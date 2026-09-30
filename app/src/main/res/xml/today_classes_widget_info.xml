@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「今明课表」组件声明（目标 4×2）。
+
+  ## ⚠️ 尺寸为什么写 340×165dp（而不是官方老公式的 250×110dp）
+  `minWidth/minHeight` 是**给启动器猜格子用的老提示**，各家算法不一样。
+  官方老公式 `minWidth = 70 × 列数 − 30`（4 列 → 250dp）假定"每格 70dp、格间无缝隙"；
+  而**实测**目标真机（MEIZU 21 Note / Android 16）的启动器是：
+     每格宽 68dp、每格高 71.4dp、格间缝 21.5dp
+     → 2 列 = 157.5dp、3 列 = 247dp、4 列 = 336.6dp；2 行 = 164.6dp
+  所以在它上面声明 250dp 只拿到 **3 列**（3 列正好 247dp）—— 这就是前一版"怎么还是 3×2"的根因。
+  这里按实测值声明 340×165dp，保证这台机器上默认就是 4 列 × 2 行。
+
+  代价：仍按官方老公式算的启动器可能默认给 5 列（能手动拉回）。取舍是"目标机一定对"优先。
+  `targetCellWidth/Height=4/2` 同时保留，给认这套新 API 的启动器用。
+
+  ## resizeMode 为什么恢复成 horizontal|vertical
+  前一版为了"防止被拉成 2×2"关掉了横向拉伸 —— 结果是自己也拉不动，卡在 3 列。
+  现在放开：最小 250dp（约 3 列）／最大 340dp，纵向拉到 250dp 会多显示几行课。
+  ## 预览
+  两条路都齐：previewLayout（启动器直接渲染真实布局）+ previewImage（静态 PNG 兜底）。
+  早期版本这里写的是 `@mipmap/ic_launcher`，于是选择页里只显示一张 App 图标 —— 就是那个 bug。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_today_classes_desc"
+    android:initialLayout="@layout/widget_loading"
+    android:maxResizeHeight="250dp"
+    android:maxResizeWidth="340dp"
+    android:minHeight="165dp"
+    android:minResizeHeight="110dp"
+    android:minResizeWidth="250dp"
+    android:minWidth="340dp"
+    android:previewImage="@drawable/widget_preview_today_classes"
+    android:previewLayout="@layout/widget_today_classes_preview"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="4"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />

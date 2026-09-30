@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      桌面小组件的尺寸口径。
+
+      ## ⚠️ 先记住"真实画布"（实测，别再用官方老公式）
+      官方文档的老公式 `minWidth = 70 × 列数 − 30` 假定"每格 70dp、格间无缝隙"，
+      算出来 4×2 = 250×110dp、2×2 = 110×110dp。**在目标真机上是错的**：
+      实测（MEIZU 21 Note / Android 16，logcat 里那行「实测画布」）：
+
+          4×2 → 342 × 195 dp        2×2 → 163 × 195 dp
+          （启动器给的 HostView 是 358×212，多出来的 16dp 是它自己留的阴影/圆角内缩）
+
+      所以下面所有尺寸都是**按 195dp 高**排的；早期按 110dp 排的版面，底部会空 85dp
+      —— 这就是"下部分很空"的根因。盒子更小时按 WidgetSchedule 里的行数/字号档位降级。
+
+      ## 圆角
+      用系统给小组件定的圆角（`system_app_widget_background_radius`），
+      和桌面上的系统组件保持同一套，不自创 18/20dp。
+
+      ## 字号为什么用 dp 而不是 sp
+      组件是**尺寸固定的方框**：宽度由桌面格子决定，不会因为用户把系统字号调大而变宽。
+      用 sp 的话，用户把系统字号调到 1.3× 就会把课名挤成"高等数…"。
+      参考的实现（拾光、HIT）也都用 dp。App 内部的正文仍然全部用 sp。
+    -->
+    <dimen name="widget_corner">@android:dimen/system_app_widget_background_radius</dimen>
+    <dimen name="widget_corner_inner">@android:dimen/system_app_widget_inner_radius</dimen>
+
+    <!-- 内边距：14dp 与拾光课程表一致 -->
+    <dimen name="widget_pad">14dp</dimen>
+
+    <!-- 间距 -->
+    <dimen name="widget_gap">8dp</dimen>      <!-- 列/标题与内容之间 -->
+    <dimen name="widget_gap_xs">2dp</dimen>   <!-- 块内两行之间 -->
+
+    <!-- ── 课表组件 ───────────────────────────────────────────── -->
+    <dimen name="widget_week">10.5dp</dimen>        <!-- 右上角「第 5 周」 -->
+    <dimen name="widget_col_header">12dp</dimen>    <!-- 列头「今天 9.29 周二」 -->
+    <dimen name="widget_side_title">12dp</dimen>    <!-- 左右分栏标题（宿舍电量 / 校园卡） -->
+    <dimen name="widget_footer">9.5dp</dimen>       <!-- 「剩余 2 节」这种小字 -->
+    <dimen name="widget_row_name">15dp</dimen>      <!-- 课程块里的课名（主角） -->
+    <dimen name="widget_row_sub">12dp</dimen>       <!-- 课程块里的地点/时间段（小字） -->
+    <dimen name="widget_status_title">15dp</dimen>  <!-- 假期/无课这类状态大字 -->
+    <dimen name="widget_status_msg">11dp</dimen>    <!-- 状态下面那行小字 -->
+
+    <!-- ── 2×2「下一节课」：一节课大字 + 圆气泡 + 一行预告 ──────────── -->
+    <dimen name="widget_name_lg">20dp</dimen>       <!-- 那节课的课名（这个组件的主角） -->
+    <dimen name="widget_time_lg">12.5dp</dimen>     <!-- 完整时间段 / 地点 -->
+    <dimen name="widget_preview_line">11.5dp</dimen> <!-- 「→ 14:00 程序设计基础」 -->
+    <dimen name="widget_bubble">24dp</dimen>        <!-- 右上角圆气泡直径 -->
+    <dimen name="widget_bubble_text">13dp</dimen>   <!-- 气泡里的数字 -->
+    <dimen name="widget_bar_h_lg">46dp</dimen>      <!-- 那节课左边的色条（贴着三行文字） -->
+
+    <!-- ── 电量与校园卡 ───────────────────────────────────────── -->
+    <dimen name="widget_block_label">12dp</dimen>   <!-- 块名「照明」 -->
+    <dimen name="widget_block_value">28dp</dimen>   <!-- 块里的数字（真实画布够大，才敢用 28dp） -->
+    <dimen name="widget_block_unit">11dp</dimen>    <!-- 「度」「元」 -->
+    <dimen name="widget_block_hint">10.5dp</dimen>  <!-- 「可用约 29 天」 -->
+
+    <!-- 课程色条 / 块色条 -->
+    <dimen name="widget_bar_w">3dp</dimen>
+    <dimen name="widget_bar_h">26dp</dimen>     <!-- 课程块：贴着课名与副行 -->
+    <dimen name="widget_bar_h_sm">16dp</dimen>  <!-- 数据块：贴着块名 -->
+</resources>

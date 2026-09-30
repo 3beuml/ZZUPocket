@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「2×2」课表组件的实际布局（**真实画布实测 163×195dp**）。
+  它只回答一个问题：**我下一节是什么**。
+
+  ┌──────────────────────────────┐
+  │ 今天 · 第 4 周         ╭──╮  │ ← 表头 + 右上角圆气泡（这节课及之后还有几节）
+  │ ▓ 大学物理             │ 3│  │
+  │   10:00 - 11:35        ╰──╯  │ ← 完整时间段：2×2 竖着有空间，4×2 的列宽写不下
+  │   南3 101                    │
+  │  → 14:00 程序设计基础          │ ← 再往后那节课（一行，钉在底部）
+  └──────────────────────────────┘
+
+  三种形态（判断全在 `WidgetSchedule.nextClassPlan`，纯函数、有单测）：
+    1. 今天还有没下课的课 → 第一节大字 + 「今天 · 第 N 周」；
+    2. 今天上完了 / 今天本来没课，但明天有 → 顶上明天的第一节，表头「明日预告 · 第 N 周」；
+    3. 今明都没有 → `@id/container_status` 居中一句「无课程」。
+  假期 / 还没同步过课表 → 「假期中」「还没有课表数据」，同样走 container_status
+  （另外 `@id/container_overlay` 只给假期用：整块盖住，连表头一起换掉）。
+
+  ## 为什么要回到这个形态（别再改成"一行一节的列表"）
+  中间那版做成了「星期表头 + 一行一节」的列表，真机上被否掉：今天上完、明天又没课时，
+  整个内容区只剩一句状态，看着像组件坏了；而且列表版把 4×2 的「明天的课看右边」文案
+  带进了 2×2（**2×2 根本没有右边**）。用户要求回到"一节课大字 + 圆气泡 + 一行预告"。
+
+  ## 尺寸账（2×2 = 195dp 高，别再用官方老公式的 110dp）
+      内边距 14+14 + 表头 22 + 间距 2 + 信息块（课名 22 + 时间段 14 + 地点 14）≈ 116dp
+      底部预告 15dp → 共约 130dp ≤ 195dp（盒子被拉矮时由 `nextClassDetail` 从下往上收）
+
+  ## RemoteViews 的限制（改这个文件前先读）
+    · 只能用白名单控件（LinearLayout / FrameLayout / RelativeLayout / TextView / ImageView…），
+      `<View>`、`<Space>` 会被判 "Class not allowed to be inflated"，所以色条/圆底都用空 TextView 顶替；
+    · 三种形态的可见性**每次刷新都要显式写一遍**，不能只写"要显示的那个"，
+      否则会看到上一状态的残留部件。
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_pad">
+
+        <!-- 表头行：左「今天 · 第 N 周」，右圆气泡（这节课以及之后还有几节） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/header"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_header"
+                android:textColor="@color/widget_text"
+                android:textSize="@dimen/widget_col_header"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/bubble"
+                android:layout_width="@dimen/widget_bubble"
+                android:layout_height="@dimen/widget_bubble"
+                android:background="@drawable/widget_circle"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="3"
+                android:textColor="@color/widget_accent"
+                android:textSize="@dimen/widget_bubble_text"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="@dimen/widget_gap_xs"
+            android:layout_weight="1">
+
+            <!-- 有课：色条 + 课名 / 完整时间段 / 地点（竖向居中，高盒子里不会贴着顶） -->
+            <LinearLayout
+                android:id="@+id/container_info"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/bar"
+                    android:layout_width="@dimen/widget_bar_w"
+                    android:layout_height="@dimen/widget_bar_h_lg"
+                    android:layout_marginTop="4dp"
+                    android:layout_gravity="top"
+                    android:background="@drawable/widget_bar" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_course_name"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_next_name"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_name_lg"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_course_time"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_next_range"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="@dimen/widget_time_lg" />
+
+                    <TextView
+                        android:id="@+id/tv_course_place"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_next_place"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_time_lg" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 状态态：无课程 / 假期中 / 还没有课表数据 -->
+            <LinearLayout
+                android:id="@+id/container_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_centerInParent="true"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/status_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:text="@string/widget_preview_no_course"
+                    android:textColor="@color/widget_text"
+                    android:textSize="@dimen/widget_status_title"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/status_message"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/widget_gap_xs"
+                    android:gravity="center"
+                    android:includeFontPadding="false"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="@dimen/widget_status_msg"
+                    android:visibility="gone" />
+            </LinearLayout>
+        </RelativeLayout>
+
+        <!-- 再往后那节课（钉在底部，所以中间那块空得下也不影响它） -->
+        <TextView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_next_preview"
+            android:textColor="@color/widget_text_hint"
+            android:textSize="@dimen/widget_preview_line"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- 假期：整块盖住（连表头一起换掉，与拾光一致） -->
+    <LinearLayout
+        android:id="@+id/container_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_pad"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/overlay_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:text="@string/widget_preview_vacation"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_status_title"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/overlay_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_gap"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:text="@string/widget_preview_vacation_msg"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="@dimen/widget_status_msg" />
+    </LinearLayout>
+</RelativeLayout>

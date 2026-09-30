@@ -1,0 +1,10 @@
+# 统一换行符，避免 Windows 上每次 git 都刷 "LF will be replaced by CRLF" 警告。
+# .bat 必须是 CRLF（cmd 对 LF 的批处理会解析出错），其余统一 LF。
+* text=auto eol=lf
+*.bat text eol=crlf
+gradlew text eol=lf
+*.jar binary
+*.jks binary
+*.keystore binary
+*.png binary
+*.webp binary

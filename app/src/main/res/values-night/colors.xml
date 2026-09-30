@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="window_background">#1C1B1F</color>
+
+    <!-- 小组件配色的深色兜底（口径见 values/colors.xml 里的注释） -->
+    <color name="widget_bg">#211F26</color>
+    <color name="widget_text">#E6E1E5</color>
+    <color name="widget_text_dim">#CAC4D0</color>
+    <color name="widget_text_hint">#9ECAC4D0</color>
+    <color name="widget_divider">#49454F</color>
+    <color name="widget_accent">#D0BCFF</color>
+    <color name="widget_bar">#D0BCFF</color>
+    <color name="widget_error">#F2B8B5</color>
+</resources>

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「下一节课」组件声明（目标 **2×2**）。
+
+  ## ⚠️ 尺寸为什么写 160×165dp（而不是官方老公式的 110×110dp）
+  `minWidth/minHeight` 只是**给启动器猜格子用的老提示**，各家算法不一样。
+  官方老公式 `70 × 格数 − 30`（2×2 → 110dp）假定"每格 70dp、格间无缝隙"；
+  而**实测**目标真机（MEIZU 21 Note / Android 16）的启动器是：
+     每格宽 68dp、每格高 71.4dp、格间缝 21.5dp
+     → 2 列 = 157.5dp、4 列 = 336.6dp；2 行 = 164.6dp
+  所以声明 110dp 在那台机器上连 2 列都拿不到。这里按实测值声明 160×165dp = 2×2。
+  `targetCellWidth/Height=2/2` 同时保留，给认这套新 API 的启动器用。
+
+  ## 预览
+  两条路都齐：previewLayout（启动器直接渲染真实布局）+ previewImage（静态 PNG 兜底）。
+  早期版本这里写的是 `@mipmap/ic_launcher`，于是选择页里只显示一张 App 图标 —— 就是那个 bug。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_next_class_desc"
+    android:initialLayout="@layout/widget_loading"
+    android:maxResizeHeight="250dp"
+    android:maxResizeWidth="340dp"
+    android:minHeight="165dp"
+    android:minResizeHeight="110dp"
+    android:minResizeWidth="150dp"
+    android:minWidth="160dp"
+    android:previewImage="@drawable/widget_preview_next_class"
+    android:previewLayout="@layout/widget_next_class_preview"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="2"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />

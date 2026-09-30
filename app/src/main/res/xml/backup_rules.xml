@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 以下使用的备份规则：当前不排除任何内容，凭据另存在 EncryptedSharedPreferences，
+     是否纳入备份由导入导出功能负责（本地数据以 JSON 导出为准）。 -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secure_prefs.xml" />
+</full-backup-content>

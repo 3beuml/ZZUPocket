@@ -1,0 +1,452 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「电量与校园卡」的实际布局（**真实画布实测 342×195dp**）：左右两半，每半两个数据块。
+
+  ┌─────────────────────────────────┊───────────────────────────────────┐
+  │                                                    22:30 更新       │ ← @id/update
+  │ 宿舍电量 · 柳园20号楼101             ┊ 校园卡                            │ ← @id/left_title / right_title
+  │ ▌照明                           ┊ ▌余额                            │ ← 块：色条 + 块名
+  │   152.82 度      可用约 29 天   ┊   36.50 元        今日 3.20       │ ← 块：数字 + 单位 + 右侧小字
+  │ ────────────────────────────────┊────────────────────────────────── │ ← @id/left_divider / right_divider
+  │ ▌空调                           ┊ ▌本周                            │
+  │   80.21 度       可用约 21 天   ┊   87.60 元        5 笔           │
+  └─────────────────────────────────┊───────────────────────────────────┘
+
+  ## 为什么是"左右两半 + 块"
+  上一版是"三行指标、数字右对齐占满整宽"，那是按官方老公式的 **110dp 高**排的，
+  而真实画布是 **195dp** —— 于是上部挤、下部空 85dp（用户报的"下部分很空"）。
+  改成左右两半、每半两块之后：
+    · 每块用 `layout_weight=1` 平分高度，块内容竖直居中 → 盒子里有多少空间就吃多少，**不会再空**；
+    · 数字可以放到 28dp（上一版 17dp），块内独占一行 → `-1234.56 度` 也放得下；
+    · 点击区变成两块大区域：左半 → 电费页、右半 → 校园卡页（不再是 28dp 的窄条）。
+
+  ## 两块可点区域
+    @id/zone_energy（整半，左）→ **电费页**（房间就是在电费页设的）
+    @id/zone_card  （整半，右）→ **校园卡页**
+    @id/widget_root（兜底）    → App 今天页
+  ⚠️ 三个目标的 PendingIntent **必须用不同 requestCode**（见 Widgets.openApp 的注释）。
+
+  RemoteViews 的限制见 widget_today_classes.xml 顶部注释。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="@dimen/widget_pad">
+
+    <!-- 右上角：数据更新到什么时候（对应课表那个「第 N 周」的位置） -->
+    <TextView
+        android:id="@+id/update"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/widget_preview_balance_update"
+        android:textColor="@color/widget_text_hint"
+        android:textSize="@dimen/widget_week" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:baselineAligned="false"
+        android:orientation="horizontal">
+
+        <!-- ══════ 左半：宿舍电量（点它去电费页） ══════ -->
+        <LinearLayout
+            android:id="@+id/zone_energy"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/left_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_balance_header"
+                android:textColor="@color/widget_text"
+                android:textSize="@dimen/widget_side_title"
+                android:textStyle="bold" />
+
+            <!-- 块 1：照明 -->
+            <LinearLayout
+                android:id="@+id/block_l1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/bar_1"
+                        android:layout_width="@dimen/widget_bar_w"
+                        android:layout_height="@dimen/widget_bar_h_sm"
+                        android:background="@drawable/widget_bar" />
+
+                    <TextView
+                        android:id="@+id/label_1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_balance_light"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_label"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/widget_gap_xs"
+                    android:baselineAligned="false"
+                    android:gravity="bottom"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/value_1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_balance_light"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_value"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/unit_1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="3dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/widget_unit_kwh"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="@dimen/widget_block_unit" />
+
+                    <FrameLayout
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/hint_1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_days_left"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_block_hint" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/left_divider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:alpha="0.2"
+                android:background="@color/widget_divider" />
+
+            <!-- 块 2：空调 -->
+            <LinearLayout
+                android:id="@+id/block_l2"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/bar_2"
+                        android:layout_width="@dimen/widget_bar_w"
+                        android:layout_height="@dimen/widget_bar_h_sm"
+                        android:background="@drawable/widget_bar" />
+
+                    <TextView
+                        android:id="@+id/label_2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_balance_ac"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_label"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/widget_gap_xs"
+                    android:baselineAligned="false"
+                    android:gravity="bottom"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/value_2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_balance_ac"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_value"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/unit_2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="3dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/widget_unit_kwh"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="@dimen/widget_block_unit" />
+
+                    <FrameLayout
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/hint_2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_days_left_ac"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_block_hint" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 两半之间的竖分隔线 -->
+        <TextView
+            android:id="@+id/mid_divider"
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="@dimen/widget_gap"
+            android:layout_marginEnd="@dimen/widget_gap"
+            android:alpha="0.2"
+            android:background="@color/widget_divider" />
+
+        <!-- ══════ 右半：校园卡（点它去校园卡页） ══════ -->
+        <LinearLayout
+            android:id="@+id/zone_card"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/right_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_balance_card"
+                android:textColor="@color/widget_text"
+                android:textSize="@dimen/widget_side_title"
+                android:textStyle="bold" />
+
+            <!-- 块 1：余额 -->
+            <LinearLayout
+                android:id="@+id/block_r1"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/bar_3"
+                        android:layout_width="@dimen/widget_bar_w"
+                        android:layout_height="@dimen/widget_bar_h_sm"
+                        android:background="@drawable/widget_bar" />
+
+                    <TextView
+                        android:id="@+id/label_3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_balance_balance"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_label"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/widget_gap_xs"
+                    android:baselineAligned="false"
+                    android:gravity="bottom"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/value_3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_balance_card"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_value"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/unit_3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="3dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/widget_unit_yuan"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="@dimen/widget_block_unit" />
+
+                    <FrameLayout
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/hint_3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_balance_today"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_block_hint" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/right_divider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:alpha="0.2"
+                android:background="@color/widget_divider" />
+
+            <!-- 块 2：本周 -->
+            <LinearLayout
+                android:id="@+id/block_r2"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/bar_4"
+                        android:layout_width="@dimen/widget_bar_w"
+                        android:layout_height="@dimen/widget_bar_h_sm"
+                        android:background="@drawable/widget_bar" />
+
+                    <TextView
+                        android:id="@+id/label_4"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_balance_week"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_label"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/widget_gap_xs"
+                    android:baselineAligned="false"
+                    android:gravity="bottom"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/value_4"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_balance_week"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_block_value"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/unit_4"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="3dp"
+                        android:includeFontPadding="false"
+                        android:text="@string/widget_unit_yuan"
+                        android:textColor="@color/widget_text_dim"
+                        android:textSize="@dimen/widget_block_unit" />
+
+                    <FrameLayout
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/hint_4"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_balance_week_count"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_block_hint" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

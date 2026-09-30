@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  小组件的根背景。
+
+  刻意只放一个**纯白**的圆角矩形：真实颜色由 App 在 RemoteViews 里用
+  `setColorStateList(viewId, "setBackgroundTintList", …)` 刷上去（见 WidgetStyle.kt），
+  这样组件能跟着 App 的主题预设走（8 个种子色 + 动态取色 + 深浅色三态），
+  而不必为每个预设各做一份 drawable。
+
+  兜底：`@color/widget_bg` 在 values/ 与 values-night/ 各有一份，
+  即使某台设备上 tint 没生效，也不会出现"深色桌面上一块纯白"。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_bg" />
+    <corners android:radius="@dimen/widget_corner" />
+</shape>

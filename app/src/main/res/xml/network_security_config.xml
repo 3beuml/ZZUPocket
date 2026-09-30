@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文流量白名单。
+
+  为什么需要：图书馆座位预约系统（order.lib.zzu.edu.cn）**校外只开放 80 端口**，
+  443 被校园网边界防火墙拒绝。Android 从 9 开始默认禁止明文 HTTP，不做这个例外
+  就直接连接失败。
+
+  ⚠️ 只对**这一个域名**放行，其他一律仍然强制 HTTPS（教务/一卡通/CAS 不受影响）。
+  这也是"最小暴露面"：明文的代价是首次登录凭据会明文经过网络（学校侧限制，我们改不了），
+  所以我们的策略是**只存会话 cookie、绝不存密码**。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">order.lib.zzu.edu.cn</domain>
+    </domain-config>
+</network-security-config>

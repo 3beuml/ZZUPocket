@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 界面完全由 Compose 绘制，这里只负责窗口背景与状态栏，
+         避免深色模式下启动瞬间闪白（见 values-night 覆盖）。 -->
+    <style name="Theme.ZZUPocket" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

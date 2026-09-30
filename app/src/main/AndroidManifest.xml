@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 访问学校各系统（统一认证 / 一卡通 / 教务 / 图书馆）必需。
+         缺失时的报错是 "Permission denied (missing INTERNET permission?)"。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 用于判断"当前离线"，从而把界面标注成"数据截至 XX:XX"而不是白屏 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 番茄钟：倒计时通知 + 走完时的提醒。
+         没有 POST_NOTIFICATIONS（Android 13+）时前台服务仍然能跑，但通知不可见。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application
+        android:name=".ZZUPocketApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ZZUPocket">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.ZZUPocket">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- ── 桌面小组件（课表 + 电量/校园卡） ────────────────────────────────
+             三个组件都用 AppWidgetProvider + RemoteViews/XML 实现（不是 Glance）：
+             只有 RemoteViews 这条路拿得到 android:previewLayout（选择页里的实时预览）
+             和 RemoteViews.addView（行数可变的课程列表）。理由详见
+             ui/widget/TodayClassesWidget.kt 的类注释。
+
+             exported="false" 是官方文档当前的口径：系统自己能往非导出的组件投
+             APPWIDGET_UPDATE，导出反而给别的 App 留了乱发广播的口子。 -->
+        <receiver
+            android:name=".ui.widget.NextClassWidget"
+            android:exported="false"
+            android:label="@string/widget_next_class">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/next_class_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".ui.widget.TodayClassesWidget"
+            android:exported="false"
+            android:label="@string/widget_today_classes">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_classes_widget_info" />
+        </receiver>
+
+        <!-- 电量 + 校园卡余额合成一个 4×2：数字右对齐独占整行，只读本地
+             （校园卡余额读的是 App 查完存下的缓存 —— 组件不许联网） -->
+        <receiver
+            android:name=".ui.widget.EnergyCardWidget"
+            android:exported="false"
+            android:label="@string/widget_energy_card">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/energy_card_widget_info" />
+        </receiver>
+
+        <!-- 上下课时间点的刷新闹钟（显式 Intent，不需要 intent-filter）。
+             系统对组件的定时刷新下限是 30 分钟，靠它补偿"上课那一刻桌面还挂着下一节"的问题。 -->
+        <receiver
+            android:name=".ui.widget.WidgetRefreshReceiver"
+            android:exported="false" />
+
+        <!-- 番茄钟前台服务。计时本身不依赖它（时间用墙钟算），
+             它的作用是不让系统回收进程 + 显示常驻倒计时通知。
+             API 34+ 必须声明类型，番茄钟没有更贴切的类型，用 specialUse 并在下面说明用途。 -->
+        <service
+            android:name=".focus.PomodoroService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="pomodoro_timer" />
+        </service>
+    </application>
+
+</manifest>

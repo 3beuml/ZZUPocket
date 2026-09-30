@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「4×2 课表」的实际布局（**真实画布实测 342×195dp**）：左列今天、右列明天。
+  结构与拾光课程表的「近日课程4x2」（`widget_double_days_native.xml`）一一对应：
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │                                                        第 5 周    │ ← @id/week，右上角
+  │ 今天 9.29 周二                  明天 9.30 周三                    │ ← @id/today_header / tomorrow_header
+  │  剩余 2 节                       共有 3 节                        │ ← @id/today_footer / tomorrow_footer
+  │  ▌大学物理                      ┊ ▌编译原理实验                    │ ← 行：@layout/widget_course_row
+  │    南3 101        10:00-11:35   ┊   中2414        08:00-09:40     │
+  │  ──────────────────────────────┊──────────────────────────────   │ ← @id/row_divider（1dp，alpha .2）
+  │  ▌程序设计基础                  ┊ ▌编译原理                      │
+  │    南1 302        14:00-15:35   ┊   南4_103       10:10-11:50     │
+  └──────────────────────────────────────────────────────────────────┘
+
+  · 列头/页脚/行内容全部由 App 运行期填（行是 `RemoteViews.addView` 加进去的），
+    布局里写死的文字只是初始值。
+  · 某列没有课 → 该列 `@id/xx_empty` 居中显示「无课程」（与拾光一致）。
+  · 整块状态（假期 / 还没同步过课表）→ `@id/container_overlay` 盖住两列，两列都不画。
+  · 可见行数按**实测画布高度**算（`WidgetSchedule.columnRows`），行高用
+    `setMinimumHeight` 撑开撑满，所以高盒子里不会"上挤下空"。
+
+  ## RemoteViews 的硬限制（改这个文件前先读）
+    · 只能用白名单里的控件（LinearLayout / RelativeLayout / FrameLayout / TextView / ImageView…），
+      自研控件、ConstraintLayout、`<Space>`、`<View>` 都可能抛 "Class not allowed to be inflated"。
+      所以**色条、分隔线、间隔都用空 TextView / FrameLayout 顶替**。
+    · ⚠️ 两种形态（内容 / 空态 / 假期）的可见性每次渲染都要**显式写一遍**，
+      不能只写"要显示的那个" —— 不归零会看到上一状态的残留部件。
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_pad">
+
+        <!-- 右上角「第 N 周」 -->
+        <TextView
+            android:id="@+id/week"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_week"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="@dimen/widget_week" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="@dimen/widget_gap_xs"
+            android:layout_weight="1"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <!-- ══════ 左列：今天 ══════ -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/today_header"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_today_header"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_col_header"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/today_footer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_footer_today"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_footer" />
+                </LinearLayout>
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="@dimen/widget_gap"
+                    android:layout_weight="1">
+
+                    <LinearLayout
+                        android:id="@+id/today_rows"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentTop="true"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:id="@+id/today_empty"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_centerInParent="true"
+                        android:includeFontPadding="false"
+                        android:text="@string/widget_preview_no_course"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_col_header"
+                        android:visibility="gone" />
+                </RelativeLayout>
+            </LinearLayout>
+
+            <!-- 两列之间的竖分隔线 -->
+            <TextView
+                android:id="@+id/col_divider"
+                android:layout_width="1dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="@dimen/widget_gap"
+                android:layout_marginEnd="@dimen/widget_gap"
+                android:alpha="0.2"
+                android:background="@color/widget_divider" />
+
+            <!-- ══════ 右列：明天 ══════ -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tomorrow_header"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_tomorrow_header"
+                        android:textColor="@color/widget_text"
+                        android:textSize="@dimen/widget_col_header"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tomorrow_footer"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:includeFontPadding="false"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_footer_tomorrow"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_footer" />
+                </LinearLayout>
+
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_marginTop="@dimen/widget_gap"
+                    android:layout_weight="1">
+
+                    <LinearLayout
+                        android:id="@+id/tomorrow_rows"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentTop="true"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:id="@+id/tomorrow_empty"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_centerInParent="true"
+                        android:includeFontPadding="false"
+                        android:text="@string/widget_preview_no_course"
+                        android:textColor="@color/widget_text_hint"
+                        android:textSize="@dimen/widget_col_header"
+                        android:visibility="gone" />
+                </RelativeLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 假期：整块盖住内容（与拾光一致） -->
+    <LinearLayout
+        android:id="@+id/container_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_pad"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/overlay_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:includeFontPadding="false"
+            android:text="@string/widget_preview_vacation"
+            android:textColor="@color/widget_text"
+            android:textSize="18dp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/overlay_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_gap"
+            android:includeFontPadding="false"
+            android:text="@string/widget_preview_vacation_msg"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="13dp" />
+    </LinearLayout>
+</RelativeLayout>

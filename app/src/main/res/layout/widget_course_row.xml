@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  课表里的一行课程块（4×2 与 2×2 **共用同一套行样式**，两个组件的观感才一致）。
+
+      ▌大学物理              ← 课名 15dp 粗（主角）
+        南3 101   10:00-11:35 ← 地点(左) 时间段(右) 12dp 弱色
+
+  · 结构与拾光课程表的 `widget_item_course_common` 一致：左侧竖色条 + 课名 + 一行小字。
+  · **不显示老师** —— 用户明确要求（App 内"格子里不显示老师"的约定延续到组件）。
+  · 时间段用 `10:00-11:35`（拾光就是这么拼的，中间没有空格）。
+  · 行高由 App 在渲染时用 `setMinimumHeight` 撑开：可见行数按实测画布高度算，
+    撑开后内容竖直居中，所以盒子高时不会"上挤下空"。
+  · 色条用空 TextView 顶替 `<View>`（RemoteViews 白名单问题，见 widget_today_classes.xml 注释）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <TextView
+        android:id="@+id/row_bar"
+        android:layout_width="@dimen/widget_bar_w"
+        android:layout_height="@dimen/widget_bar_h"
+        android:background="@drawable/widget_bar" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/widget_gap"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/row_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_class1_name"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_row_name"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_gap_xs"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/row_place"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_place"
+                android:textColor="@color/widget_text_hint"
+                android:textSize="@dimen/widget_row_sub" />
+
+            <TextView
+                android:id="@+id/row_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_range"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="@dimen/widget_row_sub" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="window_background">#FFFBFE</color>
+    <color name="ic_launcher_background">#1B6B4A</color>
+
+    <!--
+      桌面小组件的配色。
+
+      ⚠️ 这些只是**兜底值**：真正显示时 App 会用 setColorStateList 把
+      「跟 App 主题一致」的颜色实时刷到 drawable / 文字的 tint 上（见 WidgetStyle.kt）。
+      兜底值存在的意义有两个：
+        1. 万一某个启动器不支持 tint（或 RemoteViews 那条调用失败），组件不会变成纯白一块；
+        2. `previewLayout`（选择组件时的实时预览图）是启动器直接 inflate 的，
+           **不走 RemoteViews，也就拿不到运行期 tint** —— 预览图的外观全靠这里的值。
+
+      所以这里的值必须和 App 默认主题（M3 baseline 浅色）对得上，不能随手填。
+    -->
+    <color name="widget_bg">#F3EDF7</color>
+    <color name="widget_text">#1C1B1F</color>
+    <color name="widget_text_dim">#49454F</color>
+    <!-- 比 widget_text_dim 再弱一档（地点、状态小字）；运行期用的是同色 62% 透明度 -->
+    <color name="widget_text_hint">#9E49454F</color>
+    <color name="widget_divider">#CAC4D0</color>
+    <color name="widget_accent">#6750A4</color>
+    <color name="widget_bar">#6750A4</color>
+    <!-- 警示色（欠费 / 电量偏低 / 余额偏低），与 App 主题的 error 同源 -->
+    <color name="widget_error">#B3261E</color>
+</resources>

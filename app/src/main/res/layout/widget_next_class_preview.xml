@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ============================================================
+  「选择小组件」时的实时预览图（appwidget-provider 的 android:previewLayout）
+  ============================================================
+
+  早期这几个组件在选择页里**看不到预览**：provider 里 `android:previewImage` 写的是
+  `@mipmap/ic_launcher`，于是选择页里显示的是一张 App 图标，谁也看不出组件长什么样。
+  现在两条路都补上：
+    1. android:previewLayout（本文件）—— Android 12+ 的启动器**直接 inflate 它**，
+       预览就是真实布局的外观，改了布局预览自动跟着变；
+    2. android:previewImage（res/drawable/widget_preview_*.png）—— 给只认图片的启动器兜底
+       （由 tools/gen-widget-preview.ps1 按同一套几何生成）。
+
+  为什么预览布局不直接用真实布局：真实布局里的文字全是空的（真内容由 App 运行期 setText 填），
+  拿来预览会是一张空白卡。所以这里写一份**填了样例数据**的独立布局。
+  样例一律虚构的课名/教室/房间号，不涉及真实个人信息。
+  ⚠️ 颜色写死（预览不走 RemoteViews，拿不到主题色的运行期 tint），取 App 默认主题的值。
+
+  ============================================================
+  「下一节课」2×2 的预览（真实画布 163×195dp）：一节课大字 + 圆气泡 + 一行预告
+  ============================================================
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="@dimen/widget_pad">
+
+    <!-- 表头：今天 · 第 N 周 + 右上角圆气泡 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_next_header"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_col_header"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="@dimen/widget_bubble"
+            android:layout_height="@dimen/widget_bubble"
+            android:background="@drawable/widget_circle"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:text="3"
+            android:textColor="@color/widget_accent"
+            android:textSize="@dimen/widget_bubble_text"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 那节课：色条 + 课名 / 完整时间段 / 地点 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="@dimen/widget_gap_xs"
+        android:layout_weight="1"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="@dimen/widget_bar_w"
+            android:layout_height="@dimen/widget_bar_h_lg"
+            android:layout_gravity="top"
+            android:layout_marginTop="4dp"
+            android:background="#4C7FD6" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_name"
+                android:textColor="@color/widget_text"
+                android:textSize="@dimen/widget_name_lg"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_range"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="@dimen/widget_time_lg" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_place"
+                android:textColor="@color/widget_text_hint"
+                android:textSize="@dimen/widget_time_lg" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 再往后那节课 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/widget_preview_next_preview"
+        android:textColor="@color/widget_text_hint"
+        android:textSize="@dimen/widget_preview_line" />
+</LinearLayout>

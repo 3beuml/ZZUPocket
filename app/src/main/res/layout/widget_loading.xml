@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  两个课表小组件的 initialLayout。
+
+  它在「刚把组件拖到桌面、onUpdate 里的 RemoteViews 还没上去」的这一小段时间里显示
+  （通常几十毫秒），另外也是某些启动器在组件进程还没起来时的占位。
+  所以只放一行灰字，不假装有数据 —— 免得用户看到一个假的课名。
+
+  注意：课表数据全在本地库里，正常情况是"秒出"，这行字基本一闪而过。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="@dimen/widget_pad">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:includeFontPadding="false"
+        android:text="@string/widget_loading"
+        android:textColor="@color/widget_text_dim"
+        android:textSize="@dimen/widget_row_sub" />
+</LinearLayout>

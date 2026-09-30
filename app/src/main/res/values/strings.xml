@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ZZUPocket</string>
+
+    <!-- ── 桌面小组件 ──────────────────────────────────────────────────────
+         name = 选择页里显示的名字；desc = 名字下面那行说明。
+         两者都只在"添加小组件"那个界面用得到，不显示在桌面上。 -->
+    <string name="widget_next_class">下一节课</string>
+    <string name="widget_next_class_desc">下一节课：课名、完整时间段、地点，右上角还有几节要上</string>
+    <string name="widget_today_classes">今明课表</string>
+    <string name="widget_today_classes_desc">左边今天、右边明天，各列出两节课：课名、地点、时间段</string>
+    <string name="widget_energy_card">电量与校园卡</string>
+    <string name="widget_energy_card_desc">左边宿舍照明/空调余额与可用天数，右边校园卡余额与本周消费</string>
+
+    <!-- 固定文案（运行期会在 Kotlin 里替换成真实内容） -->
+    <string name="widget_loading">正在读取…</string>
+    <string name="widget_balance_light">照明</string>
+    <string name="widget_balance_ac">空调</string>
+    <string name="widget_balance_card">校园卡</string>
+    <string name="widget_balance_balance">余额</string>
+    <string name="widget_balance_week">本周</string>
+    <string name="widget_unit_kwh">度</string>
+    <string name="widget_unit_yuan">元</string>
+
+    <!-- 布局里的样例数据：一律用**虚构**的课名、教室、房间号 ——
+         「添加小组件」那个界面是所有人都能看到的公共画面 -->
+    <string name="widget_preview_week">第 5 周</string>
+    <string name="widget_preview_weekday">周二</string>
+    <string name="widget_preview_today_header">今天 9.29 周二</string>
+    <string name="widget_preview_tomorrow_header">明天 9.30 周三</string>
+    <string name="widget_preview_footer_today">剩余 2 节</string>
+    <string name="widget_preview_footer_tomorrow">共有 3 节</string>
+    <!-- 2×2「下一节课」的表头与预告（真实内容是运行期填的） -->
+    <string name="widget_preview_next_header">今天 · 第 5 周</string>
+    <string name="widget_preview_next_preview">→ 14:00 程序设计基础</string>
+    <string name="widget_preview_no_course">无课程</string>
+    <string name="widget_preview_vacation">假期中</string>
+    <string name="widget_preview_vacation_msg">期待新学期</string>
+    <string name="widget_preview_class1_name">大学物理</string>
+    <string name="widget_preview_class2_name">编译原理实验</string>
+    <string name="widget_preview_class3_name">程序设计基础</string>
+    <string name="widget_preview_class4_name">线性代数</string>
+    <string name="widget_preview_place">南3 101</string>
+    <string name="widget_preview_place2">南1 302</string>
+    <string name="widget_preview_place3">中2414</string>
+    <string name="widget_preview_place4">南2 206</string>
+    <string name="widget_preview_range">10:00-11:35</string>
+    <string name="widget_preview_range2">14:00-15:35</string>
+    <string name="widget_preview_range3">08:00-09:40</string>
+    <string name="widget_preview_range4">10:10-11:50</string>
+    <!-- 2×2「下一节课」那节课的三行（课名 / 完整时间段 / 地点） -->
+    <string name="widget_preview_next_name">大学物理</string>
+    <string name="widget_preview_next_range">10:00-11:35</string>
+    <string name="widget_preview_next_place">南3 101</string>
+    <string name="widget_preview_balance_header">宿舍电量 · 柳园20号楼101</string>
+    <string name="widget_preview_balance_update">22:30 更新</string>
+    <string name="widget_preview_balance_light">152.82</string>
+    <string name="widget_preview_balance_ac">80.21</string>
+    <string name="widget_preview_balance_card">36.50</string>
+    <string name="widget_preview_balance_week">87.60</string>
+    <string name="widget_preview_days_left">可用约 29 天</string>
+    <string name="widget_preview_days_left_ac">可用约 21 天</string>
+    <string name="widget_preview_balance_today">今日 3.20</string>
+    <string name="widget_preview_balance_week_count">5 笔</string>
+</resources>

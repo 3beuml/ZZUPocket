@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  圆形色块（「下一节课」右上角那个"还剩几节"的气泡底）。
+
+  白色 + 运行期 tint：底色按**课程颜色**来（与 App 课表格子同一套算法），
+  所以不能写死。App 用 `setColorStateList(viewId, "setBackgroundTintList", …)` 刷上去，
+  文字颜色则按底色亮度自动选黑/白（见 WidgetStyle.textOn）。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/widget_accent" />
+</shape>

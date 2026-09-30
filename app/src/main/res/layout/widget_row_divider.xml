@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  课程行之间的 1dp 分隔线（由 App 用 `addView` 插进两行之间，与拾光课程表一致）。
+
+  ⚠️ 用空 TextView 顶替 `<View>` —— RemoteViews 只允许白名单里的控件，
+  `<View>`/`<Space>` 可能抛 "Class not allowed to be inflated"。
+  alpha 0.2 让它在深浅色下都只是"淡淡的界线"。
+-->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="1dp"
+    android:alpha="0.2"
+    android:background="@color/widget_divider" />
