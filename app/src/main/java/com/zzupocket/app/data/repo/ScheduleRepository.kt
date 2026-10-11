@@ -287,14 +287,22 @@ class ScheduleRepository(
      */
     private fun logGridCollisions(rows: List<CourseSessionEntity>) {
         runCatching {
-            val collisions = rows
-                .filter { it.weekIndex > 0 && it.weekday in 1..7 }
+            val dated = rows.filter { it.weekIndex > 0 && it.weekday in 1..7 }
+            val collisions = dated
                 .groupBy { Triple(it.weekIndex, it.weekday, it.startUnit) }
                 .filter { (_, list) -> list.map { it.courseKey }.distinct().size > 1 }
-            val byDate = rows.mapNotNull { it.date }.distinct().size
+            val dates = rows.mapNotNull { it.date }.distinct().sorted()
+            // 星期分布：**周末有没有课**是判断"这个接口给不给补课"的关键 ——
+            // 学校自己的课表能显示周六/周日的补课，如果这里一周七天里只有周一到周五，
+            // 基本可以断定这个接口只返回常规周课表，补课来自别处。
+            val weekdayCounts = (1..7).joinToString(" ") { d ->
+                val n = dated.count { it.weekday == d }
+                "周${"一二三四五六日"[d - 1]}$n"
+            }
             Log.i(
                 TAG_GRID,
-                "课表入库：${rows.size} 条，按日期分布的日期数 $byDate，" +
+                "课表入库：${rows.size} 条，日期 ${dates.size} 天（${dates.joinToString(",")}）；" +
+                    "星期分布($weekdayCounts)；" +
                     "同格多门课（网格只会画第一门）的格子 ${collisions.size} 个：" +
                     collisions.entries.take(12).joinToString(" ") { (k, v) ->
                         "第${k.first}周${k.second}/${k.third}节×${v.map { it.courseKey }.distinct().size}"
