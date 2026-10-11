@@ -32,10 +32,16 @@ data class RoomBuilding(
 
     val roomCount: Int get() = roomNumbers.size
 
-    /** 楼栋简称：柳园20号楼 → 柳20；名字里没有数字就用原名 */
+    /**
+     * 楼栋简称：柳园20号楼 → 柳20。
+     *
+     * **只给主校区那四个园用**（柳/荷/菊/松 + 号楼）。别硬套"首字 + 数字"：
+     * 别的校区有 `北区1号楼`（会缩成"北1"，还算能用，但没必要）、`1号宿舍楼 2层`（会缩成"12"）、
+     * `主校区护理1#女生`（会缩成"主1"）—— 认不出来，还不如原名。名字不匹配就用原名。
+     */
     val shortName: String
         get() {
-            val m = Regex("""^(.+?)(\d+)""").find(name) ?: return name
+            val m = Regex("""^([柳荷菊松]园)(\d+)""").find(name) ?: return name
             return m.groupValues[1].take(1) + m.groupValues[2]
         }
 
@@ -69,35 +75,65 @@ data class RoomBuilding(
     }
 }
 
+/**
+ * 一个校区。
+ *
+ * 一卡通里管它叫"区域"，[code] 就是房间 ID 开头那个 area 码（主校区 `99`、北校区 `101`……），
+ * 所以**校区可以直接从房间 ID 里读出来**。
+ *
+ * ⚠️ 房间表只覆盖 6 个区域；**亿达学生公寓（area `106`）上游从来没导出过**，
+ * 那里只能靠"从学校账户读取绑定房间"或手动填房间号（见 `ElectricityRepository.boundRoom`）。
+ */
 @Serializable
-data class RoomCatalogData(
-    val campus: String = "",
+data class RoomCampus(
+    val code: String = "",
+    val name: String = "",
     val buildings: List<RoomBuilding> = emptyList(),
 ) {
+    val roomCount: Int get() = buildings.sumOf { it.roomCount }
+}
+
+@Serializable
+data class RoomCatalogData(
+    val campuses: List<RoomCampus> = emptyList(),
+) {
+    /** 全部楼栋（跨校区）；反查与老的调用点用它就够 */
+    val buildings: List<RoomBuilding> get() = campuses.flatMap { it.buildings }
+
+    fun campusOf(code: String?): RoomCampus? =
+        code?.let { c -> campuses.firstOrNull { it.code == c } }
+
     fun findBuilding(name: String?): RoomBuilding? =
         name?.let { n -> buildings.firstOrNull { it.name == n } }
 
     /**
-     * 用房间 ID 反查它属于哪栋楼、哪个房号。
+     * 用房间 ID 反查它属于哪个校区、哪栋楼、哪个房号。
      *
      * 空调 ID（`99-16--32-8101`）会被换回照明表的房号（`101`），
      * 因为学生认的是寝室号，不是空调表里那个多一个前导 8 的编号。
+     * area 码在校区之间不重复，所以一次遍历就能定下来。
      */
-    fun locate(roomId: String?): Pair<RoomBuilding, String>? {
+    fun locate(roomId: String?): LocatedRoom? {
         val parts = decodeRoomId(roomId) ?: return null
-        val building = buildings.firstOrNull {
-            it.area == parts.area && it.building == parts.building
-        } ?: return null
-        return when (parts.unit) {
-            building.lightUnit -> building to parts.room
-            building.acUnit -> {
-                val asLightRoom = parts.room.removePrefix("8").takeIf { it in building.light }
-                building to (asLightRoom ?: parts.room)
+        for (campus in campuses) {
+            val building = campus.buildings.firstOrNull {
+                it.area == parts.area && it.building == parts.building
+            } ?: continue
+            // ⚠️ unit 为 0 表示"这栋楼没有这一套表"，不能拿 0 去比
+            val room = when {
+                building.lightUnit > 0 && parts.unit == building.lightUnit -> parts.room
+                building.acUnit > 0 && parts.unit == building.acUnit ->
+                    parts.room.removePrefix("8").takeIf { it in building.light } ?: parts.room
+                else -> continue
             }
-            else -> null
+            return LocatedRoom(campus, building, room)
         }
+        return null
     }
 }
+
+/** [RoomCatalogData.locate] 的结果 */
+data class LocatedRoom(val campus: RoomCampus, val building: RoomBuilding, val room: String)
 
 /** 拆解内部房间 ID：`99-16--31-101` → area=99, building=16, unit=31, room=101 */
 data class RoomIdParts(val area: Int, val building: Int, val unit: Int, val room: String) {
@@ -120,8 +156,9 @@ fun decodeRoomId(raw: String?): RoomIdParts? {
 /**
  * 宿舍房间表。
  *
- * 数据来自社区项目 **ZZU-Electricity-Monitor**（MIT）维护的 `rooms/99.json`，
- * 已精简成"楼栋 → 照明/空调房号列表"（见 assets/rooms.json）。
+ * 数据来自社区项目 **ZZU-Electricity-Monitor**（MIT）维护的 `rooms/{99,101..105}.json`
+ * 六个区域文件，已精简成"**校区 → 楼栋 → 照明/空调房号列表**"（见 assets/rooms.json）。
+ * 生成脚本与原始副本在作者本机 `_research/`（原始文件不入库）。
  *
  * 为什么内置而不是联网取：这是用来**选房间**的，断网也得能选；而且它变化很慢
  * （新楼落成才会变），跟着版本发就行。取不到时会抛出异常，界面会退化成"手动填房间 ID"。
@@ -148,11 +185,16 @@ class RoomCatalog(private val context: Context) {
         val hit = listOfNotNull(lightRoomId, acRoomId)
             .firstNotNullOfOrNull { data.locate(it) }
             ?: return null
-        return hit.first.shortLabel(hit.second)
+        val label = hit.building.shortLabel(hit.room)
+        // 楼栋简称跨校区会重名（北1 / 东1 / 南1 都是一号楼），非主校区带上校区名
+        return if (hit.campus.code == MAIN_CAMPUS_CODE) label else "${hit.campus.name} $label"
     }
 
     companion object {
         const val ASSET = "rooms.json"
+
+        /** 主校区的 area 码（也是默认校区；界面上的简称在这一个校区里不需要前缀） */
+        const val MAIN_CAMPUS_CODE = "99"
 
         private val JSON = Json { ignoreUnknownKeys = true }
     }

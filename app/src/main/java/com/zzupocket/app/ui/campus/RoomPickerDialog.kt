@@ -26,23 +26,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.zzupocket.app.data.room.LocatedRoom
 import com.zzupocket.app.data.room.RoomBuilding
+import com.zzupocket.app.data.room.RoomCampus
 import com.zzupocket.app.data.room.RoomCatalogData
-import com.zzupocket.app.data.room.decodeRoomId
 
 /**
- * 宿舍房间选择器：**选楼栋 → 选房号 → 确认**，而不是让人手抄 `99-16--31-101`。
+ * 宿舍房间选择器：**选校区 → 选楼栋 → 选房号 → 确认**，而不是让人手抄 `99-16--31-101`。
  *
  * 房号列表来自内置的房间表（assets/rooms.json，社区项目 ZZU-Electricity-Monitor 整理，MIT）：
  * 选中一个寝室号后，自动带出**照明**与**空调**两套表计的房间 ID
  * （同一栋楼里它们是两个独立的 unit，空调的房号通常还要多一个前导 8）。
  *
- * ⚠️ 内置表**只有 6 个区域**（主校区 + 北/东/南/护理学院/洛阳），而且"空调号 = 照明号加前导 8"
+ * ⚠️ 内置表覆盖 **6 个校区**（主校区 + 北/东/南/护理学院/洛阳），而"空调号 = 照明号加前导 8"
  * 只是**主校区的多数派规律**：
  *  - 荷园2–9号楼是"照明房号 + 一位住户序号"，**一间房每人一个空调户**（`302` → `3021/3022/3023`）；
  *  - 松园8/9/10/11/13号楼、北校区、东校区、南校区各有各的偏移。
  * 所以 [RoomBuilding.acGuessIsReliable] 为假时，确认页会提醒用户去学校电费页核对。
- * 表里没有的楼栋（例如**亿达学生公寓** area 106）用"从学校账户读取"或手动填房间号。
+ * 表里没有的楼栋（例如**亿达学生公寓** area 106 —— 上游六个区域文件里没有它）用
+ * "从学校账户读取"或手动填房间号。
  *
  * 房间表读不出来、或者表里没有你的楼栋时，右下角可以切到"手动填房间号"。
  */
@@ -54,22 +56,18 @@ fun RoomPickerDialog(
     currentAc: String,
     onDismiss: () -> Unit,
     onConfirm: (label: String, lightId: String, acId: String) -> Unit,
-    /** 从学校账户读取绑定房间（内置表里没有的楼栋靠它）；null = 不显示这个入口 */
+    /** 从学校账户读取绑定房间（表里没有的楼栋靠它）；null = 不显示这个入口 */
     onReadFromSchool: (() -> Unit)? = null,
 ) {
-    // 能从当前房间 ID 反查出楼栋与房号，就直接定位过去：打开就是你那栋楼的房号列表，
-    // 当前房号标粗，省得每次从 59 栋楼里重新找一遍。
-    val currentRoom = remember(currentLight, catalog) {
-        decodeRoomId(currentLight)?.let { (area, bld, unit, room) ->
-            catalog?.buildings
-                ?.firstOrNull { it.area == area && it.building == bld && it.lightUnit == unit }
-                ?.let { it to room }
-        }
-    }
+    // 能从当前房间 ID 反查出校区/楼栋/房号，就在列表里标粗。**但不跳过"选校区"这一步** ——
+    // 校区是这版新加的一层，要让它在界面上看得见（这一层也是给用户自测其他校区用的）。
+    val current = remember(currentLight, catalog) { catalog?.locate(currentLight) }
 
-    // 步骤：null = 选楼栋；选中楼栋 = 选房号；选中房号 = 确认
-    var building by remember(currentRoom) { mutableStateOf(currentRoom?.first) }
+    // 步骤：null = 选校区；选中校区 = 选楼栋；选中楼栋 = 选房号；选中房号 = 确认
+    var campus by remember { mutableStateOf<RoomCampus?>(null) }
+    var building by remember { mutableStateOf<RoomBuilding?>(null) }
     var room by remember { mutableStateOf<String?>(null) }
+    var campusQuery by remember { mutableStateOf("") }
     var buildingQuery by remember { mutableStateOf("") }
     var roomQuery by remember { mutableStateOf("") }
     var manual by remember { mutableStateOf(false) }
@@ -88,9 +86,11 @@ fun RoomPickerDialog(
         return
     }
 
+    val selectedCampus = campus
     val selectedBuilding = building
     val title = when {
-        selectedBuilding == null -> "选择宿舍楼"
+        selectedCampus == null -> "选择校区"
+        selectedBuilding == null -> selectedCampus.name
         room == null -> selectedBuilding.name
         else -> "确认房间"
     }
@@ -101,18 +101,28 @@ fun RoomPickerDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when {
-                    selectedBuilding == null -> BuildingStep(
+                    selectedCampus == null -> CampusStep(
                         catalog = catalog,
                         catalogError = catalogError,
+                        currentCampusCode = current?.campus?.code,
+                        query = campusQuery,
+                        onQueryChange = { campusQuery = it },
+                        onPick = { campus = it },
+                        onReadFromSchool = onReadFromSchool,
+                    )
+                    selectedBuilding == null -> BuildingStep(
+                        campus = selectedCampus,
+                        current = current,
                         query = buildingQuery,
                         onQueryChange = { buildingQuery = it },
                         onPick = { building = it },
-                        onReadFromSchool = onReadFromSchool,
                     )
                     room == null -> RoomStep(
                         building = selectedBuilding,
                         query = roomQuery,
-                        highlight = currentRoom?.takeIf { it.first.name == selectedBuilding.name }?.second,
+                        highlight = current
+                            ?.takeIf { it.building.name == selectedBuilding.name }
+                            ?.room,
                         onQueryChange = { roomQuery = it },
                         onPick = { room = it },
                     )
@@ -143,26 +153,29 @@ fun RoomPickerDialog(
             when {
                 room != null -> TextButton(onClick = { room = null }) { Text("返回") }
                 selectedBuilding != null -> TextButton(onClick = { building = null }) { Text("返回") }
+                selectedCampus != null -> TextButton(onClick = { campus = null }) { Text("返回") }
                 else -> TextButton(onClick = { manual = true }) { Text("手动填房间号") }
             }
         },
     )
 }
 
+/** 第一步：选校区。[RoomCampus.code] 就是房间 ID 的 area 段（99 / 101 / …）。 */
 @Composable
-private fun BuildingStep(
+private fun CampusStep(
     catalog: RoomCatalogData?,
     catalogError: String?,
+    currentCampusCode: String?,
     query: String,
     onQueryChange: (String) -> Unit,
-    onPick: (RoomBuilding) -> Unit,
+    onPick: (RoomCampus) -> Unit,
     onReadFromSchool: (() -> Unit)? = null,
 ) {
     if (onReadFromSchool != null) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             TextButton(onClick = onReadFromSchool) { Text("从学校账户读取我的房间") }
             Text(
-                text = "不用挑楼栋：读一次学校电费页上那个绑定房间，直接填进来。" +
+                text = "不用挑校区和楼栋：读一次学校电费页上那个绑定房间，直接填进来。" +
                     "房表里没有的楼栋（如亿达学生公寓）也能这样设。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -187,9 +200,66 @@ private fun BuildingStep(
     }
 
     Text(
-        text = "${catalog.campus} · 共 ${catalog.buildings.size} 栋楼。输入楼栋名或数字可以快速筛。\n" +
+        text = "先选校区（房间号第一段就是它）：共 ${catalog.campuses.size} 个校区、" +
+            "${catalog.buildings.size} 栋楼。\n" +
             "照明与空调是两套独立电表（余额不能互抵），房间号不一样；带出来的空调号请核对一遍。" +
-            "这里只有主校区等 6 个区域，没有的楼栋用上面的「从学校账户读取」。",
+            "表里没有的楼栋用上面的「从学校账户读取」。",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    SearchField(
+        value = query,
+        onValueChange = onQueryChange,
+        label = "搜校区（如 北 / 洛阳）",
+        numeric = false,
+    )
+    val filtered = catalog.campuses.filter { query.isBlank() || it.name.contains(query.trim()) }
+    LazyColumn(Modifier.heightIn(max = 340.dp)) {
+        items(filtered, key = { it.code }) { c ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onPick(c) }
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = c.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (c.code == currentCampusCode) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = "${c.buildings.size} 栋 · ${c.roomCount} 间",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (filtered.isEmpty()) {
+            item {
+                Text(
+                    text = "没找到这个校区，可以手动填房间号。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BuildingStep(
+    campus: RoomCampus,
+    current: LocatedRoom?,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onPick: (RoomBuilding) -> Unit,
+) {
+    Text(
+        text = "${campus.name} · 共 ${campus.buildings.size} 栋楼。输入楼栋名或数字可以快速筛。" +
+            "洛阳校区是按楼层分的（「1号宿舍楼 2层」），选自己那层。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -199,10 +269,10 @@ private fun BuildingStep(
         label = "搜楼栋（如 松园 / 15）",
         numeric = false,
     )
-    val filtered = catalog.buildings.filter { b ->
+    val filtered = campus.buildings.filter { b ->
         query.isBlank() || b.name.contains(query.trim())
     }
-    LazyColumn(Modifier.heightIn(max = 380.dp)) {
+    LazyColumn(Modifier.heightIn(max = 340.dp)) {
         items(filtered, key = { it.name }) { b ->
             Row(
                 modifier = Modifier
@@ -211,7 +281,16 @@ private fun BuildingStep(
                     .padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(b.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                Text(
+                    text = b.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (current?.building?.name == b.name) {
+                        FontWeight.Bold
+                    } else {
+                        FontWeight.Normal
+                    },
+                    modifier = Modifier.weight(1f),
+                )
                 Text(
                     text = "${b.roomCount} 间",
                     style = MaterialTheme.typography.labelSmall,
@@ -255,7 +334,7 @@ private fun RoomStep(
         numeric = true,
     )
     val rooms = building.roomNumbers.filter { query.isBlank() || it.contains(query.trim()) }
-    LazyColumn(Modifier.heightIn(max = 380.dp)) {
+    LazyColumn(Modifier.heightIn(max = 340.dp)) {
         // 一行 4 个，方便快速扫
         items(rooms.chunked(4)) { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
