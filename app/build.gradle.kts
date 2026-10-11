@@ -28,8 +28,9 @@ android {
         applicationId = "com.zzupocket.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = 69
-        versionName = "0.29.3-P6"
+        versionCode = 70
+        // 版本号只写纯数字，不再带 -P6 那种阶段后缀（阶段划分是 docs 里的事，别混进版本号）
+        versionName = "0.3.0"
     }
 
     signingConfigs {
