@@ -33,6 +33,13 @@ data class MeterUi(
     val fetchedAt: Long?,
     val error: String?,
     val daysLeft: Double?,
+    /**
+     * **这一路自己的**房间可读名。
+     *
+     * ⚠️ 千万别让两路共用一行名字：照明与空调可以是两个不同的房间
+     * （换校区试查、或学校只回了绑定房间那一路），共用就会显示成"怎么查都是我自己的寝室"。
+     */
+    val roomLabel: String = "",
 )
 
 /** 「从学校账户读取房间」的结果，给界面显示一行反馈 */
@@ -196,7 +203,10 @@ class ElectricityViewModel : ViewModel() {
      * 界面就会退回显示两串 ID。房间号进数据库，可读名进偏好存储（不涉及数据库迁移）。
      */
     fun saveRooms(light: String, ac: String, label: String = "") {
-        viewModelScope.launch { persistRooms(light, ac, label) }
+        viewModelScope.launch {
+            // 选择器选的是**一间宿舍**的两套表计，所以两路共用一个可读名
+            persistRooms(light, ac, lightLabel = label, acLabel = label)
+        }
     }
 
     /**
@@ -230,7 +240,12 @@ class ElectricityViewModel : ViewModel() {
             val target = if (location.isAcMeter) "空调" else "照明"
             val light = if (location.isAcMeter) lightRoom else location.room
             val ac = if (location.isAcMeter) location.room else acRoom
-            persistRooms(light, ac, location.shortName)
+            // 只写填的那一路的名字 —— 另一路（可能是别的楼、别的房间）的名字必须留着
+            if (location.isAcMeter) {
+                persistRooms(light, ac, acLabel = location.shortName)
+            } else {
+                persistRooms(light, ac, lightLabel = location.shortName)
+            }
             // 另一路没值就说清楚：服务端只给一个绑定房间，不能替用户猜第二个
             val otherBlank = if (location.isAcMeter) light.isBlank() else ac.isBlank()
             _state.update {
@@ -343,7 +358,12 @@ class ElectricityViewModel : ViewModel() {
         val light = if (isAc) lightRoom else roomId
         val ac = if (isAc) roomId else acRoom
         val label = (ui.steps.map { it.name } + node.name).filter { it.isNotBlank() }.joinToString(" ")
-        persistRooms(light, ac, label)
+        // 同上：只写刚选的那一路的名字
+        if (isAc) {
+            persistRooms(light, ac, acLabel = label)
+        } else {
+            persistRooms(light, ac, lightLabel = label)
+        }
         val otherBlank = if (isAc) light.isBlank() else ac.isBlank()
         _state.update {
             it.copy(
@@ -358,7 +378,19 @@ class ElectricityViewModel : ViewModel() {
     }
 
     /** 落盘 + 刷新，[saveRooms] 与 [readRoomFromSchool] 共用 */
-    private suspend fun persistRooms(light: String, ac: String, label: String) {
+    /**
+     * 落盘 + 刷新。
+     *
+     * [lightLabel] / [acLabel] 只写传进来的那一路 —— **null 表示"这一路的房间名原样保留"**。
+     * 这是必须的：两路可以是两个不同的房间，只改一路时把另一路的名字一起覆盖，
+     * 就会出现"查了别的房间却显示自己寝室名"。
+     */
+    private suspend fun persistRooms(
+        light: String,
+        ac: String,
+        lightLabel: String? = null,
+        acLabel: String? = null,
+    ) {
         val current = repo.settings()
         repo.saveSettings(
             current.copy(
@@ -366,10 +398,9 @@ class ElectricityViewModel : ViewModel() {
                 acRoomId = ac.trim(),
             ),
         )
-        prefsStore.setRoomLabel(label)
+        prefsStore.setRoomLabels(light = lightLabel, ac = acLabel)
         lightRoom = light.trim()
         acRoom = ac.trim()
-        _state.update { it.copy(roomLabel = label) }
         load()
         refresh()
     }
@@ -384,10 +415,12 @@ class ElectricityViewModel : ViewModel() {
             val prefs = prefsStore.flow.first()
             _state.update { it.copy(price = prefs.energyPricePerKwh.toDouble()) }
 
-            // 房间显示名：选择器选过就用它；没选过也别给用户看内部代码，
-            // 用房表反查出寝室号（柳20-101）来显示
-            val roomLabel = prefs.roomLabel?.takeIf { it.isNotBlank() }
-                ?: AppGraph.roomCatalog.labelFor(lightRoom, acRoom).orEmpty()
+            // 房间显示名：**按槽位各自算**。选择器/读取写下的名字优先（表里没有的楼栋只能靠它），
+            // 没有就用内置房间表按这一路的房间 ID 反查（柳20-101），再没有就显示房间 ID。
+            val lightLabel = prefs.lightRoomLabel?.takeIf { it.isNotBlank() }
+                ?: AppGraph.roomCatalog.labelForRoom(lightRoom).orEmpty()
+            val acLabel = prefs.acRoomLabel?.takeIf { it.isNotBlank() }
+                ?: AppGraph.roomCatalog.labelForRoom(acRoom).orEmpty()
 
             val since = EnergyStats.dayStart(
                 LocalDate.now().minusDays(WINDOW_DAYS.toLong()),
@@ -452,6 +485,7 @@ class ElectricityViewModel : ViewModel() {
                         fetchedAt = light.lastOrNull()?.ts,
                         error = null,
                         daysLeft = EnergyStats.daysLeft(lightKwh ?: 0.0, lightAvgForDaysLeft),
+                        roomLabel = lightLabel,
                     ),
                     ac = MeterUi(
                         label = "空调",
@@ -460,8 +494,8 @@ class ElectricityViewModel : ViewModel() {
                         fetchedAt = ac.lastOrNull()?.ts,
                         error = null,
                         daysLeft = EnergyStats.daysLeft(acKwh ?: 0.0, acAvgForDaysLeft),
+                        roomLabel = acLabel,
                     ),
-                    roomLabel = roomLabel,
                 )
             }
         }

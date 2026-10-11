@@ -48,12 +48,28 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zzupocket.app.data.room.decodeRoomId
 import com.zzupocket.app.domain.DayUsage
 import com.zzupocket.app.domain.EnergyStats
 import com.zzupocket.app.ui.components.RelativeTime
 import java.time.format.DateTimeFormatter
 
 private val DAY_FMT = DateTimeFormatter.ofPattern("M月d日")
+
+/**
+ * 两路表计是不是**不在同一栋楼**（可以这样，但要提醒一句）。
+ *
+ * 返回 null = 不用提醒：任一路没设、或两路解析出来是同一栋（同一个 area + building）。
+ */
+private fun differentBuildings(lightId: String?, acId: String?): Pair<String, String>? {
+    val light = decodeRoomId(lightId) ?: return null
+    val ac = decodeRoomId(acId) ?: return null
+    return if (light.area == ac.area && light.building == ac.building) null else light.id to ac.id
+}
+
+/** 卡片上的房间名；没有就退回房间 ID，至少让人知道查的是哪一间 */
+private fun lightLabelOf(meter: MeterUi?): String =
+    meter?.let { if (it.roomLabel.isNotBlank()) it.roomLabel else it.roomId.ifBlank { "未设置" } }.orEmpty()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -161,8 +177,20 @@ fun ElectricityScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                state.light?.let { MeterCard(it, state.price, state.roomLabel, Modifier.weight(1f)) }
-                state.ac?.let { MeterCard(it, state.price, state.roomLabel, Modifier.weight(1f)) }
+                state.light?.let { MeterCard(it, state.price, Modifier.weight(1f)) }
+                state.ac?.let { MeterCard(it, state.price, Modifier.weight(1f)) }
+            }
+
+            // 两路指向不同楼栋时说清楚 —— 这是允许的（换校区试查就是这样），
+            // 但不说的话很容易看成"怎么查都显示我自己的寝室"
+            differentBuildings(state.light?.roomId, state.ac?.roomId)?.let { (light, ac) ->
+                Text(
+                    text = "⚠️ 这两路现在不在同一栋楼：照明 ${lightLabelOf(state.light)}（$light），" +
+                        "空调 ${lightLabelOf(state.ac)}（$ac）。如果只是查一下没问题；" +
+                        "要改成自己宿舍，点右上角齿轮重选一次。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
             Card(Modifier.fillMaxWidth()) {
@@ -398,7 +426,6 @@ fun ElectricityScreen(
 private fun MeterCard(
     meter: MeterUi,
     price: Double,
-    roomLabel: String,
     modifier: Modifier = Modifier,
 ) {
     Card(modifier) {
@@ -430,7 +457,8 @@ private fun MeterCard(
             }
             Text(
                 text = when {
-                    roomLabel.isNotBlank() -> roomLabel
+                    // 用**这一路自己**的房间名，别拿两路共用的（见 MeterUi.roomLabel 的说明）
+                    meter.roomLabel.isNotBlank() -> meter.roomLabel
                     // 只有一套表的楼栋（留学生公寓那种整间一表、亿达学生公寓）另一路本来就该空着
                     meter.roomId.isBlank() -> "未设置房间（有些楼只有一套表，留空即可）"
                     else -> "房间 ${meter.roomId}"

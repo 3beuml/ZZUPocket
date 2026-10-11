@@ -175,16 +175,19 @@ class RoomCatalog(private val context: Context) {
     }
 
     /**
-     * 拿两个房间 ID 换一个紧凑可读名（`柳20-101`）。
+     * 拿**一个**房间 ID 换紧凑可读名（`柳20-101`）。
      *
      * 用途：老用户（或手动填过 ID 的人）本来只会看到 `99-16--31-101` 这种内部代码，
      * 有了反查就能直接显示寝室号，不需要他们再去选一次房间。查不到返回 null。
+     *
+     * ⚠️ 一次只查一个房间，别写成"两个 ID 一起查第一个能查到的" ——
+     * 照明与空调**可以是两个不同的房间**，混着查会让两张卡显示同一个名字
+     * （历史上就是这么错的，用户看到的是"怎么查都显示我自己寝室"）。
      */
-    suspend fun labelFor(lightRoomId: String?, acRoomId: String?): String? {
+    suspend fun labelForRoom(roomId: String?): String? {
+        if (roomId.isNullOrBlank()) return null
         val data = runCatching { load() }.getOrNull() ?: return null
-        val hit = listOfNotNull(lightRoomId, acRoomId)
-            .firstNotNullOfOrNull { data.locate(it) }
-            ?: return null
+        val hit = data.locate(roomId) ?: return null
         val label = hit.building.shortLabel(hit.room)
         // 楼栋简称跨校区会重名（北1 / 东1 / 南1 都是一号楼），非主校区带上校区名
         return if (hit.campus.code == MAIN_CAMPUS_CODE) label else "${hit.campus.name} $label"

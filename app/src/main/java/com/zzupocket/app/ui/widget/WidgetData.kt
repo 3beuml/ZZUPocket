@@ -168,7 +168,7 @@ object WidgetData {
         val (lightRoom, acRoom) = runCatching { repo.effectiveRooms() }.getOrDefault("" to "")
         if (lightRoom.isBlank() && acRoom.isBlank()) {
             return WidgetBalanceBundle(
-                roomLabel = prefs.roomLabel.orEmpty(),
+                roomLabel = (prefs.lightRoomLabel ?: prefs.acRoomLabel).orEmpty(),
                 lightKwh = null, acKwh = null,
                 lightAvgDaily = 0.0, acAvgDaily = 0.0,
                 lightAt = null, acAt = null,
@@ -179,9 +179,11 @@ object WidgetData {
             )
         }
 
-        // 房间名优先用用户在房间表里选出来的可读名，其次用房表反查（得到 "柳园20号楼101" 这种）
-        val label = prefs.roomLabel?.takeIf { it.isNotBlank() }
-            ?: runCatching { AppGraph.roomCatalog.labelFor(lightRoom, acRoom) }.getOrNull().orEmpty()
+        // 房间名：组件只有一行位置，所以先取照明那一路的名字（两路不同楼时电费页会标出来），
+        // 其次用房表按**那一个**房间 ID 反查（得到 "柳园20号楼101" 这种）
+        val label = (prefs.lightRoomLabel ?: prefs.acRoomLabel)?.takeIf { it.isNotBlank() }
+            ?: runCatching { AppGraph.roomCatalog.labelForRoom(lightRoom.ifBlank { acRoom }) }
+                .getOrNull().orEmpty()
 
         val light = if (lightRoom.isBlank()) null
         else runCatching { repo.latest(ElectricityRepository.ACCOUNT_TYPE_LIGHT, lightRoom) }.getOrNull()

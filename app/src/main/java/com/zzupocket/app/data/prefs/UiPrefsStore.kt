@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.data.prefs
+package com.zzupocket.app.data.prefs
 
 import android.content.Context
 import androidx.datastore.core.DataStore
@@ -96,10 +96,18 @@ data class UiPrefs(
     /** 深浅色（默认跟随系统） */
     val darkMode: DarkMode = DarkMode.SYSTEM,
     /**
-     * 宿舍房间的可读名（如"柳园20号楼 101"）。
-     * 房间表选完自动写入；界面上优先显示它，两串内部 ID 收进高级信息。
+     * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
+     *
+     * ⚠️ 为什么要分开存：照明与空调是两套独立表计，**可以是两个不同的房间** ——
+     * 换校区试查、或者学校只回了"绑定房间"那一路时就会这样。
+     * 以前只有一个 `roomLabel` 给两张卡共用，谁最后保存就覆盖谁：
+     * 点一次「从学校账户读取」（只填照明那一路）就会把空调卡下面的房间名也写成照明那间，
+     * 看起来像"怎么查都显示我自己寝室"。
+     *
+     * 留空表示没有可读名，界面会退回用内置房间表按房间 ID 反查，再退回直接显示 ID。
      */
-    val roomLabel: String? = null,
+    val lightRoomLabel: String? = null,
+    val acRoomLabel: String? = null,
 ) {
     val dayCount: Int get() = if (showWeekend) 7 else 5
 
@@ -158,7 +166,8 @@ class UiPrefsStore(context: Context) {
                 ?: ThemePreset.DYNAMIC,
             darkMode = p[KEY_DARK_MODE]?.let { runCatching { DarkMode.valueOf(it) }.getOrNull() }
                 ?: DarkMode.SYSTEM,
-            roomLabel = p[KEY_ROOM_LABEL]?.takeIf { it.isNotBlank() },
+            lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
+            acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -197,9 +206,21 @@ class UiPrefsStore(context: Context) {
 
     suspend fun setDarkMode(v: DarkMode) = store.edit { p -> p[KEY_DARK_MODE] = v.name }
 
-    /** 房间表选完之后写入可读名（如"柳园20号楼 101"）；手动填 ID 时传 null 表示没有名字 */
-    suspend fun setRoomLabel(v: String?) = store.edit { p ->
-        if (v.isNullOrBlank()) p.remove(KEY_ROOM_LABEL) else p[KEY_ROOM_LABEL] = v
+    /**
+     * 写**其中一路**的房间可读名。
+     *
+     * 只传要改的那一路 —— 另一路的房间名必须原样留着：
+     * 两路可以是不同房间（见 [UiPrefs.lightRoomLabel] 的说明），
+     * 一起覆盖就是"查了别的房间却显示自己的寝室名"那个 bug。
+     * [light]/[ac] 传空串表示清掉（界面会退回按房间 ID 反查）。
+     */
+    suspend fun setRoomLabels(light: String? = null, ac: String? = null) = store.edit { p ->
+        if (light != null) {
+            if (light.isBlank()) p.remove(KEY_LIGHT_ROOM_LABEL) else p[KEY_LIGHT_ROOM_LABEL] = light
+        }
+        if (ac != null) {
+            if (ac.isBlank()) p.remove(KEY_AC_ROOM_LABEL) else p[KEY_AC_ROOM_LABEL] = ac
+        }
     }
 
     suspend fun setEnergyPricePerKwh(v: Float) = store.edit { p ->
@@ -233,6 +254,9 @@ class UiPrefsStore(context: Context) {
         val KEY_BG_VERSION = intPreferencesKey("grid_bg_version")
         val KEY_THEME_PRESET = stringPreferencesKey("theme_preset")
         val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
-        val KEY_ROOM_LABEL = stringPreferencesKey("room_label")
+
+        /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
+        val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
+        val KEY_AC_ROOM_LABEL = stringPreferencesKey("ac_room_label")
     }
 }
