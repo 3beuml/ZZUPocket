@@ -129,33 +129,68 @@ class RoomCatalogTest {
     }
 
     /**
-     * 核对提示的判据：空调号是不是"照明号前加 8"对上的。
-     *
-     * ⚠️ 这里**只断言"可靠/不可靠"这个判断**，不断言具体取到哪个房号 ——
-     * 因为那些楼的真实对应关系还没定论（见 README 里"房间号规律因楼而异"）。
+     * 各校区的空调号规律都是**生成资产时用两侧真实房号算好的**，运行时只套用。
+     * 这条把四个校区的代表楼钉住 —— 以前只认"8+房号"，别的校区全对不上，用户只能手抄。
      */
     @Test
-    fun `常见规律的楼栋算可靠，靠后缀猜的算不可靠`() {
-        // 柳园20号楼：空调表里确实有 8101，对得上
-        val liu20 = loadRealAsset().buildings.first { it.name == "柳园20号楼" }
-        assertTrue("柳园20号楼 101 应该按常见规律对上", liu20.acGuessIsReliable("101"))
+    fun `各校区的空调号都能算出来而不是靠猜`() {
+        val data = loadRealAsset()
+        fun building(campus: String, name: String) =
+            data.campuses.first { it.name == campus }.buildings.first { it.name == name }
 
-        // 荷园3号楼：空调表是"房号 + 一位住户序号"（101 → 1011/1012/1013），101 对不上 8+101
+        // 主校区：8 + 房号
+        assertEquals(listOf("8212"), building("主校区", "松园15号楼").acRoomNumbersFor("212"))
+        // 北校区：+ 楼号×1000
+        assertEquals(listOf("1101"), building("北校区", "北区1号楼").acRoomNumbersFor("101"))
+        // 南校区：+ 楼号×1000（7号楼 → +7000）
+        assertEquals(listOf("7101"), building("南校区", "南区7号楼").acRoomNumbersFor("101"))
+        // 东校区：负偏移（9号楼：照明 9201 → 空调 201）
+        assertEquals(listOf("201"), building("东校区", "东区9号楼").acRoomNumbersFor("9201"))
+        // 护理学院：8 + 房号
+        assertEquals(listOf("8101"), building("护理学院", "主校区护理1#女生").acRoomNumbersFor("101"))
+    }
+
+    /** 荷园式：一间房多个空调户 → 必须返回**全部**，界面才能让用户挑自己的那个 */
+    @Test
+    fun `一间房多个空调户时返回全部户号`() {
         val he3 = loadRealAsset().buildings.first { it.name == "荷园3号楼" }
-        assertTrue("荷园3号楼应该有空调表", he3.ac.size > 0)
-        assertTrue("荷园3号楼 101 不该算常见规律", !he3.acGuessIsReliable("101"))
-
-        // 构造：空调表里既没有 8101、也没有任何以 101 结尾的房号
-        val b = RoomBuilding(
-            name = "测试楼",
-            area = 99,
-            building = 16,
-            lightUnit = 31,
-            acUnit = 32,
-            light = listOf("101"),
-            ac = listOf("1101"),
+        assertEquals(listOf("3021", "3022", "3023"), he3.acRoomNumbersFor("302"))
+        assertEquals(3, he3.acPerRoom)
+        assertEquals(
+            listOf("99-88--194-3021", "99-88--194-3022", "99-88--194-3023"),
+            he3.acRoomIds("302"),
         )
-        assertTrue(!b.acGuessIsReliable("101"))
+    }
+
+    /**
+     * **不许凭空造房号**：每个照明房号算出来的空调号都必须真的在那栋楼的空调表里。
+     * 老实现用 `endsWith` 猜，会把 1101 当成 101 室的空调号 —— 那是别人家的表。
+     */
+    @Test
+    fun `算出来的空调号必须真实存在于该楼空调表`() {
+        var checked = 0
+        var withAc = 0
+        loadRealAsset().buildings.forEach { b ->
+            b.light.forEach { room ->
+                checked++
+                val got = b.acRoomNumbersFor(room)
+                got.forEach { n ->
+                    assertTrue("${b.name} $room → $n 不在该楼空调表里", b.ac.contains(n))
+                }
+                if (got.isNotEmpty()) withAc++
+            }
+        }
+        assertTrue("房间太少：$checked", checked > 10000)
+        assertTrue("能算出空调号的房间太少：$withAc/$checked", withAc > checked * 0.85)
+    }
+
+    /** 没有空调表的楼栋如实返回空，不硬凑一个 */
+    @Test
+    fun `没有空调表的楼栋返回空`() {
+        val luoyang = loadRealAsset().campuses
+            .first { it.name == "洛阳校区" }.buildings.first()
+        assertTrue(luoyang.acRoomNumbersFor(luoyang.light.first()).isEmpty())
+        assertTrue(!luoyang.acRuleIsExact())
     }
 
     @Test

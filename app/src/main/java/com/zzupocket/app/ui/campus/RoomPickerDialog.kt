@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -30,6 +31,7 @@ import com.zzupocket.app.data.room.LocatedRoom
 import com.zzupocket.app.data.room.RoomBuilding
 import com.zzupocket.app.data.room.RoomCampus
 import com.zzupocket.app.data.room.RoomCatalogData
+import com.zzupocket.app.data.room.decodeRoomId
 
 /**
  * 宿舍房间选择器：**选校区 → 选楼栋 → 选房号 → 确认**，而不是让人手抄 `99-16--31-101`。
@@ -75,6 +77,8 @@ fun RoomPickerDialog(
     var manual by remember { mutableStateOf(false) }
     var manualLight by remember { mutableStateOf(currentLight) }
     var manualAc by remember { mutableStateOf(currentAc) }
+    // 一间房有多个空调户时，用户自己挑的那一个（荷园那种每人一个表）
+    var acChoice by remember { mutableStateOf<String?>(null) }
 
     if (manual) {
         ManualRoomDialog(
@@ -127,9 +131,14 @@ fun RoomPickerDialog(
                             ?.takeIf { it.building.name == selectedBuilding.name }
                             ?.room,
                         onQueryChange = { roomQuery = it },
-                        onPick = { room = it },
+                        onPick = { room = it; acChoice = null },
                     )
-                    else -> ConfirmStep(building = selectedBuilding, room = room!!)
+                    else -> ConfirmStep(
+                        building = selectedBuilding,
+                        room = room!!,
+                        acChoice = acChoice,
+                        onAcChoice = { acChoice = it },
+                    )
                 }
             }
         },
@@ -137,9 +146,14 @@ fun RoomPickerDialog(
             when {
                 selectedBuilding != null && room != null -> {
                     val lightId = selectedBuilding.lightRoomId(room!!)
-                    val acId = selectedBuilding.acRoomId(room!!)
+                    val acNumbers = selectedBuilding.acRoomNumbersFor(room!!)
+                    // 多个空调户时必须让用户选一个，不能默认取第一个（那是别人的表）
+                    val needChoice = acNumbers.size > 1
+                    val pickedAcNumber = if (needChoice) acChoice else acNumbers.firstOrNull()
+                    val acId = selectedBuilding.acRoomIds(room!!)
+                        .firstOrNull { it.endsWith("-$pickedAcNumber") }
                     TextButton(
-                        enabled = lightId != null || acId != null,
+                        enabled = (lightId != null || acId != null) && (!needChoice || pickedAcNumber != null),
                         onClick = {
                             onConfirm(
                                 selectedBuilding.shortLabel(room!!),
@@ -147,7 +161,9 @@ fun RoomPickerDialog(
                                 acId ?: currentAc,
                             )
                         },
-                    ) { Text("保存") }
+                    ) {
+                        Text(if (needChoice && pickedAcNumber == null) "先选空调户" else "保存")
+                    }
                 }
                 else -> TextButton(onClick = onDismiss) { Text("取消") }
             }
@@ -385,12 +401,18 @@ private fun RoomStep(
 }
 
 @Composable
-private fun ConfirmStep(building: RoomBuilding, room: String) {
+private fun ConfirmStep(
+    building: RoomBuilding,
+    room: String,
+    acChoice: String?,
+    onAcChoice: (String) -> Unit,
+) {
     val lightId = building.lightRoomId(room)
-    val acId = building.acRoomId(room)
-    // 空调号不是"照明号加前导 8"对出来的 —— 说明这栋楼的编号规律不一样，
-    // 提醒去学校电费页核对（见 RoomBuilding.acGuessIsReliable 的说明）
-    val needsVerify = acId != null && !building.acGuessIsReliable(room)
+    val acNumbers = building.acRoomNumbersFor(room)
+    val acIds = building.acRoomIds(room)
+    // 数据里查不出空调号（这栋楼的编号没有可靠规律，或这间确实没有空调户）→ 如实说，
+    // 并指路「在线选房间」（那里是学校服务器给的**确切**房间号），而不是让人手抄
+    val noAc = building.acUnit <= 0 || acNumbers.isEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = "${building.name} $room",
@@ -401,22 +423,61 @@ private fun ConfirmStep(building: RoomBuilding, room: String) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(
-            text = "空调：${acId ?: "这栋楼的空调表里没有这个房号（会保留当前设置）"}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        if (needsVerify) {
+
+        when {
+            noAc -> Text(
+                text = "空调：" + if (building.acUnit <= 0) {
+                    "这栋楼没有空调表"
+                } else {
+                    "这栋楼的空调表里没有这个房号"
+                } + "（会保留当前的空调房间号）",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            acNumbers.size > 1 -> {
+                Text(
+                    text = "这间房有 ${acNumbers.size} 个空调户（每人一个表），选你自己的那个 —— " +
+                        "选错了就是查到别人的电表：",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    acNumbers.forEachIndexed { i, n ->
+                        val selected = acChoice == n
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onAcChoice(n) },
+                            label = { Text(if (i == 0) "$n（第 1 户）" else "$n（第 ${i + 1} 户）") },
+                        )
+                    }
+                }
+                acChoice?.let {
+                    Text(
+                        text = "空调房间 ID：${acIds.firstOrNull { id -> id.endsWith("-$it") } ?: "—"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            else -> Text(
+                text = "空调：${acIds.first()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        if (noAc && building.acUnit > 0) {
             Text(
-                text = "⚠️ 这栋楼的空调编号不是常见的「照明号前加 8」，上面这个空调号是 App 按房号后缀猜的，" +
-                    "可能对到别人的房间。请到学校电费页复制你自己的空调房间号，" +
-                    "再用「手动填房间号」填进来；或者先只填照明。",
+                text = "要查空调，用「在线选房间」：那是一条条问学校服务器拿到的确切房间号，" +
+                    "不用自己抄；或者照学校电费页显示的编号用「手动填房间号」填进来。",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
         Text(
-            text = "同一栋楼里照明与空调是两套独立账户，余额不能互相抵用，所以两个都要有。",
+            text = "同一栋楼里照明与空调是两套独立账户，余额不能互相抵用。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -452,18 +513,28 @@ private fun ManualRoomDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
+    val lightBad = light.isNotBlank() && decodeRoomId(light) == null
+    val acBad = ac.isNotBlank() && decodeRoomId(ac) == null
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("手动填房间号") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "房间 ID 形如 99-16--31-101（照明）与 99-16--32-8101（空调）：" +
-                        "area-building--unit-room。\n" +
-                        "在学校电费页能看到属于自己的编号，照抄即可；房表里没有的楼栋" +
-                        "（如亿达学生公寓）也可以上一页点「从学校账户读取」。\n" +
-                        "不确定就不要手填，回到上一页选楼栋更稳。",
+                    text = "格式（两个短横线在中间，别写成三个或一个）：\n" +
+                        "    区域-楼栋--层级-房间\n" +
+                        "例：照明 99-16--31-101　空调 99-16--32-8101\n" +
+                        "同一栋楼里照明与空调的层级号不同（这个例子 31 对 32），" +
+                        "房间号也可能不同（空调常多一个前导 8，但不是所有楼都这样）。",
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = "最稳的抄法：学校电费页上那两行编号直接复制。\n" +
+                        "房表里没有的楼栋（如亿达学生公寓）建议回上一页用「在线选房间」——" +
+                        "那是问学校服务器要的确切房间号，不用抄。\n" +
+                        "只有一套表的楼栋（如留学生公寓）只填一路就行。",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
@@ -471,21 +542,54 @@ private fun ManualRoomDialog(
                     onValueChange = { onLightChange(it.take(40)) },
                     label = { Text("照明房间 ID") },
                     singleLine = true,
+                    isError = lightBad,
+                    supportingText = if (lightBad) {
+                        { Text(roomIdHint(light)) }
+                    } else {
+                        null
+                    },
                 )
                 OutlinedTextField(
                     value = ac,
                     onValueChange = { onAcChange(it.take(40)) },
                     label = { Text("空调房间 ID") },
                     singleLine = true,
+                    isError = acBad,
+                    supportingText = if (acBad) {
+                        { Text(roomIdHint(ac)) }
+                    } else {
+                        null
+                    },
                 )
             }
         },
         confirmButton = {
             TextButton(
-                enabled = light.isNotBlank() || ac.isNotBlank(),
+                enabled = (light.isNotBlank() || ac.isNotBlank()) && !lightBad && !acBad,
                 onClick = onConfirm,
             ) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+/**
+ * 房间 ID 哪里不对 —— 直接把原因说出来。
+ *
+ * 写代码时"格式错"最常见的就是**双横线的数量**（写成 `99-16-31-101` 或 `99-16---31-101`），
+ * 光说"格式不正确"用户没法自查，所以这里逐条说。
+ */
+private fun roomIdHint(raw: String): String {
+    val t = raw.trim()
+    if (t.isEmpty()) return "还没填"
+    if (t.count { it == '-' } < 3) return "短横线太少：应该是 区域-楼栋--层级-房间（例 99-16--31-101）"
+    if (!t.contains("--")) return "少了中间的双横线：楼栋和层级之间是两个短横线（例 99-16--31-101）"
+    if (t.contains("---")) return "中间多了一个短横线：楼栋和层级之间只要两个"
+    val head = t.substringBefore("--")
+    val tail = t.substringAfter("--")
+    if (head.split("-").size != 2) return "前半段应该是 区域-楼栋 两段数字（例 99-16）"
+    if (tail.split("-").size != 2) return "后半段应该是 层级-房间 两段（例 31-101）"
+    if (!head.all { it.isDigit() || it == '-' }) return "区域和楼栋只能填数字"
+    if (tail.substringBefore("-").toIntOrNull() == null) return "层级只能填数字（例 31）"
+    return "房间 ID 不合法，照 99-16--31-101 这种格式填"
 }

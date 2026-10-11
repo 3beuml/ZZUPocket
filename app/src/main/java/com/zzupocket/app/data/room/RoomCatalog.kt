@@ -11,7 +11,13 @@ import kotlinx.serialization.json.Json
  *
  * 房间 ID 的格式是 `area-building--unit-room`（注意中间是**双横线**），例如
  * 柳园20号楼 101 室的照明表是 `99-16--31-101`、空调表是 `99-16--32-8101`：
- * 同一栋楼里照明与空调是**两套独立表计**（unit 不同），空调的房号还多一个前导 8。
+ * 同一栋楼里照明与空调是**两套独立表计**（unit 不同）。
+ *
+ * ## 空调房号怎么来的（重要）
+ * 「空调号 = 照明号前加 8」**只是主校区的多数派**，别的楼各有各的规律。所以这份规则
+ * **在生成资产时就用两侧真实房号列表算好了**（离线穷举，覆盖率 100% 或明确标"没有规律"），
+ * 运行时只套用 [acRule] / [acOffset] / [acPerRoom] / [acOverride]，**不再用 `endsWith` 猜** ——
+ * 猜错的后果是把别人的电表填给用户（历史上真发生过）。
  */
 @Serializable
 data class RoomBuilding(
@@ -24,13 +30,23 @@ data class RoomBuilding(
     val acUnit: Int = 0,
     /** 照明表下的房号 */
     val light: List<String> = emptyList(),
-    /** 空调表下的房号（通常是照明房号前加 8） */
+    /** 空调表下的房号 */
     val ac: List<String> = emptyList(),
+    /** 空调号推导规则：[AC_RULE_PREFIX8] / [AC_RULE_OFFSET] / [AC_RULE_SUFFIX] / [AC_RULE_NONE] */
+    val acRule: String = AC_RULE_PREFIX8,
+    /** [AC_RULE_OFFSET] 用：空调号 = 照明号 + acOffset（北校区 = 楼号×1000，东校区是负数） */
+    val acOffset: Int = 0,
+    /** [AC_RULE_SUFFIX] 用：一间房有几个空调户（荷园那种每人一个表就是 3） */
+    val acPerRoom: Int = 1,
+    /** 规则解释不了的房间：房号 → 它的空调号列表（**空数组 = 这间确实没有空调户**） */
+    val acOverride: Map<String, List<String>> = emptyMap(),
 ) {
     /** 学生在宿舍门口看到的房号：优先用照明表的（那才是寝室号本身） */
     val roomNumbers: List<String> get() = if (light.isNotEmpty()) light else ac
 
     val roomCount: Int get() = roomNumbers.size
+
+    private val acIndex: Set<String> by lazy { ac.toSet() }
 
     /**
      * 楼栋简称：柳园20号楼 → 柳20。
@@ -51,29 +67,60 @@ data class RoomBuilding(
     fun lightRoomId(room: String): String? =
         if (lightUnit > 0) "$area-$building--$lightUnit-$room" else null
 
-    /** 空调表里对应的房号；找不到就返回 null（界面会提示"这个房号没有空调表"） */
-    fun acRoomNumberFor(room: String): String? =
-        ac.firstOrNull { it == "8$room" } ?: ac.firstOrNull { it.endsWith(room) }
+    /**
+     * 一个房号对应的**全部**空调户房号。
+     *
+     * - 空列表：这栋楼没有空调表，或者这个房号确实没有空调户（如荷园5号楼 101）；
+     * - 多个：**一间房每人一个空调表**（荷园2–9号楼），界面必须让用户选自己是哪一个，
+     *   不能默认取第一个 —— 那就是别人的表。
+     */
+    fun acRoomNumbersFor(room: String): List<String> {
+        if (acUnit <= 0) return emptyList()
+        // 例外优先（"这间房确实没有空调户"也记在这里）
+        acOverride[room]?.let { return it }
+        return when (acRule) {
+            AC_RULE_PREFIX8 -> listOf("8$room").filter { it in acIndex }
+            AC_RULE_OFFSET -> room.toIntOrNull()
+                ?.plus(acOffset)
+                ?.toString()
+                ?.let { listOf(it) }
+                ?.filter { it in acIndex }
+                .orEmpty()
+            AC_RULE_SUFFIX -> (1..4).map { room + it }.filter { it in acIndex }
+            else -> emptyList()
+        }
+    }
+
+    /** 只取第一个空调户（老调用点/界面默认值用）；没有就 null */
+    fun acRoomNumberFor(room: String): String? = acRoomNumbersFor(room).firstOrNull()
 
     /**
-     * 这个房号的空调号是不是**按常见规律**（照明房号前加 `8`）对上的。
+     * 这栋楼的空调号是不是**有确切规律**（资产里算过、覆盖率已核）。
      *
-     * 只做判断，**不改变 [acRoomId] 的取值** —— 界面拿它决定要不要提醒用户去学校电费页核对。
-     *
-     * 为什么要提醒：楼栋之间的空调编号规律并不统一。主校区实测 8839/9730 条是"8+房号"，
-     * 但荷园2–9号楼是"房号 + 一位住户序号"（`302` → `3021/3022/3023`，**一间房每人一个空调户**），
-     * 松园8/9/10/11/13号楼、北校区（楼号×1000）、东校区（偏移为负）、南校区各有各的偏移。
-     * 这些楼里 [acRoomNumberFor] 的回退分支 `endsWith` 可能对上**别人**的房间，
-     * 所以要么核对，要么干脆别填那一路。
+     * 注意：true **不代表只有一套空调户** —— 荷园那种一间房 N 个户也是确切规律，
+     * 只是必须让用户选一个（[acPerRoom] > 1）。
      */
-    fun acGuessIsReliable(room: String): Boolean = ac.any { it == "8$room" }
+    fun acRuleIsExact(): Boolean = acRule != AC_RULE_NONE
 
-    fun acRoomId(room: String): String? {
-        if (acUnit <= 0) return null
-        val acRoom = acRoomNumberFor(room) ?: return null
-        return "$area-$building--$acUnit-$acRoom"
+    fun acRoomIds(room: String): List<String> {
+        if (acUnit <= 0) return emptyList()
+        return acRoomNumbersFor(room).map { "$area-$building--$acUnit-$it" }
     }
+
+    fun acRoomId(room: String): String? = acRoomIds(room).firstOrNull()
 }
+
+/** 空调号 = 照明号前加 `8`（主校区多数派） */
+const val AC_RULE_PREFIX8 = "prefix8"
+
+/** 空调号 = 照明号 + 数值偏移（北校区 = 楼号×1000、南校区 = 楼号×1000、东校区是负数） */
+const val AC_RULE_OFFSET = "offset"
+
+/** 空调号 = 照明号 + 一位住户序号（荷园式，一间房每人一个表） */
+const val AC_RULE_SUFFIX = "suffix"
+
+/** 数据里没有可靠的对应关系（例如松园2/4/5号楼的 2222/3333 占位号） */
+const val AC_RULE_NONE = "none"
 
 /**
  * 一个校区。
@@ -82,7 +129,8 @@ data class RoomBuilding(
  * 所以**校区可以直接从房间 ID 里读出来**。
  *
  * ⚠️ 房间表只覆盖 6 个区域；**亿达学生公寓（area `106`）上游从来没导出过**，
- * 那里只能靠"从学校账户读取绑定房间"或手动填房间号（见 `ElectricityRepository.boundRoom`）。
+ * 那里只能靠"从学校账户读取绑定房间"、在线选房间、或手动填房间号
+ * （见 `ElectricityRepository.boundRoom` / `locationLevel`）。
  */
 @Serializable
 data class RoomCampus(
