@@ -350,10 +350,13 @@ class ElectricityViewModel : ViewModel() {
     /** 选中一个房间节点：id 就是完整房间 ID，按面包屑里的层级名决定填哪一路 */
     private suspend fun applyOnlineRoom(node: EcardClient.LocationNode, ui: OnlinePickerUi) {
         val roomId = node.id
-        // 层级名（"照明房间"/"空调用电"…）在面包屑里，用它判断这是哪一路表计
+        // 层级名（"照明房间"/"空调用电"…）在面包屑里，用它判断这是哪一路表计。
+        // ⚠️ 但**不是所有区域都按表计分层**：亿达学生公寓、洛阳校区是按楼层分的（2层/3层…），
+        // 那种楼通常整间一个表 —— 这时填主表计那一行（"照明"），并且如实告诉用户。
         val levelName = ui.steps.lastOrNull { it.type.equals("level", ignoreCase = true) }?.name
             ?: ui.steps.lastOrNull()?.name.orEmpty()
         val isAc = levelName.contains("空调")
+        val namedMeter = isAc || levelName.contains("照明")
         val target = if (isAc) "空调" else "照明"
         val light = if (isAc) lightRoom else roomId
         val ac = if (isAc) roomId else acRoom
@@ -371,6 +374,11 @@ class ElectricityViewModel : ViewModel() {
                 roomRead = RoomReadUi(
                     ok = true,
                     text = "已选中：$label，已填入「$target」（$roomId）。" +
+                        if (!namedMeter) {
+                            "这一层不是照明/空调分类（这类楼多半整间一个表），所以填在主表计那一行。"
+                        } else {
+                            ""
+                        } +
                         if (otherBlank) "另一路还没设，需要的话再选一次那个层级（如「空调房间」）。" else "",
                 ),
             )

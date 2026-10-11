@@ -35,7 +35,9 @@ private fun levelTitle(type: String): String = when (type.lowercase()) {
     "area" -> "校区"
     "building" -> "楼栋"
     "unit" -> "单元"
-    "level" -> "表计（照明 / 空调）"
+    // 主校区这一层是"照明房间/空调用电"，但亿达、洛阳是**按楼层**分的（2层/3层…），
+    // 所以标题不能写死成照明/空调
+    "level" -> "表计 / 楼层"
     "room" -> "房间"
     "subarea" -> "分区"
     else -> type.ifBlank { "房间" }
