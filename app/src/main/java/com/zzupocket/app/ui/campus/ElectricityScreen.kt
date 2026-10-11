@@ -65,8 +65,9 @@ fun ElectricityScreen(
     var showPrice by remember { mutableStateOf(false) }
     var showRooms by remember { mutableStateOf(false) }
 
-    // 房间号是每个宿舍自己的，没有默认值：没设置就先引导填
-    val roomsMissing = state.light?.roomId.isNullOrBlank() || state.ac?.roomId.isNullOrBlank()
+    // 两路都空才算"还没设置"：有些楼栋只有一套表（留学生公寓那种整间一表、亿达学生公寓），
+    // 而学校只返回一个绑定房间，另一路本来就填不上 —— 不能因此一直提示"还没设置"。
+    val roomsMissing = state.light?.roomId.isNullOrBlank() && state.ac?.roomId.isNullOrBlank()
 
     Scaffold(
         topBar = {
@@ -114,8 +115,35 @@ fun ElectricityScreen(
             }
 
             if (roomsMissing) {
-                RoomSetupCard(onOpen = { showRooms = true })
+                RoomSetupCard(
+                    reading = state.roomReading,
+                    onOpen = { showRooms = true },
+                    onReadFromSchool = vm::readRoomFromSchool,
+                )
             }
+
+            // 「从学校账户读取房间」的结果：成功/失败各一句，不做 toast（用户可能就在看这页）
+            state.roomRead?.let { read ->
+                Text(
+                    text = read.text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (read.ok) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+
+            // 房间号口径：为什么不是"填一次就完事"，为什么有时要手抄
+            Text(
+                text = "房间号：照明与空调是两套独立电表（余额不能互抵），不同楼栋的房号规律也不一样 —— " +
+                    "App 按常见的「空调号 = 照明号前加 8」带出空调号，个别楼栋带不准" +
+                    "（如荷园部分楼一间房有多个空调户、每人一个表），请以学校电费页显示的编号为准。" +
+                    "房表里没有的楼栋（如亿达学生公寓）点齿轮进设置，用「从学校账户读取」或手动填。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             // 口径说明：学校不给历史用电量，这里全是本机采样推出来的
             Text(
@@ -342,6 +370,11 @@ fun ElectricityScreen(
                 vm.saveRooms(light, ac, label)
                 showRooms = false
             },
+            // 读完就关掉对话框：结果会显示在电费页上（成功与失败都在那儿说清楚）
+            onReadFromSchool = {
+                showRooms = false
+                vm.readRoomFromSchool()
+            },
         )
     }
 }
@@ -383,7 +416,8 @@ private fun MeterCard(
             Text(
                 text = when {
                     roomLabel.isNotBlank() -> roomLabel
-                    meter.roomId.isBlank() -> "未设置房间"
+                    // 只有一套表的楼栋（留学生公寓那种整间一表、亿达学生公寓）另一路本来就该空着
+                    meter.roomId.isBlank() -> "未设置房间（有些楼只有一套表，留空即可）"
                     else -> "房间 ${meter.roomId}"
                 },
                 style = MaterialTheme.typography.labelSmall,
@@ -422,21 +456,32 @@ private fun LegendDot(label: String, color: androidx.compose.ui.graphics.Color) 
 /**
  * 没设置宿舍房间时的引导卡片。
  *
- * 房间号是每个宿舍自己的（照明、空调还是两套独立表计），所以 App 不预置任何默认值；
- * 内置房间表支持"选楼栋 → 选房号"，选完自动带出两套表计，不用手抄内部 ID。
+ * 房间号是每个宿舍自己的（照明、空调还是两套独立表计），所以 App 不预置任何默认值。
+ * 两条路：**从学校账户读取**（读账号当前绑定的房间，房表里没有的楼栋也能用 ——
+ * 亿达学生公寓就是这样设的），或按内置房间表"选楼栋 → 选房号"。
  */
 @Composable
-private fun RoomSetupCard(onOpen: () -> Unit) {
+private fun RoomSetupCard(
+    reading: Boolean,
+    onOpen: () -> Unit,
+    onReadFromSchool: () -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("还没有设置宿舍房间", style = MaterialTheme.typography.titleSmall)
             Text(
                 text = "电费是按房间查的，每个人不一样，所以需要你选一次：\n" +
-                    "选宿舍楼 → 选你的房号（如 101），照明和空调两套表计会自动带出来。",
+                    "① 最省事：从学校账户读取（就是学校电费页上显示的那个房间）；\n" +
+                    "② 或者选宿舍楼 → 选你的房号（如 101），照明和空调两套表计会自动带出来。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            TextButton(onClick = onOpen) { Text("选择宿舍房间") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onReadFromSchool, enabled = !reading) {
+                    Text(if (reading) "读取中…" else "从学校账户读取")
+                }
+                TextButton(onClick = onOpen) { Text("选择宿舍房间") }
+            }
         }
     }
 }

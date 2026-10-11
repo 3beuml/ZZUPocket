@@ -34,6 +34,9 @@ data class MeterUi(
     val daysLeft: Double?,
 )
 
+/** 「从学校账户读取房间」的结果，给界面显示一行反馈 */
+data class RoomReadUi(val ok: Boolean, val text: String)
+
 data class ElectricityUiState(
     val loading: Boolean = false,
     val error: String? = null,
@@ -63,6 +66,9 @@ data class ElectricityUiState(
     /** 内置房间表（选楼栋 → 选房号用）；读不出来时为 null */
     val roomCatalog: RoomCatalogData? = null,
     val roomCatalogError: String? = null,
+    /** 「从学校账户读取房间」的进行中 / 结果反馈 */
+    val roomReading: Boolean = false,
+    val roomRead: RoomReadUi? = null,
 ) {
     val todayCost: Double get() = EnergyStats.cost(today.total, price)
 
@@ -130,21 +136,77 @@ class ElectricityViewModel : ViewModel() {
      * 界面就会退回显示两串 ID。房间号进数据库，可读名进偏好存储（不涉及数据库迁移）。
      */
     fun saveRooms(light: String, ac: String, label: String = "") {
+        viewModelScope.launch { persistRooms(light, ac, label) }
+    }
+
+    /**
+     * 从学校账户读取"我绑定的房间"，填进对应的那一路。
+     *
+     * 用途：内置房间表没有的楼栋（亿达学生公寓、护理学院、洛阳校区……）也能用 ——
+     * 不需要用户知道任何内部房间号，学校那边住哪就读到哪。
+     *
+     * 规则：服务端给 `levelName`（实测"照明房间"/"空调房间"），据此决定填哪一路；
+     * **另一路一律不动**，只如实说明 —— 服务端只返回一个绑定房间，
+     * 拿它去猜另一个（或留下别的楼的旧值）都会给出错误的表计。
+     */
+    fun readRoomFromSchool() {
+        if (_state.value.roomReading) return
+        _state.update { it.copy(roomReading = true, roomRead = null) }
         viewModelScope.launch {
-            val current = repo.settings()
-            repo.saveSettings(
-                current.copy(
-                    lightRoomId = light.trim(),
-                    acRoomId = ac.trim(),
-                ),
-            )
-            prefsStore.setRoomLabel(label)
-            lightRoom = light.trim()
-            acRoom = ac.trim()
-            _state.update { it.copy(roomLabel = label) }
-            load()
-            refresh()
+            val result = runCatching { repo.boundRoom() }
+            val location = result.getOrNull()
+            if (location == null) {
+                _state.update {
+                    it.copy(
+                        roomReading = false,
+                        roomRead = RoomReadUi(
+                            ok = false,
+                            text = "读取失败：${result.exceptionOrNull()?.toUserMessage() ?: "未知错误"}",
+                        ),
+                    )
+                }
+                return@launch
+            }
+            val target = if (location.isAcMeter) "空调" else "照明"
+            val light = if (location.isAcMeter) lightRoom else location.room
+            val ac = if (location.isAcMeter) location.room else acRoom
+            persistRooms(light, ac, location.shortName)
+            // 另一路没值就说清楚：服务端只给一个绑定房间，不能替用户猜第二个
+            val otherBlank = if (location.isAcMeter) light.isBlank() else ac.isBlank()
+            _state.update {
+                it.copy(
+                    roomReading = false,
+                    roomRead = RoomReadUi(
+                        ok = true,
+                        text = "已读取到你的房间：${location.shortName}（${location.levelName}），" +
+                            "已填入「$target」。" +
+                            if (otherBlank) {
+                                "学校只返回这一个绑定房间，另一路要你自己设 —— " +
+                                    "只填这一路也能查（有些楼栋本来就只有一套表）。"
+                            } else {
+                                ""
+                            },
+                    ),
+                )
+            }
         }
+    }
+
+    /** 落盘 + 刷新，[saveRooms] 与 [readRoomFromSchool] 共用 */
+    private suspend fun persistRooms(light: String, ac: String, label: String) {
+        val current = repo.settings()
+        repo.saveSettings(
+            current.copy(
+                lightRoomId = light.trim(),
+                acRoomId = ac.trim(),
+            ),
+        )
+        prefsStore.setRoomLabel(label)
+        lightRoom = light.trim()
+        acRoom = ac.trim()
+        _state.update { it.copy(roomLabel = label) }
+        load()
+        refresh()
     }
 
     /** 只读库：断网也能看历史 */

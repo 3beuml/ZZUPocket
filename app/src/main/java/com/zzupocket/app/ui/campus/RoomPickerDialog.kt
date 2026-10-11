@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.ui.campus
+package com.zzupocket.app.ui.campus
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,6 +37,13 @@ import com.zzupocket.app.data.room.decodeRoomId
  * 选中一个寝室号后，自动带出**照明**与**空调**两套表计的房间 ID
  * （同一栋楼里它们是两个独立的 unit，空调的房号通常还要多一个前导 8）。
  *
+ * ⚠️ 内置表**只有 6 个区域**（主校区 + 北/东/南/护理学院/洛阳），而且"空调号 = 照明号加前导 8"
+ * 只是**主校区的多数派规律**：
+ *  - 荷园2–9号楼是"照明房号 + 一位住户序号"，**一间房每人一个空调户**（`302` → `3021/3022/3023`）；
+ *  - 松园8/9/10/11/13号楼、北校区、东校区、南校区各有各的偏移。
+ * 所以 [RoomBuilding.acGuessIsReliable] 为假时，确认页会提醒用户去学校电费页核对。
+ * 表里没有的楼栋（例如**亿达学生公寓** area 106）用"从学校账户读取"或手动填房间号。
+ *
  * 房间表读不出来、或者表里没有你的楼栋时，右下角可以切到"手动填房间号"。
  */
 @Composable
@@ -47,6 +54,8 @@ fun RoomPickerDialog(
     currentAc: String,
     onDismiss: () -> Unit,
     onConfirm: (label: String, lightId: String, acId: String) -> Unit,
+    /** 从学校账户读取绑定房间（内置表里没有的楼栋靠它）；null = 不显示这个入口 */
+    onReadFromSchool: (() -> Unit)? = null,
 ) {
     // 能从当前房间 ID 反查出楼栋与房号，就直接定位过去：打开就是你那栋楼的房号列表，
     // 当前房号标粗，省得每次从 59 栋楼里重新找一遍。
@@ -98,6 +107,7 @@ fun RoomPickerDialog(
                         query = buildingQuery,
                         onQueryChange = { buildingQuery = it },
                         onPick = { building = it },
+                        onReadFromSchool = onReadFromSchool,
                     )
                     room == null -> RoomStep(
                         building = selectedBuilding,
@@ -146,7 +156,19 @@ private fun BuildingStep(
     query: String,
     onQueryChange: (String) -> Unit,
     onPick: (RoomBuilding) -> Unit,
+    onReadFromSchool: (() -> Unit)? = null,
 ) {
+    if (onReadFromSchool != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            TextButton(onClick = onReadFromSchool) { Text("从学校账户读取我的房间") }
+            Text(
+                text = "不用挑楼栋：读一次学校电费页上那个绑定房间，直接填进来。" +
+                    "房表里没有的楼栋（如亿达学生公寓）也能这样设。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
     if (catalogError != null) {
         Text(
             text = "房间表读不出来：$catalogError\n可以点右下角手动填房间号。",
@@ -165,7 +187,9 @@ private fun BuildingStep(
     }
 
     Text(
-        text = "${catalog.campus} · 共 ${catalog.buildings.size} 栋楼。输入楼栋名或数字可以快速筛。",
+        text = "${catalog.campus} · 共 ${catalog.buildings.size} 栋楼。输入楼栋名或数字可以快速筛。\n" +
+            "照明与空调是两套独立电表（余额不能互抵），房间号不一样；带出来的空调号请核对一遍。" +
+            "这里只有主校区等 6 个区域，没有的楼栋用上面的「从学校账户读取」。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -218,7 +242,9 @@ private fun RoomStep(
 ) {
     Text(
         text = "选你宿舍的门牌号。选完会自动带出照明与空调两套表计。" +
-            (highlight?.let { "（当前：$it）" } ?: ""),
+            (highlight?.let { "（当前：$it）" } ?: "") +
+            "\n注意：有些楼栋（如荷园部分楼）一间房有多个空调户、每人一个表，" +
+            "这里只能带出其中一个 —— 请到学校电费页核对你自己的编号。",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -273,6 +299,9 @@ private fun RoomStep(
 private fun ConfirmStep(building: RoomBuilding, room: String) {
     val lightId = building.lightRoomId(room)
     val acId = building.acRoomId(room)
+    // 空调号不是"照明号加前导 8"对出来的 —— 说明这栋楼的编号规律不一样，
+    // 提醒去学校电费页核对（见 RoomBuilding.acGuessIsReliable 的说明）
+    val needsVerify = acId != null && !building.acGuessIsReliable(room)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = "${building.name} $room",
@@ -288,6 +317,15 @@ private fun ConfirmStep(building: RoomBuilding, room: String) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (needsVerify) {
+            Text(
+                text = "⚠️ 这栋楼的空调编号不是常见的「照明号前加 8」，上面这个空调号是 App 按房号后缀猜的，" +
+                    "可能对到别人的房间。请到学校电费页复制你自己的空调房间号，" +
+                    "再用「手动填房间号」填进来；或者先只填照明。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         Text(
             text = "同一栋楼里照明与空调是两套独立账户，余额不能互相抵用，所以两个都要有。",
             style = MaterialTheme.typography.labelSmall,
@@ -332,7 +370,10 @@ private fun ManualRoomDialog(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     text = "房间 ID 形如 99-16--31-101（照明）与 99-16--32-8101（空调）：" +
-                        "area-building--unit-room。不确定就不要手填，回到上一页选楼栋更稳。",
+                        "area-building--unit-room。\n" +
+                        "在学校电费页能看到属于自己的编号，照抄即可；房表里没有的楼栋" +
+                        "（如亿达学生公寓）也可以上一页点「从学校账户读取」。\n" +
+                        "不确定就不要手填，回到上一页选楼栋更稳。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

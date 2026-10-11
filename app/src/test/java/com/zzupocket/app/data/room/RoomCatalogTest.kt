@@ -77,6 +77,36 @@ class RoomCatalogTest {
         assertNull(b.acRoomId("101"))
     }
 
+    /**
+     * 核对提示的判据：空调号是不是"照明号前加 8"对上的。
+     *
+     * ⚠️ 这里**只断言"可靠/不可靠"这个判断**，不断言具体取到哪个房号 ——
+     * 因为那些楼的真实对应关系还没定论（见 README 里"房间号规律因楼而异"）。
+     */
+    @Test
+    fun `常见规律的楼栋算可靠，靠后缀猜的算不可靠`() {
+        // 柳园20号楼：空调表里确实有 8101，对得上
+        val liu20 = loadRealAsset().buildings.first { it.name == "柳园20号楼" }
+        assertTrue("柳园20号楼 101 应该按常见规律对上", liu20.acGuessIsReliable("101"))
+
+        // 荷园3号楼：空调表是"房号 + 一位住户序号"（101 → 1011/1012/1013），101 对不上 8+101
+        val he3 = loadRealAsset().buildings.first { it.name == "荷园3号楼" }
+        assertTrue("荷园3号楼应该有空调表", he3.ac.size > 0)
+        assertTrue("荷园3号楼 101 不该算常见规律", !he3.acGuessIsReliable("101"))
+
+        // 构造：空调表里既没有 8101、也没有任何以 101 结尾的房号
+        val b = RoomBuilding(
+            name = "测试楼",
+            area = 99,
+            building = 16,
+            lightUnit = 31,
+            acUnit = 32,
+            light = listOf("101"),
+            ac = listOf("1101"),
+        )
+        assertTrue(!b.acGuessIsReliable("101"))
+    }
+
     @Test
     fun `没有照明表时照明 ID 为 null 但空调照旧`() {
         val b = RoomBuilding(

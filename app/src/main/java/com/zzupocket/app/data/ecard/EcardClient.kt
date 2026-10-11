@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.data.ecard
+package com.zzupocket.app.data.ecard
 
 import android.util.Log
 import com.zzupocket.app.core.AppError
@@ -61,6 +61,62 @@ class EcardClient(
 
     @Serializable
     private data class AccountDto(val templateList: List<TemplateDto> = emptyList())
+
+    /**
+     * 读取绑定房间的请求体：**只有 `utilityType`**。
+     *
+     * 和 [EnergyQueryBody] 一样，这个字段带默认值 —— 一旦哪天 `encodeDefaults` 被关掉，
+     * 请求体就成了 `{}`，服务端不会把它当成"查电费配置"，所以单测里也守着它。
+     */
+    @Serializable
+    internal data class ConfigBody(val utilityType: String = UTILITY_TYPE_ELECTRIC)
+
+    @Serializable
+    private data class ConfigEnvelope(
+        val success: Boolean = false,
+        val message: String? = null,
+        val resultData: ConfigData? = null,
+    )
+
+    @Serializable
+    private data class ConfigData(val location: EcardLocation? = null)
+
+    /**
+     * 一卡通里"一个房间"的完整定位。
+     *
+     * [room] 是**内部房间 ID**（如 `99-38--73-212`）—— 查电量时真正要传的那个字符串；
+     * 其余字段是服务端给的可读名（实测形如 areaName=主校区、buildingName=松园15号楼、
+     * levelName=照明房间、roomName=212房间），直接拿来显示即可。
+     */
+    @Serializable
+    data class EcardLocation(
+        val area: String = "",
+        val areaName: String = "",
+        val building: String = "",
+        val buildingName: String = "",
+        val level: String = "",
+        val levelName: String = "",
+        val room: String = "",
+        val roomName: String = "",
+    ) {
+        /**
+         * 界面用名，如「主校区 松园15号楼 212房间」。
+         *
+         * 故意的：**不要**把 levelName（"照明房间"/"空调房间"）拼进去 —— 表计卡片上已经写着
+         * 「照明」/「空调」了，再拼一次就是"照明 照明房间"。
+         *
+         * `roomName` 为空时退回内部房间 ID（洛阳校区那种按楼层分类的服务端不给 roomName，
+         * 只写楼名会让用户认不出是哪一间）。
+         */
+        val shortName: String
+            get() = listOf(areaName, buildingName, roomName.ifBlank { room })
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+                .ifBlank { room }
+
+        /** 这个绑定房间属于哪一路表计：层级名里带"空调"就算空调，其余都按照明处理 */
+        val isAcMeter: Boolean get() = levelName.contains("空调")
+    }
 
     @Serializable
     private data class TemplateDto(val code: String? = null, val name: String? = null, val value: JsonPrimitive? = null)
@@ -209,6 +265,48 @@ class EcardClient(
             )
         template.value?.content?.toDoubleOrNull()
             ?: throw AppError.Parse("quantity 不是数字：${template.value?.content}")
+    }
+
+    /**
+     * 查这个账号**当前绑定的房间**（学校电费页顶部显示的就是它）。
+     *
+     * ⚠️ 请求体**只有 `utilityType`、不带任何房间** —— 服务端回的就是当前绑定的那一个房间。
+     * 这是**不需要房间表就能拿到自己房间号**的唯一途径：内置房间表只覆盖 6 个区域、且是第三方
+     * 静态快照，亿达学生公寓（area 106）之类的地方表里根本没有，用户也不可能知道内部 ID；
+     * 但只要他在学校那边住哪个房间，这里就能读到那个房间。
+     *
+     * 依据：上游 zzupy 的 `ECardClient.get_default_room()` 用的就是这个调用（同 URL、同 body，
+     * 取 `resultData.location.room`）。注意它**只返回一个**房间（实测是"照明房间"那一路），
+     * 两套表计的宿舍另一路还得另外设。
+     */
+    suspend fun fetchBoundLocation(accessToken: String): EcardLocation = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(ConfigBody.serializer(), ConfigBody())
+        val response = try {
+            client.newCall(
+                Request.Builder()
+                    .url(CONFIG_URL)
+                    .header("Authorization", accessToken)
+                    .post(payload.toRequestBody(JSON_MEDIA))
+                    .build(),
+            ).execute()
+        } catch (e: IOException) {
+            throw AppError.Network("无法连接一卡通服务", e)
+        }
+        val text = response.use {
+            if (!it.isSuccessful) throw AppError.Server(it.code, "读取绑定房间失败（HTTP ${it.code}）")
+            it.body?.string().orEmpty()
+        }
+        val env = try {
+            json.decodeFromString<ConfigEnvelope>(text)
+        } catch (e: Exception) {
+            throw AppError.Parse("一卡通配置响应无法解析（顶层字段：${topLevelKeys(text)}）", e)
+        }
+        env.resultData?.location?.takeIf { it.room.isNotBlank() }
+            ?: throw AppError.Parse(
+                "一卡通没有返回绑定房间（success=${env.success}，message=${env.message}）。" +
+                    "这个账号可能还没绑定房间 —— 先在学校电费页选一次房间再来。" +
+                    "resultData 内字段：${resultDataKeysOf(text)}",
+            )
     }
 
     /**
@@ -428,6 +526,9 @@ class EcardClient(
         private const val TID_URL = "$BASE/server/auth/host/open"
         private const val TOKEN_URL = "$BASE/server/auth/getToken"
         private const val ACCOUNT_URL = "$BASE/server/utilities/account"
+
+        /** 缴费配置：**不带房间**调用时返回账号当前绑定的房间（见 fetchBoundLocation） */
+        private const val CONFIG_URL = "$BASE/server/utilities/config"
 
         /** 校园卡余额在**另一个域名**上，头部是 X-Id-Token + CAS userToken */
         private const val BALANCE_URL =

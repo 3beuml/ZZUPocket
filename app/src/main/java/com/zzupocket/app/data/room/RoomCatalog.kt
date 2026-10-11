@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.data.room
+package com.zzupocket.app.data.room
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +48,19 @@ data class RoomBuilding(
     /** 空调表里对应的房号；找不到就返回 null（界面会提示"这个房号没有空调表"） */
     fun acRoomNumberFor(room: String): String? =
         ac.firstOrNull { it == "8$room" } ?: ac.firstOrNull { it.endsWith(room) }
+
+    /**
+     * 这个房号的空调号是不是**按常见规律**（照明房号前加 `8`）对上的。
+     *
+     * 只做判断，**不改变 [acRoomId] 的取值** —— 界面拿它决定要不要提醒用户去学校电费页核对。
+     *
+     * 为什么要提醒：楼栋之间的空调编号规律并不统一。主校区实测 8839/9730 条是"8+房号"，
+     * 但荷园2–9号楼是"房号 + 一位住户序号"（`302` → `3021/3022/3023`，**一间房每人一个空调户**），
+     * 松园8/9/10/11/13号楼、北校区（楼号×1000）、东校区（偏移为负）、南校区各有各的偏移。
+     * 这些楼里 [acRoomNumberFor] 的回退分支 `endsWith` 可能对上**别人**的房间，
+     * 所以要么核对，要么干脆别填那一路。
+     */
+    fun acGuessIsReliable(room: String): Boolean = ac.any { it == "8$room" }
 
     fun acRoomId(room: String): String? {
         if (acUnit <= 0) return null
