@@ -375,6 +375,21 @@ fun ElectricityScreen(
                 showRooms = false
                 vm.readRoomFromSchool()
             },
+            // 在线选房间：静态表里没有的楼栋（亿达学生公寓 area 106）只有这条路能选到
+            onPickOnline = {
+                showRooms = false
+                vm.openOnlinePicker()
+            },
+        )
+    }
+
+    // 在线房间树（现从学校服务器取），逐层选到房间
+    state.online?.let { online ->
+        OnlineRoomDialog(
+            ui = online,
+            onPick = vm::onlineChoose,
+            onBack = vm::onlineBack,
+            onDismiss = vm::closeOnlinePicker,
         )
     }
 }

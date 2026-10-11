@@ -118,6 +118,100 @@ class EcardClient(
         val isAcMeter: Boolean get() = levelName.contains("空调")
     }
 
+    // ── 在线房间树（/utilities/location）────────────────────────────────
+    //
+    // 为什么需要它：静态房间表（assets/rooms.json）是从第三方快照来的，只覆盖 6 个区域，
+    // **亿达学生公寓（area 106）从来就没被导出过** —— 上游 rooms/ 目录里没有 106.json，
+    // 主校区的 99.json 里也没有那些楼。而学校自己的电费页从来不靠静态表：
+    // 它按 locationType 一层层问服务端，所以亿达的楼栋/房号它拿得到。
+    // 这里就是复刻同一套：**区域 → 楼栋 → … → 房间**，深度由服务端返回的 nextLocationType 决定。
+
+    /** 在线房间树的一个节点：[id] 就是往上一层传回去的值（房间层的 id 即完整房间 ID） */
+    @Serializable
+    data class LocationNode(val id: String = "", val name: String = "")
+
+    /** 一层房间树的查询结果 */
+    @Serializable
+    data class LocationLevel(
+        /** 这一层的层级名（area / building / level / room …） */
+        val locationType: String = "",
+        /** 下一层要问什么；[end] 为 true 时无意义 */
+        val nextLocationType: String? = null,
+        /** true = 这一层已经是叶子（房间），选中的 id 直接就是房间 ID */
+        val end: Boolean = false,
+        val nodes: List<LocationNode> = emptyList(),
+    )
+
+    /**
+     * 查询房间树的父级定位。
+     *
+     * 字段名与层级名一一对应（`locationType` 指的是**要问的那一层**，其余填已选中的祖先）：
+     * `bigArea` / `area` / `building` / `unit` / `level` / `room` / `subArea`。
+     * 实测：`locationType=area` 返回 7 个区域（99 主校区 … 106 亿达学生公寓），
+     * `nextLocationType=building`、`end=false`。
+     */
+    @Serializable
+    data class LocationScope(
+        val bigArea: String = "",
+        val area: String = "",
+        val building: String = "",
+        val unit: String = "",
+        val level: String = "",
+        val room: String = "",
+        val subArea: String = "",
+    ) {
+        /** 把某个层级选中的 id 填进去（层级名 → 字段名） */
+        fun with(type: String, id: String): LocationScope = when (type.lowercase()) {
+            "bigarea" -> copy(bigArea = id)
+            "area" -> copy(area = id)
+            "building" -> copy(building = id)
+            "unit" -> copy(unit = id)
+            "level" -> copy(level = id)
+            "room" -> copy(room = id)
+            "subarea" -> copy(subArea = id)
+            else -> this
+        }
+    }
+
+    @Serializable
+    internal data class LocationQueryBody(
+        val utilityType: String = UTILITY_TYPE_ELECTRIC,
+        val locationType: String,
+        val bigArea: String = "",
+        val area: String = "",
+        val building: String = "",
+        val unit: String = "",
+        val level: String = "",
+        val room: String = "",
+        val subArea: String = "",
+    )
+
+    @Serializable
+    internal data class LocationLevelDto(
+        val locationType: String = "",
+        val locationList: List<LocationNode> = emptyList(),
+        val nextLocationType: String? = null,
+        val end: Boolean = false,
+    ) {
+        /** 转成界面用的层级结果；层级名统一成界面认识的形式（H5 里 `subArea` 写成小写 `subarea`） */
+        internal fun toLevel(fallbackType: String): LocationLevel {
+            val type = locationType.ifBlank { fallbackType }
+            return LocationLevel(
+                locationType = if (type.equals("subarea", ignoreCase = true)) "subArea" else type,
+                nextLocationType = nextLocationType?.takeIf { it.isNotBlank() },
+                end = end,
+                nodes = locationList,
+            )
+        }
+    }
+
+    @Serializable
+    internal data class LocationEnvelope(
+        val success: Boolean = false,
+        val message: String? = null,
+        val resultData: LocationLevelDto? = null,
+    )
+
     @Serializable
     private data class TemplateDto(val code: String? = null, val name: String? = null, val value: JsonPrimitive? = null)
 
@@ -307,6 +401,72 @@ class EcardClient(
                     "这个账号可能还没绑定房间 —— 先在学校电费页选一次房间再来。" +
                     "resultData 内字段：${resultDataKeysOf(text)}",
             )
+    }
+
+    /**
+     * 问一层房间树。
+     *
+     * 用法（复刻学校 H5 与自己探针的实测行为）：
+     * ```
+     * var scope = LocationScope()
+     * var level = fetchLocationLevel(token, "area", scope)      // 拿 7 个区域
+     * while (!level.end) {
+     *     scope = scope.with(level.locationType, 用户选中的 id)
+     *     level = fetchLocationLevel(token, level.nextLocationType!!, scope)
+     * }
+     * // 此时 level.nodes 是房间，节点的 id 就是完整房间 ID（99-38--73-212 这种）
+     * ```
+     *
+     * ⚠️ 层级名与字段名的对应**不是猜的**：上游 zzupy 的 `get_room_dict()` 就是这么拼的
+     * （`""`→bigArea、`"99"`→building、`"99-12"`→unit、`"99-12--33"`→room）。
+     * `subArea` 在 H5 里写成小写 `subarea`，这里两种都认（见 [LocationScope.with]）。
+     */
+    suspend fun fetchLocationLevel(
+        accessToken: String,
+        locationType: String,
+        scope: LocationScope = LocationScope(),
+    ): LocationLevel = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(
+            LocationQueryBody.serializer(),
+            LocationQueryBody(
+                locationType = locationType,
+                bigArea = scope.bigArea,
+                area = scope.area,
+                building = scope.building,
+                unit = scope.unit,
+                level = scope.level,
+                room = scope.room,
+                subArea = scope.subArea,
+            ),
+        )
+        val response = try {
+            client.newCall(
+                Request.Builder()
+                    .url(LOCATION_URL)
+                    .header("Authorization", accessToken)
+                    .post(payload.toRequestBody(JSON_MEDIA))
+                    .build(),
+            ).execute()
+        } catch (e: IOException) {
+            throw AppError.Network("无法连接一卡通服务", e)
+        }
+        val text = response.use {
+            if (!it.isSuccessful) throw AppError.Server(it.code, "房间树查询失败（HTTP ${it.code}）")
+            it.body?.string().orEmpty()
+        }
+        val env = try {
+            json.decodeFromString<LocationEnvelope>(text)
+        } catch (e: Exception) {
+            throw AppError.Parse("房间树响应无法解析（顶层字段：${topLevelKeys(text)}）", e)
+        }
+        val data = env.resultData
+        if (data == null || !env.success) {
+            throw AppError.Parse(
+                "房间树查询失败：${env.message ?: "服务端未返回成功"}" +
+                    "（resultData 内字段：${resultDataKeysOf(text)}）",
+            )
+        }
+        data.toLevel(locationType)
     }
 
     /**
@@ -529,6 +689,9 @@ class EcardClient(
 
         /** 缴费配置：**不带房间**调用时返回账号当前绑定的房间（见 fetchBoundLocation） */
         private const val CONFIG_URL = "$BASE/server/utilities/config"
+
+        /** 房间树（在线选房间，覆盖静态表没有的楼栋，例如亿达学生公寓 area 106） */
+        private const val LOCATION_URL = "$BASE/server/utilities/location"
 
         /** 校园卡余额在**另一个域名**上，头部是 X-Id-Token + CAS userToken */
         private const val BALANCE_URL =

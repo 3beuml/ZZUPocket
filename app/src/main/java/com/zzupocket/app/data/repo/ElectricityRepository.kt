@@ -135,8 +135,29 @@ class ElectricityRepository(
         }
     }
 
-    suspend fun settings(): AppSettingsEntity = db.settingsDao().get() ?: AppSettingsEntity()
+    /**
+     * 问一层**在线房间树**。
+     *
+     * 与 [boundRoom] 互补：那个只给"当前绑定的一个房间"，这个能把整个学校的房间一层层列出来，
+     * 所以**静态表里没有的楼栋（亿达学生公寓 area `106`、以及主校区里那些没被导出的楼）
+     * 只有这条路能选到** —— 也是学校自己的电费页在用的同一套接口。
+     */
+    suspend fun locationLevel(
+        locationType: String,
+        scope: EcardClient.LocationScope = EcardClient.LocationScope(),
+    ): EcardClient.LocationLevel {
+        val token = auth.requireEcardAccessToken()
+        return try {
+            ecard.fetchLocationLevel(token, locationType, scope)
+        } catch (e: AppError.Server) {
+            if (e.code == 401 || e.code == 403) {
+                throw AppError.ReLoginRequired("一卡通会话已过期，请重新登录")
+            }
+            throw e
+        }
+    }
 
+    suspend fun settings(): AppSettingsEntity = db.settingsDao().get() ?: AppSettingsEntity()
     /**
      * 两个表计实际该用哪两个房间号：**用户设置优先，其次本机已有读数里的房间号**。
      *

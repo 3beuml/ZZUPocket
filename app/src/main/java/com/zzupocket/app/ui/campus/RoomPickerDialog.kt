@@ -58,6 +58,8 @@ fun RoomPickerDialog(
     onConfirm: (label: String, lightId: String, acId: String) -> Unit,
     /** 从学校账户读取绑定房间（表里没有的楼栋靠它）；null = 不显示这个入口 */
     onReadFromSchool: (() -> Unit)? = null,
+    /** 在线选房间（学校房间树，覆盖静态表没有的楼栋，如亿达学生公寓）；null = 不显示 */
+    onPickOnline: (() -> Unit)? = null,
 ) {
     // 能从当前房间 ID 反查出校区/楼栋/房号，就在列表里标粗。**但不跳过"选校区"这一步** ——
     // 校区是这版新加的一层，要让它在界面上看得见（这一层也是给用户自测其他校区用的）。
@@ -109,6 +111,7 @@ fun RoomPickerDialog(
                         onQueryChange = { campusQuery = it },
                         onPick = { campus = it },
                         onReadFromSchool = onReadFromSchool,
+                        onPickOnline = onPickOnline,
                     )
                     selectedBuilding == null -> BuildingStep(
                         campus = selectedCampus,
@@ -170,13 +173,20 @@ private fun CampusStep(
     onQueryChange: (String) -> Unit,
     onPick: (RoomCampus) -> Unit,
     onReadFromSchool: (() -> Unit)? = null,
+    onPickOnline: (() -> Unit)? = null,
 ) {
-    if (onReadFromSchool != null) {
+    if (onReadFromSchool != null || onPickOnline != null) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            TextButton(onClick = onReadFromSchool) { Text("从学校账户读取我的房间") }
+            if (onReadFromSchool != null) {
+                TextButton(onClick = onReadFromSchool) { Text("从学校账户读取我的房间") }
+            }
+            if (onPickOnline != null) {
+                TextButton(onClick = onPickOnline) { Text("在线选房间（含亿达公寓等）") }
+            }
             Text(
-                text = "不用挑校区和楼栋：读一次学校电费页上那个绑定房间，直接填进来。" +
-                    "房表里没有的楼栋（如亿达学生公寓）也能这样设。",
+                text = "两招都不用挑楼栋：前者读一次学校电费页上那个绑定房间；" +
+                    "后者按「区域 → 楼栋 → 照明/空调 → 房间」从学校服务器现取，" +
+                    "下面这份内置表里没有的楼栋（亿达学生公寓）就用它。",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
