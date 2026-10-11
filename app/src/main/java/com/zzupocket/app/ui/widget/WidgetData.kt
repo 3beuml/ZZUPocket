@@ -74,6 +74,8 @@ data class WidgetBalanceBundle(
     val cardWeekSpend: Double?,
     val cardWeekCount: Int?,
     val nowMillis: Long,
+    /** 只有一路表计（亿达学生公寓那种整间一个表）→ 左半只显示一个「电量」块 */
+    val singleMeter: Boolean = false,
 ) {
     fun plan(): WidgetBalancePlan = WidgetBalance.build(
         roomLabel = roomLabel,
@@ -89,6 +91,7 @@ data class WidgetBalanceBundle(
         cardWeekSpend = cardWeekSpend,
         cardWeekCount = cardWeekCount,
         nowMillis = nowMillis,
+        singleMeter = singleMeter,
     )
 }
 
@@ -222,6 +225,9 @@ object WidgetData {
             cardWeekSpend = cardTotals?.week,
             cardWeekCount = cardTotals?.weekCount,
             nowMillis = nowMillis,
+            // 只有一路设了房间号 = 整间一个表那种楼 → 组件也只显示一个「电量」
+            singleMeter = (lightRoom.isNotBlank() && acRoom.isBlank()) ||
+                (lightRoom.isBlank() && acRoom.isNotBlank()),
         )
     }
 

@@ -134,6 +134,13 @@ data class ElectricityUiState(
     /** 「从学校账户读取房间」的进行中 / 结果反馈 */
     val roomReading: Boolean = false,
     val roomRead: RoomReadUi? = null,
+    /**
+     * 只设了**一路**表计（另一路没有房间号）。
+     *
+     * 这类楼是"整间一个表"：亿达学生公寓、洛阳校区、柳园17号楼（留学生）那种。
+     * 界面上按**一个电量**呈现 —— 不摆一张空的空调卡，也不写"照明 + 空调"这种文案。
+     */
+    val singleMeter: Boolean = false,
     /** 在线选房间（走学校房间树）；null = 没打开 */
     val online: OnlinePickerUi? = null,
 ) {
@@ -504,6 +511,9 @@ class ElectricityViewModel : ViewModel() {
                         daysLeft = EnergyStats.daysLeft(acKwh ?: 0.0, acAvgForDaysLeft),
                         roomLabel = acLabel,
                     ),
+                    // 只有一路设了房间号 = 这类楼整间一个表（亿达学生公寓等）→ 界面按一个电量显示
+                    singleMeter = (lightRoom.isNotBlank() && acRoom.isBlank()) ||
+                        (lightRoom.isBlank() && acRoom.isNotBlank()),
                 )
             }
         }

@@ -71,6 +71,21 @@ private fun differentBuildings(lightId: String?, acId: String?): Pair<String, St
 private fun lightLabelOf(meter: MeterUi?): String =
     meter?.let { if (it.roomLabel.isNotBlank()) it.roomLabel else it.roomId.ifBlank { "未设置" } }.orEmpty()
 
+/**
+ * 只有一路表计时显示哪一张卡：**哪一路设了房间号就用哪一路**（亿达填的是照明那一路）。
+ */
+private fun singleMeterOf(state: ElectricityUiState): MeterUi? =
+    state.light?.takeIf { it.roomId.isNotBlank() } ?: state.ac?.takeIf { it.roomId.isNotBlank() }
+
+/** 单表计模式下的图例/折线颜色：跟着实际有数据的那一路走（照明=主色、空调=第三色） */
+@Composable
+private fun singleMeterColor(state: ElectricityUiState): androidx.compose.ui.graphics.Color =
+    if (state.light?.roomId?.isNotBlank() == true) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.tertiary
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ElectricityScreen(
@@ -176,9 +191,17 @@ fun ElectricityScreen(
                 )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                state.light?.let { MeterCard(it, state.price, Modifier.weight(1f)) }
-                state.ac?.let { MeterCard(it, state.price, Modifier.weight(1f)) }
+            if (state.singleMeter) {
+                // 只有一路表计（亿达学生公寓、洛阳校区、留学生公寓那种整间一个表）：
+                // 就一张卡、标题写「电量」—— 不摆一张空的空调卡让人以为没设好
+                singleMeterOf(state)?.let {
+                    MeterCard(it, state.price, title = "电量", modifier = Modifier.fillMaxWidth())
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    state.light?.let { MeterCard(it, state.price, Modifier.weight(1f)) }
+                    state.ac?.let { MeterCard(it, state.price, Modifier.weight(1f)) }
+                }
             }
 
             // 两路指向不同楼栋时说清楚 —— 这是允许的（换校区试查就是这样），
@@ -246,9 +269,13 @@ fun ElectricityScreen(
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        LegendItem("照明", MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(14.dp))
-                        LegendItem("空调", MaterialTheme.colorScheme.tertiary)
+                        if (state.singleMeter) {
+                            LegendItem("用电量", singleMeterColor(state))
+                        } else {
+                            LegendItem("照明", MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(14.dp))
+                            LegendItem("空调", MaterialTheme.colorScheme.tertiary)
+                        }
                         Spacer(Modifier.weight(1f))
                         Text(
                             text = "柱顶 = 当天总量",
@@ -270,12 +297,19 @@ fun ElectricityScreen(
                                 style = MaterialTheme.typography.titleSmall,
                             )
                             Text(
-                                text = "照明 %.2f 度 · ¥%.2f　空调 %.2f 度 · ¥%.2f".format(
-                                    usage.light,
-                                    EnergyStats.cost(usage.light, state.price),
-                                    usage.ac,
-                                    EnergyStats.cost(usage.ac, state.price),
-                                ),
+                                text = if (state.singleMeter) {
+                                    "用电量 %.2f 度 · ¥%.2f".format(
+                                        usage.total,
+                                        EnergyStats.cost(usage.total, state.price),
+                                    )
+                                } else {
+                                    "照明 %.2f 度 · ¥%.2f　空调 %.2f 度 · ¥%.2f".format(
+                                        usage.light,
+                                        EnergyStats.cost(usage.light, state.price),
+                                        usage.ac,
+                                        EnergyStats.cost(usage.ac, state.price),
+                                    )
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Text(
@@ -304,22 +338,35 @@ fun ElectricityScreen(
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    MeterBalanceChart(
-                        series = state.lightBalance,
-                        label = "照明",
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    MeterBalanceChart(
-                        series = state.acBalance,
-                        label = "空调",
-                        color = MaterialTheme.colorScheme.tertiary,
-                    )
-                    Text(
-                        text = "两张图各自量纲（照明和空调差不多差 80 度，画在一起会把波动压平）。" +
-                            "圆圈 + 竖虚线 = 那天余额往上跳，也就是充值。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (state.singleMeter) {
+                        MeterBalanceChart(
+                            series = state.lightBalance.ifEmpty { state.acBalance },
+                            label = "电量",
+                            color = singleMeterColor(state),
+                        )
+                        Text(
+                            text = "圆圈 + 竖虚线 = 那天余额往上跳，也就是充值。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        MeterBalanceChart(
+                            series = state.lightBalance,
+                            label = "照明",
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        MeterBalanceChart(
+                            series = state.acBalance,
+                            label = "空调",
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                        Text(
+                            text = "两张图各自量纲（照明和空调差不多差 80 度，画在一起会把波动压平）。" +
+                                "圆圈 + 竖虚线 = 那天余额往上跳，也就是充值。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
@@ -347,7 +394,12 @@ fun ElectricityScreen(
                                     modifier = Modifier.width(70.dp),
                                 )
                                 Text(
-                                    text = "照明 %.2f · 空调 %.2f".format(row.usage.light, row.usage.ac),
+                                    // 只有一路表计时右边已经写着总量了，这里再拆"照明/空调"是废话
+                                    text = if (state.singleMeter) {
+                                        ""
+                                    } else {
+                                        "照明 %.2f · 空调 %.2f".format(row.usage.light, row.usage.ac)
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.weight(1f),
@@ -427,11 +479,13 @@ private fun MeterCard(
     meter: MeterUi,
     price: Double,
     modifier: Modifier = Modifier,
+    /** 卡上的标题；只有一路表计时传「电量」（那栋楼只有一个表，叫照明/空调都不对） */
+    title: String = meter.label,
 ) {
     Card(modifier) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = meter.label,
+                text = title,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

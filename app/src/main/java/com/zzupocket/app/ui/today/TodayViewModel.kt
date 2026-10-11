@@ -25,6 +25,8 @@ data class MeterUi(
     val kwh: Double? = null,
     val fetchedAt: Long? = null,
     val error: String? = null,
+    /** 这一路的房间 ID；空 = 没设置（只有一路有值时，今天页就只显示一行「电量」） */
+    val roomId: String = "",
 )
 
 data class TodayUiState(
@@ -84,8 +86,8 @@ class TodayViewModel : ViewModel() {
         _state.update {
             it.copy(
                 loggedIn = auth.isLoggedIn(),
-                light = MeterUi(light?.kwh, light?.ts),
-                ac = MeterUi(ac?.kwh, ac?.ts),
+                light = MeterUi(light?.kwh, light?.ts, roomId = lightRoom),
+                ac = MeterUi(ac?.kwh, ac?.ts, roomId = acRoom),
                 roomHint = roomLabel(lightRoom, acRoom),
             )
         }
@@ -163,8 +165,18 @@ class TodayViewModel : ViewModel() {
             it.copy(
                 loading = false,
                 loggedIn = auth.isLoggedIn() && !needRelogin,
-                light = MeterUi(snap.light.kwh, snap.light.fetchedAt, snap.light.error?.toUserMessage()),
-                ac = MeterUi(snap.ac.kwh, snap.ac.fetchedAt, snap.ac.error?.toUserMessage()),
+                light = MeterUi(
+                    snap.light.kwh,
+                    snap.light.fetchedAt,
+                    snap.light.error?.toUserMessage(),
+                    roomId = lightRoom,
+                ),
+                ac = MeterUi(
+                    snap.ac.kwh,
+                    snap.ac.fetchedAt,
+                    snap.ac.error?.toUserMessage(),
+                    roomId = acRoom,
+                ),
                 stale = snap.light.error != null || snap.ac.error != null,
                 roomHint = roomLabel(lightRoom, acRoom),
             )

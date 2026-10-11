@@ -199,17 +199,29 @@ private fun ElectricityCard(
                 return@Column
             }
 
-            // 两套表计分开展示：照明与空调是独立账户，余额不能互相抵用，所以不做合计
-            MeterRow(
-                icon = Icons.Filled.Lightbulb,
-                label = "照明",
-                meter = state.light,
-            )
-            MeterRow(
-                icon = Icons.Filled.AcUnit,
-                label = "空调",
-                meter = state.ac,
-            )
+            // 只有一路表计的楼（亿达学生公寓、洛阳校区、留学生公寓）就显示一行「电量」，
+            // 别摆一个空的空调行；两套表计时才分开显示（独立账户，余额不能互抵，不做合计）
+            val single = (state.light.roomId.isNotBlank() && state.ac.roomId.isBlank()) ||
+                (state.light.roomId.isBlank() && state.ac.roomId.isNotBlank())
+            if (single) {
+                val meter = state.light.takeIf { it.roomId.isNotBlank() } ?: state.ac
+                MeterRow(
+                    icon = Icons.Filled.Bolt,
+                    label = "电量",
+                    meter = meter,
+                )
+            } else {
+                MeterRow(
+                    icon = Icons.Filled.Lightbulb,
+                    label = "照明",
+                    meter = state.light,
+                )
+                MeterRow(
+                    icon = Icons.Filled.AcUnit,
+                    label = "空调",
+                    meter = state.ac,
+                )
+            }
 
             if (state.roomHint.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
