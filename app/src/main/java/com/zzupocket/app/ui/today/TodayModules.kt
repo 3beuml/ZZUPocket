@@ -117,6 +117,11 @@ fun TodayEnergyTrendCard(
     avgKwh: Double,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 整间一个表的楼（亿达学生公寓）：只有一路电量，图例不能写"照明/空调"。
+     * 柱子本身就是"有数据的那一路往上长"，所以只换图例文案即可。
+     */
+    singleMeter: Boolean = false,
 ) {
     Card(modifier = modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -154,12 +159,20 @@ fun TodayEnergyTrendCard(
 
             DivergingTrendChart(bars)
 
-            // 两个表计的合计分开写：它们是独立账户，混在一起看不出谁更费
+            // 两个表计的合计分开写：它们是独立账户，混在一起看不出谁更费。
+            // ⚠️ 单表计的楼（亿达）没有"照明/空调"之分，这里必须写「用电量」，否则就是拿照明顶替。
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LegendDot(MaterialTheme.colorScheme.primary, "照明 ${fmt(bars.sumOf { it.light })} 度")
-                if (bars.any { it.ac > 0.0 }) {
-                    Spacer(Modifier.width(14.dp))
-                    LegendDot(MaterialTheme.colorScheme.tertiary, "空调 ${fmt(bars.sumOf { it.ac })} 度")
+                if (singleMeter) {
+                    LegendDot(
+                        MaterialTheme.colorScheme.primary,
+                        "用电量 ${fmt(bars.sumOf { it.light + it.ac })} 度",
+                    )
+                } else {
+                    LegendDot(MaterialTheme.colorScheme.primary, "照明 ${fmt(bars.sumOf { it.light })} 度")
+                    if (bars.any { it.ac > 0.0 }) {
+                        Spacer(Modifier.width(14.dp))
+                        LegendDot(MaterialTheme.colorScheme.tertiary, "空调 ${fmt(bars.sumOf { it.ac })} 度")
+                    }
                 }
             }
         }

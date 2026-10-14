@@ -37,6 +37,7 @@ class WidgetBalanceTest {
         cardTodaySpend: Double? = 3.20,
         cardWeekSpend: Double? = 87.6,
         cardWeekCount: Int? = 5,
+        singleMeter: Boolean = false,
     ) = WidgetBalance.build(
         roomLabel = roomLabel,
         lightKwh = lightKwh,
@@ -51,7 +52,42 @@ class WidgetBalanceTest {
         cardWeekSpend = cardWeekSpend,
         cardWeekCount = cardWeekCount,
         nowMillis = now,
+        singleMeter = singleMeter,
     )
+
+    /**
+     * 只有一路表计的楼（亿达学生公寓、洛阳校区、留学生公寓）：左半只给一个「电量」块，
+     * 第二格留空占位（布局是 4 个固定格子，少给会让上一轮的"空调"文字留在屏幕上）。
+     */
+    @Test
+    fun `单表计时左半只有一个电量块`() {
+        val plan = build(lightKwh = 42.5, acKwh = null, singleMeter = true)
+
+        assertEquals(2, plan.leftBlocks.size)
+        assertEquals("电量", plan.leftBlocks[0].label)
+        assertEquals("42.50", plan.leftBlocks[0].value)
+        assertEquals("度", plan.leftBlocks[0].unit)
+        // 第二格必须是空的，不能是"空调 —"
+        assertEquals("", plan.leftBlocks[1].label)
+        assertEquals("", plan.leftBlocks[1].value)
+        assertEquals("", plan.leftBlocks[1].unit)
+    }
+
+    /** 单表计时只有空调那一路有值（理论上少见，但别显示成"—"） */
+    @Test
+    fun `单表计时用有值的那一路`() {
+        val plan = build(lightKwh = null, acKwh = 17.0, singleMeter = true)
+        assertEquals("电量", plan.leftBlocks[0].label)
+        assertEquals("17", plan.leftBlocks[0].value)
+    }
+
+    /** 两套表计时照旧：照明 / 空调 两块 */
+    @Test
+    fun `两套表计时仍然是照明与空调两块`() {
+        val plan = build()
+        assertEquals("照明", plan.leftBlocks[0].label)
+        assertEquals("空调", plan.leftBlocks[1].label)
+    }
 
     // ── 格式化 ───────────────────────────────────────────────────────────
 

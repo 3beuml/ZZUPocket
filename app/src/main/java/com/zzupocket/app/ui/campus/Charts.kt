@@ -343,18 +343,6 @@ fun LegendItem(label: String, color: Color, modifier: Modifier = Modifier) {
     }
 }
 
-/** 当天明细里用的一行（日期 → 照明/空调/合计/电费） */
-fun usageDetailText(usage: DayUsage?, price: Double, day: LocalDate): String {
-    val u = usage ?: DayUsage()
-    val total = u.total
-    return buildString {
-        append("${day.format(AXIS_FMT)}：")
-        append("照明 %.2f 度 ¥%.2f · ".format(u.light, u.light * price))
-        append("空调 %.2f 度 ¥%.2f · ".format(u.ac, u.ac * price))
-        append("合计 %.2f 度 ¥%.2f".format(total, total * price))
-    }
-}
-
 /** 商户占比用的横条 */
 @Composable
 fun ShareBar(fraction: Float, modifier: Modifier = Modifier) {

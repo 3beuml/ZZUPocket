@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.ui.today
+package com.zzupocket.app.ui.today
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +25,8 @@ data class MeterUi(
     val kwh: Double? = null,
     val fetchedAt: Long? = null,
     val error: String? = null,
+    /** 这一路的房间 ID；空 = 没设置（只有一路有值时，今天页就只显示一行「电量」） */
+    val roomId: String = "",
 )
 
 data class TodayUiState(
@@ -84,8 +86,8 @@ class TodayViewModel : ViewModel() {
         _state.update {
             it.copy(
                 loggedIn = auth.isLoggedIn(),
-                light = MeterUi(light?.kwh, light?.ts),
-                ac = MeterUi(ac?.kwh, ac?.ts),
+                light = MeterUi(light?.kwh, light?.ts, roomId = lightRoom),
+                ac = MeterUi(ac?.kwh, ac?.ts, roomId = acRoom),
                 roomHint = roomLabel(lightRoom, acRoom),
             )
         }
@@ -163,8 +165,18 @@ class TodayViewModel : ViewModel() {
             it.copy(
                 loading = false,
                 loggedIn = auth.isLoggedIn() && !needRelogin,
-                light = MeterUi(snap.light.kwh, snap.light.fetchedAt, snap.light.error?.toUserMessage()),
-                ac = MeterUi(snap.ac.kwh, snap.ac.fetchedAt, snap.ac.error?.toUserMessage()),
+                light = MeterUi(
+                    snap.light.kwh,
+                    snap.light.fetchedAt,
+                    snap.light.error?.toUserMessage(),
+                    roomId = lightRoom,
+                ),
+                ac = MeterUi(
+                    snap.ac.kwh,
+                    snap.ac.fetchedAt,
+                    snap.ac.error?.toUserMessage(),
+                    roomId = acRoom,
+                ),
                 stale = snap.light.error != null || snap.ac.error != null,
                 roomHint = roomLabel(lightRoom, acRoom),
             )
@@ -174,15 +186,17 @@ class TodayViewModel : ViewModel() {
     }
 
     /**
-     * 房间的显示文案：优先用房间表选出来的可读名（"柳园20号楼 101"），
+     * 房间的显示文案（今日页只有一行位置，所以这里是**一个**名字）：
+     * 优先用照明那一路的可读名（空调那路若不同楼，电费页会明确标出来），
      * 其次是两串内部 ID，都没设置就什么都不显示（去电费页设置）。
      */
     private suspend fun roomLabel(lightRoom: String, acRoom: String): String {
         if (lightRoom.isBlank() && acRoom.isBlank()) return ""
-        val picked = AppGraph.uiPrefsStore.flow.first().roomLabel.orEmpty()
+        val prefs = AppGraph.uiPrefsStore.flow.first()
+        val picked = (prefs.lightRoomLabel ?: prefs.acRoomLabel).orEmpty()
         if (picked.isNotBlank()) return picked
         // 没选过房间也不给用户看内部代码：用房表反查出寝室号（柳20-101）
-        return AppGraph.roomCatalog.labelFor(lightRoom, acRoom)
+        return AppGraph.roomCatalog.labelForRoom(lightRoom.ifBlank { acRoom })
             ?: "照明 ${lightRoom.ifBlank { "未设置" }} / 空调 ${acRoom.ifBlank { "未设置" }}"
     }
 

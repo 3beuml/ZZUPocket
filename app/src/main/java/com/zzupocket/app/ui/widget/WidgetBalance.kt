@@ -174,26 +174,50 @@ object WidgetBalance {
         cardWeekSpend: Double?,
         cardWeekCount: Int?,
         nowMillis: Long,
+        /**
+         * 只有一路表计（亿达学生公寓、洛阳校区、留学生公寓那种整间一个表）：
+         * 左半只显示一个「电量」块，第二格留空 —— 不摆一个空的"空调"格。
+         * 布局是 4 个固定格子（左 2 右 2），所以**必须仍然给满 4 个块**，
+         * 否则第二格会残留上一次的文字。
+         */
+        singleMeter: Boolean = false,
     ): WidgetBalancePlan {
         val hasRoom = roomLabel.isNotBlank() || lightKwh != null || acKwh != null
         val leftTitle = if (roomLabel.isNotBlank()) "宿舍电量 · $roomLabel" else "宿舍电量"
 
-        val leftBlocks = listOf(
-            WidgetBlock(
-                label = "照明",
-                value = kwhText(lightKwh),
-                unit = "度",
-                hint = if (hasRoom) daysLeftText(lightKwh, lightAvgDaily) else "",
-                alert = meterAlert(lightKwh),
-            ),
-            WidgetBlock(
-                label = "空调",
-                value = kwhText(acKwh),
-                unit = "度",
-                hint = if (hasRoom) daysLeftText(acKwh, acAvgDaily) else "",
-                alert = meterAlert(acKwh),
-            ),
-        )
+        // 单表计时用有值的那一路（亿达填的是照明那一路）
+        val onlyKwh = lightKwh ?: acKwh
+        val onlyAvg = if (lightKwh != null) lightAvgDaily else acAvgDaily
+
+        val leftBlocks = if (singleMeter) {
+            listOf(
+                WidgetBlock(
+                    label = "电量",
+                    value = kwhText(onlyKwh),
+                    unit = "度",
+                    hint = if (hasRoom) daysLeftText(onlyKwh, onlyAvg) else "",
+                    alert = meterAlert(onlyKwh),
+                ),
+                WidgetBlock(label = "", value = "", unit = "", hint = "", alert = false),
+            )
+        } else {
+            listOf(
+                WidgetBlock(
+                    label = "照明",
+                    value = kwhText(lightKwh),
+                    unit = "度",
+                    hint = if (hasRoom) daysLeftText(lightKwh, lightAvgDaily) else "",
+                    alert = meterAlert(lightKwh),
+                ),
+                WidgetBlock(
+                    label = "空调",
+                    value = kwhText(acKwh),
+                    unit = "度",
+                    hint = if (hasRoom) daysLeftText(acKwh, acAvgDaily) else "",
+                    alert = meterAlert(acKwh),
+                ),
+            )
+        }
 
         val rightBlocks = listOf(
             WidgetBlock(
