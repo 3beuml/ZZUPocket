@@ -116,9 +116,15 @@ class ScheduleViewModel : ViewModel() {
     }
 
     private suspend fun bootstrap() {
-        _state.update { it.copy(started = true, loading = true, error = null) }
+        // ⚠️ loggedIn 必须在**任何网络请求之前**就写进状态，否则会骗用户去反复重登：
+        // 以前这里是"先 refreshSemesters()，直到最后才把 loggedIn 写进状态"，于是教务回 401/403
+        // 时异常被 catch 掉，loggedIn 就停在默认的 false —— 界面同时显示红色「教务登录态已失效」
+        // 与「登录后查看课表 + 登录按钮」（那两处分别由 error 与 !loggedIn 决定渲染），
+        // 用户重登一次、界面一模一样，形成死循环（2026-10-14 用户报告）。
+        // 本地令牌有效就按"已登录"渲染；教务被拒是另一回事，交给 error 说明。
+        val loggedIn = auth.isLoggedIn()
+        _state.update { it.copy(started = true, loading = true, error = null, loggedIn = loggedIn) }
         try {
-            val loggedIn = auth.isLoggedIn()
             var all = repo.semesters()
             if (all.isEmpty() && loggedIn) {
                 repo.refreshSemesters()
