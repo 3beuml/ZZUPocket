@@ -1,5 +1,6 @@
 package com.zzupocket.app.data.repo
 
+import android.util.Log
 import androidx.room.withTransaction
 import com.zzupocket.app.data.auth.AuthRepository
 import com.zzupocket.app.data.db.AppDatabase
@@ -14,12 +15,11 @@ import com.zzupocket.app.domain.Plan
 import com.zzupocket.app.domain.PlanSpec
 import com.zzupocket.app.domain.Semester
 import com.zzupocket.app.domain.Session
+import com.zzupocket.app.domain.WeekAlignment
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
-import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 
 /**
  * 课表仓库。
@@ -74,6 +74,7 @@ class ScheduleRepository(
     suspend fun refreshCourseTable(semesterId: Int) {
         val token = auth.requireCasToken()
         val sessions = eas.fetchCourseTable(token, semesterId)
+        val semester = semester(semesterId)
         val now = System.currentTimeMillis()
 
         // 一门课 = 按课程代码聚合，sessions 全部挂在它下面
@@ -92,14 +93,22 @@ class ScheduleRepository(
             )
         }
         val sessionEntities = sessions.map { s ->
+            // ⚠️ 学校的**临时补课**经常只给日期、不给教学周/星期（`weekIndex`/`weekday` 是 0）。
+            // 按日期把这两样补出来：这样它既能在"今天"按日期匹配到，
+            // 也能落进对应教学周的网格里（否则网格永远看不到它）。
+            val derived = weekdayAndWeekOf(semester, s.date)
+            val weekday = if (s.weekday in 1..7) s.weekday else derived?.first ?: 0
+            val weekIndex = if (s.weekIndex > 0) s.weekIndex else derived?.second ?: 0
             CourseSessionEntity(
-                id = sessionIdOf(semesterId, s.courseCode, s.weekIndex, s.weekday, s.startUnit),
+                // 主键带上日期：同一门课在同一周同一天同一节的**补课**不能覆盖正常那节课，
+                // 两条都得留（以前 id 不含日期，后写的一条会把前一条顶掉）
+                id = sessionIdOf(semesterId, s.courseCode, weekIndex, weekday, s.startUnit, s.date),
                 courseKey = courseKeyOf(semesterId, s.courseCode),
                 semesterId = semesterId,
                 source = SOURCE_EAS,
                 courseName = s.courseName,
-                weekIndex = s.weekIndex,
-                weekday = s.weekday,
+                weekIndex = weekIndex,
+                weekday = weekday,
                 startUnit = s.startUnit,
                 endUnit = s.endUnit,
                 date = s.date,
@@ -119,6 +128,7 @@ class ScheduleRepository(
             db.courseDao().upsertAll(courseEntities)
             db.courseSessionDao().upsertAll(sessionEntities)
         }
+        logGridCollisions(sessionEntities)
     }
 
     /** 节次时刻表（作息）。内容基本不变，拉一次长期有效。 */
@@ -199,24 +209,29 @@ class ScheduleRepository(
     // ── 本地计算 ─────────────────────────────────────────────────────────
 
     /**
-     * 由学期起始日推算今天属于第几教学周；落在学期外（假期）返回 null。
+     * 由学期起始日推算某一天属于第几教学周；落在学期外（假期）返回 null。
      *
-     * 用「对齐到周首」的方式算，这样即使 startDate 是周中某天也不会错一周。
+     * 算法在 [WeekAlignment.indexOf]（纯函数、有单测）：对齐到周首再算，
+     * 这样即使 startDate 是周中某天也不会错一周。
      */
-    fun resolveCurrentWeek(semester: Semester, today: LocalDate = LocalDate.now()): Int? {
-        val start = semester.startDate ?: return null
-        val anchor = alignToWeekStart(start, semester.weekStartOnSunday)
-        val target = alignToWeekStart(today, semester.weekStartOnSunday)
-        val days = ChronoUnit.DAYS.between(anchor, target)
-        if (days < 0) return null
-        val idx = (days / 7).toInt() + 1
-        return if (idx in semester.weekIndices) idx else null
-    }
+    fun resolveCurrentWeek(semester: Semester, today: LocalDate = LocalDate.now()): Int? =
+        WeekAlignment.indexOf(
+            startDate = semester.startDate,
+            weekStartOnSunday = semester.weekStartOnSunday,
+            weekIndices = semester.weekIndices,
+            date = today,
+        )
 
-    private fun alignToWeekStart(date: LocalDate, sundayStart: Boolean): LocalDate {
-        val target = if (sundayStart) DayOfWeek.SUNDAY else DayOfWeek.MONDAY
-        val diff = ((date.dayOfWeek.value - target.value) + 7) % 7
-        return date.minusDays(diff.toLong())
+    /**
+     * 只有日期、没有周网格信息的记录（临时补课）：按日期算出「星期 + 教学周」。
+     *
+     * 星期直接用 ISO（周一=1…周日=7，与教务一致）；教学周用同一套对齐算法，
+     * 落到学期周次之外（比如假期补课）就返回 0 —— 那种记录只能按日期匹配显示，不硬塞进某一周。
+     */
+    private fun weekdayAndWeekOf(semester: Semester?, date: String?): Pair<Int, Int>? {
+        val d = date?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return null
+        val week = semester?.let { resolveCurrentWeek(it, d) } ?: 0
+        return d.dayOfWeek.value to week
     }
 
     /**
@@ -262,6 +277,39 @@ class ScheduleRepository(
 
     suspend fun hasCourseData(semesterId: Int): Boolean =
         db.courseSessionDao().countBySemester(semesterId) > 0
+
+    /**
+     * 诊断：**同一个 (周, 星期, 起始节次) 上有多门课**的格子有多少个（`ScheduleGrid` 标签）。
+     *
+     * 为什么要记：课表页一个格子只会画**第一门**匹配的课（`ScheduleScreen` 里是 `firstOrNull`），
+     * 而且被跨节大块覆盖的格子会被整段跳过 —— 学校新加的**补课**如果正好落在已有课的格子，
+     * 在网格里就是看不见的。只记格子坐标与条数，**不含课程名/教室**。
+     */
+    private fun logGridCollisions(rows: List<CourseSessionEntity>) {
+        runCatching {
+            val dated = rows.filter { it.weekIndex > 0 && it.weekday in 1..7 }
+            val collisions = dated
+                .groupBy { Triple(it.weekIndex, it.weekday, it.startUnit) }
+                .filter { (_, list) -> list.map { it.courseKey }.distinct().size > 1 }
+            val dates = rows.mapNotNull { it.date }.distinct().sorted()
+            // 星期分布：**周末有没有课**是判断"这个接口给不给补课"的关键 ——
+            // 学校自己的课表能显示周六/周日的补课，如果这里一周七天里只有周一到周五，
+            // 基本可以断定这个接口只返回常规周课表，补课来自别处。
+            val weekdayCounts = (1..7).joinToString(" ") { d ->
+                val n = dated.count { it.weekday == d }
+                "周${"一二三四五六日"[d - 1]}$n"
+            }
+            Log.i(
+                TAG_GRID,
+                "课表入库：${rows.size} 条，日期 ${dates.size} 天（${dates.joinToString(",")}）；" +
+                    "星期分布($weekdayCounts)；" +
+                    "同格多门课（网格只会画第一门）的格子 ${collisions.size} 个：" +
+                    collisions.entries.take(12).joinToString(" ") { (k, v) ->
+                        "第${k.first}周${k.second}/${k.third}节×${v.map { it.courseKey }.distinct().size}"
+                    },
+            )
+        }
+    }
 
     // ── 自定义日程 ──────────────────────────────────────────────────────
 
@@ -357,16 +405,25 @@ class ScheduleRepository(
         const val SOURCE_EAS = "eas"
         const val SOURCE_CUSTOM = "custom"
 
+        private const val TAG_GRID = "ScheduleGrid"
+
         fun courseKeyOf(semesterId: Int, courseCode: String) = "$semesterId:$courseCode"
 
-        /** 稳定主键：同一学期 + 同一门课 + 同一周 + 同一天 + 同一节 = 同一节课 */
+        /**
+         * 稳定主键：同一学期 + 同一门课 + 同一周 + 同一天 + 同一节 + **同一日期** = 同一节课。
+         *
+         * [date] 必须进主键：学校的**补课**可能和正常课落在同一周同一天同一节
+         * （比如把周二的课补在某周周二），不含日期就会互相覆盖，只剩一条。
+         * 自定义日程没有日期（按周重复），传 null 即可。
+         */
         fun sessionIdOf(
             semesterId: Int,
             courseCode: String,
             weekIndex: Int,
             weekday: Int,
             startUnit: Int,
-        ) = "$semesterId:$courseCode:$weekIndex:$weekday:$startUnit"
+            date: String? = null,
+        ) = "$semesterId:$courseCode:$weekIndex:$weekday:$startUnit:${date.orEmpty()}"
 
         fun newPlanCode(): String = "P" + System.currentTimeMillis().toString(36)
     }

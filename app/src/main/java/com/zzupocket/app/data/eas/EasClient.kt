@@ -1,5 +1,6 @@
 package com.zzupocket.app.data.eas
 
+import android.util.Log
 import com.zzupocket.app.core.AppError
 import com.zzupocket.app.core.ScheduleText
 import kotlinx.coroutines.Dispatchers
@@ -189,10 +190,22 @@ class EasClient(
         val url = "$COURSE_URL/$semesterId"
         val data = getData<List<DatumDto>>(url, userToken, "课表")
         val out = ArrayList<Session>(data.size * 2)
+        var noGridKept = 0
+        var dropped = 0
         for (datum in data) {
             val c = datum.course
             for (s in datum.schedules) {
-                if (s.weekIndex <= 0 || s.weekday !in 1..7 || s.startUnit <= 0) continue
+                val date = s.date?.take(10)
+                // ⚠️ 以前这里把"没有教学周 / 星期 / 节次"的记录**直接丢掉** ——
+                // 而学校的**临时补课**恰恰经常只给一个日期，于是整条补课在 App 里根本不存在。
+                // 现在：只要带日期就收下来（补不出网格的记录靠**日期匹配**显示，今天页/组件都能看到）；
+                // 连日期都没有、又不在周网格里的，确实没有位置可放，只能丢。
+                val hasGrid = s.weekIndex > 0 && s.weekday in 1..7 && s.startUnit > 0
+                if (!hasGrid && date == null) {
+                    dropped++
+                    continue
+                }
+                if (!hasGrid) noGridKept++
                 val endUnit = if (s.endUnit >= s.startUnit) s.endUnit else s.startUnit
                 out += Session(
                     courseCode = c.code.ifBlank { c.nameZh },
@@ -205,7 +218,7 @@ class EasClient(
                     weekday = s.weekday,
                     startUnit = s.startUnit,
                     endUnit = endUnit,
-                    date = s.date?.take(10),
+                    date = date,
                     startTime = s.startTime,
                     endTime = s.endTime,
                     teacherName = s.teacherName?.takeIf { it.isNotBlank() },
@@ -215,7 +228,30 @@ class EasClient(
                 )
             }
         }
+        logScheduleShape(data, out.size, noGridKept, dropped)
         return out
+    }
+
+    /**
+     * 课表原始形状的**一行小结**（`ScheduleRaw` 标签）。
+     *
+     * 只记**计数与枚举取值分布**，不含课程名 / 教室 / 教师 —— 出问题时看 logcat 就能判断：
+     *   · 学校的"补课"到底带不带教学周/星期/节次（`noGrid`）；
+     *   · `state`（课程状态）与 `lessonType`（课时类型）都有哪些取值 —— App 目前**没有用**这两个字段，
+     *     要区分正常课/调课/补课就得先知道它们长什么样。
+     */
+    private fun logScheduleShape(data: List<DatumDto>, kept: Int, noGridKept: Int, dropped: Int) {
+        runCatching {
+            val all = data.flatMap { it.schedules }
+            val states = all.groupingBy { it.state ?: "null" }.eachCount()
+            val types = all.groupingBy { it.lessonType ?: "null" }.eachCount()
+            Log.i(
+                TAG_SCHEDULE,
+                "课表原始：${data.size} 门课 / ${all.size} 条记录 → 入库 $kept 条" +
+                    "（其中无周网格、只有日期 $noGridKept 条），丢弃 $dropped 条；" +
+                    "state=$states lessonType=$types",
+            )
+        }
     }
 
     /** 优先取"楼栋+房间"，其次只有房间名，最后才用自定义地点 */
@@ -374,7 +410,33 @@ class EasClient(
             if (env.result != 0) {
                 throw AppError.Server(env.result, "教室查询失败：${env.message ?: env.msg ?: "未知原因"}")
             }
-            env.data ?: throw AppError.Parse("教室查询响应缺少 data")
+            val page = env.data ?: throw AppError.Parse("教室查询响应缺少 data")
+            logOccupancyTypes(page)
+            page
+        }
+    }
+
+    /**
+     * 诊断：教室占用里出现了哪些 `activityType`（`RoomOccupancy` 标签）。
+     *
+     * 为什么关心：`activityType` 里有 **`ScheduleChange`（调课申请）**——
+     * 学校如果把这门课的**补课/调课**登记进教务，那间教室当天就会多出这样一条记录。
+     * 个人课表接口（course-table）实测不含周末补课，所以"补课到底还在哪"这个问题，
+     * 用这条日志就能判断：如果这里能出现 ScheduleChange，我们就有路子在 App 里把它显示出来。
+     * **只记类型与条数，不记课程名/教师姓名。**
+     */
+    private fun logOccupancyTypes(page: ClassroomPageDto) {
+        runCatching {
+            val rooms = page.data
+            val rows = rooms.flatMap { it.roomOccupationInfoVms }
+            val types = rows.map { it.activityType ?: "null" }
+                .groupingBy { it }.eachCount()
+                .entries.sortedByDescending { it.value }
+                .joinToString(" ") { "${it.key}=${it.value}" }
+            Log.i(
+                TAG_OCCUPANCY,
+                "教室占用：${rooms.size} 间教室 / ${rows.size} 条记录；activityType: $types",
+            )
         }
     }
 
@@ -430,6 +492,10 @@ class EasClient(
     }
 
     companion object {
+        private const val TAG_SCHEDULE = "ScheduleRaw"
+
+        /** 教室占用的 activityType 分布（判断补课有没有被登记成 ScheduleChange） */
+        private const val TAG_OCCUPANCY = "RoomOccupancy"
         private const val JWXT = "https://jwxt.zzu.edu.cn"
 
         /** 教务微服务前缀：教室占用那批接口都在这里 */

@@ -1,6 +1,8 @@
 package com.zzupocket.app.domain
 
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 
 /**
  * 「课表该显示第几教学周」的判断。
@@ -45,4 +47,36 @@ object WeekAlignment {
         currentWeek: Int?,
         firstWeek: Int?,
     ): Int = if (needsRealign(resolvedOn, today)) currentWeek(currentWeek, firstWeek) else storedWeek
+
+    /**
+     * 某个**日期**属于第几教学周；落在学期周次之外（寒暑假、开学前）返回 null。
+     *
+     * 用途有两个，都是真机上会碰到的事：
+     *  · 课表页判断"今天该显示第几周"；
+     *  · 学校给的记录**只有日期、没有教学周号**时（临时补课就常这样）由日期反推，
+     *    否则那条补课永远进不了周网格，只能在"今天"里按日期看到。
+     *
+     * 对齐到周首再算，这样学期起始日是周中某天也不会整体错一周。
+     */
+    fun indexOf(
+        startDate: LocalDate?,
+        weekStartOnSunday: Boolean,
+        weekIndices: List<Int>,
+        date: LocalDate,
+    ): Int? {
+        if (startDate == null) return null
+        val days = ChronoUnit.DAYS.between(
+            alignToWeekStart(startDate, weekStartOnSunday),
+            alignToWeekStart(date, weekStartOnSunday),
+        )
+        if (days < 0) return null
+        val idx = (days / 7).toInt() + 1
+        return if (idx in weekIndices) idx else null
+    }
+
+    private fun alignToWeekStart(date: LocalDate, sundayStart: Boolean): LocalDate {
+        val target = if (sundayStart) DayOfWeek.SUNDAY else DayOfWeek.MONDAY
+        val diff = ((date.dayOfWeek.value - target.value) + 7) % 7
+        return date.minusDays(diff.toLong())
+    }
 }

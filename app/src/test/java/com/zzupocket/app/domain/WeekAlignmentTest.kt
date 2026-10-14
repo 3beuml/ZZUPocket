@@ -104,4 +104,56 @@ class WeekAlignmentTest {
         assertFalse(WeekAlignment.needsRealign(resolvedOn = monday, today = monday))
         assertTrue(WeekAlignment.needsRealign(resolvedOn = monday, today = monday.plusDays(1)))
     }
+
+    // ── 日期 → 教学周（补课靠它进网格）──────────────────────────────────
+
+    private val weeks = (1..18).toList()
+
+    @Test
+    fun `按日期反推教学周`() {
+        val start = LocalDate.of(2026, 9, 7)   // 周一，第 1 周
+        fun idx(d: LocalDate) = WeekAlignment.indexOf(start, false, weeks, d)
+
+        assertEquals(1, idx(start))
+        assertEquals(1, idx(start.plusDays(6)))     // 第 1 周周日
+        assertEquals(2, idx(start.plusDays(7)))     // 第 2 周周一
+        // 补课最常落的周末：第 3 周周六 / 周日
+        assertEquals(3, idx(start.plusDays(14 + 5)))
+        assertEquals(3, idx(start.plusDays(14 + 6)))
+        assertEquals(4, idx(monday))
+    }
+
+    @Test
+    fun `学期开始之前返回 null`() {
+        val start = LocalDate.of(2026, 9, 7)
+        assertEquals(null, WeekAlignment.indexOf(start, false, weeks, start.minusDays(1)))
+    }
+
+    @Test
+    fun `超出学期周次返回 null`() {
+        val start = LocalDate.of(2026, 9, 7)
+        // 第 19 周（学期只有 18 周）—— 假期补课就属于这种，别硬塞进第 18 周
+        assertEquals(null, WeekAlignment.indexOf(start, false, weeks, start.plusWeeks(18)))
+    }
+
+    @Test
+    fun `起始日是周中时对齐到周首算_不会整体错一周`() {
+        // 学校给的 startDate 落在周三，同样按那周的周一算第 1 周
+        val startWed = LocalDate.of(2026, 9, 9)
+        assertEquals(1, WeekAlignment.indexOf(startWed, false, weeks, LocalDate.of(2026, 9, 13)))
+        assertEquals(2, WeekAlignment.indexOf(startWed, false, weeks, LocalDate.of(2026, 9, 14)))
+    }
+
+    @Test
+    fun `按周日开学时以周日为周首`() {
+        val start = LocalDate.of(2026, 9, 6)   // 周日
+        assertEquals(1, WeekAlignment.indexOf(start, true, weeks, LocalDate.of(2026, 9, 12)))
+        assertEquals(2, WeekAlignment.indexOf(start, true, weeks, LocalDate.of(2026, 9, 13)))
+    }
+
+    @Test
+    fun `没有起始日或没有周次列表时返回 null`() {
+        assertEquals(null, WeekAlignment.indexOf(null, false, weeks, monday))
+        assertEquals(null, WeekAlignment.indexOf(LocalDate.of(2026, 9, 7), false, emptyList(), monday))
+    }
 }
