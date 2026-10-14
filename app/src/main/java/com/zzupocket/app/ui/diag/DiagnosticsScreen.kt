@@ -72,6 +72,10 @@ data class DiagState(
     /** 图书馆传输层自检结果 */
     val libReport: String = "",
     val libError: String = "",
+    val probingEasAuth: Boolean = false,
+    /** 教务鉴权自检结果（令牌形态 + 各接口状态码 + 换鉴权形状的对照） */
+    val easAuthReport: String = "",
+    val easAuthError: String = "",
 )
 
 class DiagnosticsViewModel : ViewModel() {
@@ -153,6 +157,35 @@ class DiagnosticsViewModel : ViewModel() {
                     probingLib = false,
                     libReport = result.getOrDefault(""),
                     libError = result.exceptionOrNull()?.let { e -> e.message ?: e.toString() }
+                        .orEmpty(),
+                )
+            }
+        }
+    }
+
+    /**
+     * 教务「鉴权」自检：定位"一卡通正常、唯独教务 401/403"。
+     *
+     * 起因是 2026-10-14 的用户报告 —— 统一身份认证与一卡通都正常，课表却始终
+     * 「教务登录态已失效，请重新登录」，重新登录仍复现。教务网关拒绝时响应体是**空的**
+     * （实测五种鉴权写法一律 401 + content-length 0），本地看不出原因，所以这里把原始事实摊开：
+     * 令牌形态（长度 / exp / alg，**不含令牌值**）、每个在用接口的状态码与响应头、
+     * 以及把同一条令牌换几种鉴权形状时的对照。**结果可以整段复制发给开发者。**
+     */
+    fun runEasAuthProbe() {
+        if (_state.value.probingEasAuth) return
+        _state.update { it.copy(probingEasAuth = true, easAuthReport = "", easAuthError = "") }
+        viewModelScope.launch {
+            // 课表接口要学期 id —— 那正是用户报告里失败的那个接口
+            val semesterId = runCatching {
+                AppGraph.scheduleRepository.semesters().firstOrNull()?.id
+            }.getOrNull()
+            val result = runCatching { AppGraph.easAuthProbe.run(semesterId) }
+            _state.update {
+                it.copy(
+                    probingEasAuth = false,
+                    easAuthReport = result.getOrDefault(""),
+                    easAuthError = result.exceptionOrNull()?.let { e -> e.message ?: e.toString() }
                         .orEmpty(),
                 )
             }
@@ -365,6 +398,64 @@ fun DiagnosticsScreen(
                             SelectionContainer {
                                 Text(
                                     text = state.roomReport,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("教务鉴权自检", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "课表报「教务登录态已失效」、而一卡通正常、重新登录也没用时，跑这个。" +
+                                "它会报告令牌形态（长度 / exp / alg，不含令牌值）、教务各接口的状态码与响应头，" +
+                                "再把同一条令牌换成几种鉴权写法各试一次 —— 只要有一种能过，" +
+                                "就说明问题在请求形态而不是账号或令牌。结果可以整段复制发出来。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { vm.runEasAuthProbe() },
+                                enabled = !state.probingEasAuth,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                if (state.probingEasAuth) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                }
+                                Text(if (state.probingEasAuth) "自检中…" else "开始教务鉴权自检")
+                            }
+                            if (state.easAuthReport.isNotEmpty()) {
+                                val clipboard = LocalClipboardManager.current
+                                OutlinedButton(onClick = {
+                                    clipboard.setText(AnnotatedString(state.easAuthReport))
+                                }) { Text("复制结果") }
+                            }
+                        }
+                        if (state.easAuthError.isNotEmpty()) {
+                            Text(
+                                text = "自检出错：${state.easAuthError}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (state.easAuthReport.isNotEmpty()) {
+                            Text(
+                                "结果（也可以直接说一声，我从 logcat 取，tag = EasAuthProbe）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            SelectionContainer {
+                                Text(
+                                    text = state.easAuthReport,
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontFamily = FontFamily.Monospace,
                                     ),

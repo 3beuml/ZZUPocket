@@ -5,6 +5,7 @@ import com.zzupocket.app.data.auth.AuthRepository
 import com.zzupocket.app.data.auth.CasClient
 import com.zzupocket.app.data.auth.TokenStore
 import com.zzupocket.app.data.db.AppDatabase
+import com.zzupocket.app.data.eas.EasAuthProbe
 import com.zzupocket.app.data.eas.EasClient
 import com.zzupocket.app.data.eas.RoomProbe
 import com.zzupocket.app.data.ecard.EcardClient
@@ -147,6 +148,14 @@ object AppGraph {
     /** 教务「教室」接口自检（P5 开发期用，定位空教室/教室字典接口） */
     val roomProbe: RoomProbe by lazy {
         RoomProbe(easClient, authRepository, db, json)
+    }
+
+    /**
+     * 教务鉴权自检：回答"是我们发得不对，还是服务端不认这个令牌"。
+     * 起因是 2026-10-14 的报告 —— 一卡通正常、唯独教务 401/403，重新登录仍复现。
+     */
+    val easAuthProbe: EasAuthProbe by lazy {
+        EasAuthProbe(authRepository)
     }
 
     val roomRepository: RoomRepository by lazy {

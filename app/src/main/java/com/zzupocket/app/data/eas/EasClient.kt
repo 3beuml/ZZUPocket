@@ -396,8 +396,9 @@ class EasClient(
         }
         response.use {
             val text = it.body?.string().orEmpty()
-            if (it.code == 401 || it.code == 403) {
-                throw AppError.ReLoginRequired("教务登录态已失效，请重新登录")
+            authRejectOf(it.code, "教室占用")?.let { err ->
+                Log.w(TAG_AUTH, "教务拒绝：HTTP ${it.code} /room/place/rooms（响应体 ${text.length} 字节）")
+                throw err
             }
             if (!it.isSuccessful) {
                 throw AppError.Server(it.code, "教室查询失败（HTTP ${it.code}）：${serverMessageOf(text)}")
@@ -471,8 +472,11 @@ class EasClient(
 
         response.use {
             val text = it.body?.string().orEmpty()
-            if (it.code == 401 || it.code == 403) {
-                throw AppError.ReLoginRequired("教务登录态已失效，请重新登录")
+            // 教务网关拒绝时响应体是**空的**（实测：不带鉴权/裸令牌/Bearer/cookie/X-Id-Token
+            // 五种写法一律 401 + content-length 0），所以这里只留状态码与路径供 logcat 取证。
+            authRejectOf(it.code, what)?.let { err ->
+                Log.w(TAG_AUTH, "教务拒绝：HTTP ${it.code} ${url.substringAfter("zzu.edu.cn", url)}（响应体 ${text.length} 字节）")
+                throw err
             }
             if (!it.isSuccessful) throw AppError.Server(it.code, "教务返回 HTTP ${it.code}（$what）")
 
@@ -496,7 +500,31 @@ class EasClient(
 
         /** 教室占用的 activityType 分布（判断补课有没有被登记成 ScheduleChange） */
         private const val TAG_OCCUPANCY = "RoomOccupancy"
-        private const val JWXT = "https://jwxt.zzu.edu.cn"
+        /** 教务网关根地址；`EasAuthProbe`（鉴权自检）也要用，所以不是 private */
+        internal const val JWXT = "https://jwxt.zzu.edu.cn"
+
+        /** logcat 里取「教务拒绝了什么」的记录（只含状态码与路径，不含令牌值） */
+        private const val TAG_AUTH = "EasAuth"
+
+        /**
+         * 401/403 各自的错误；其他状态码返回 null。
+         *
+         * **两者必须分开**：401 = 网关不认这个令牌（重登有意义）；403 = 令牌被识别但无权限
+         * （重登没用，是账号/院系权限问题）。以前合并成同一句文案，等于把最有价值的线索丢掉
+         * —— 2026-10-14 那位同学"一卡通正常、唯独教务报错"的报告，正是靠这个区分才能继续往下查。
+         * 抽成纯函数是为了能单测文案（见 EasAuthRejectTest）。
+         */
+        internal fun authRejectOf(code: Int, what: String): AppError? = when (code) {
+            401 -> AppError.ReLoginRequired(
+                "教务未通过鉴权（HTTP 401 · $what）：登录态可能已被服务端吊销，请重新登录；" +
+                    "重登后若依旧，请到「更多 → 登录状态 → 教务鉴权自检」跑一次并把结果发给开发者。",
+            )
+            403 -> AppError.Server(
+                403,
+                "教务拒绝访问（HTTP 403 · $what）：登录态被识别但无访问权限，多为账号/院系权限问题，重新登录无用。",
+            )
+            else -> null
+        }
 
         /** 教务微服务前缀：教室占用那批接口都在这里 */
         private const val MICRO = "$JWXT/eams-micro-server/api/v1"
