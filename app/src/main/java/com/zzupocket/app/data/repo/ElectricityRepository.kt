@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.data.repo
+package com.zzupocket.app.data.repo
 
 import com.zzupocket.app.core.AppError
 import com.zzupocket.app.data.auth.AuthRepository
@@ -111,8 +111,53 @@ class ElectricityRepository(
 
     // ── 设置 ──────────────────────────────────────────────────────────
 
-    suspend fun settings(): AppSettingsEntity = db.settingsDao().get() ?: AppSettingsEntity()
+    /**
+     * 从学校账户读"**我当前绑定的房间**"（学校电费页顶部显示的就是它）。
+     *
+     * 为什么必须有这条路：内置房间表只覆盖 6 个区域（`99` 主校区 + `101`–`105`），而且是第三方
+     * 整理的**静态快照**；亿达学生公寓（area `106`）这类地方表里根本没有，用户也不可能知道
+     * `106-x--y-z` 这种内部 ID —— 结果就是"学校 App 能查、这里查不了"。
+     * 而 `/utilities/config` 不带房间调用时，服务端会直接返回账号绑定的那个房间（含内部 ID），
+     * 所以**只要用户在学校那边住哪个房间，这里就能读到哪个**，不需要任何房间表。
+     *
+     * ⚠️ 服务端只返回**一个**房间（实测是"照明房间"那一路）。两套表计的宿舍，另一路仍然要用户
+     * 自己设 —— 不要拿它去猜另一个，那是错的概率更大。
+     */
+    suspend fun boundRoom(): EcardClient.EcardLocation {
+        val token = auth.requireEcardAccessToken()
+        return try {
+            ecard.fetchBoundLocation(token)
+        } catch (e: AppError.Server) {
+            if (e.code == 401 || e.code == 403) {
+                throw AppError.ReLoginRequired("一卡通会话已过期，请重新登录")
+            }
+            throw e
+        }
+    }
 
+    /**
+     * 问一层**在线房间树**。
+     *
+     * 与 [boundRoom] 互补：那个只给"当前绑定的一个房间"，这个能把整个学校的房间一层层列出来，
+     * 所以**静态表里没有的楼栋（亿达学生公寓 area `106`、以及主校区里那些没被导出的楼）
+     * 只有这条路能选到** —— 也是学校自己的电费页在用的同一套接口。
+     */
+    suspend fun locationLevel(
+        locationType: String,
+        scope: EcardClient.LocationScope = EcardClient.LocationScope(),
+    ): EcardClient.LocationLevel {
+        val token = auth.requireEcardAccessToken()
+        return try {
+            ecard.fetchLocationLevel(token, locationType, scope)
+        } catch (e: AppError.Server) {
+            if (e.code == 401 || e.code == 403) {
+                throw AppError.ReLoginRequired("一卡通会话已过期，请重新登录")
+            }
+            throw e
+        }
+    }
+
+    suspend fun settings(): AppSettingsEntity = db.settingsDao().get() ?: AppSettingsEntity()
     /**
      * 两个表计实际该用哪两个房间号：**用户设置优先，其次本机已有读数里的房间号**。
      *

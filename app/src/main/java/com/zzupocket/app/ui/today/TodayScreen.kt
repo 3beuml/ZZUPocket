@@ -43,6 +43,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zzupocket.app.data.room.isSingleMeterRoom
 import com.zzupocket.app.domain.EnergyStats
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -126,12 +127,14 @@ fun TodayScreen(
             )
 
             // ④ 近 7 天用电趋势（本机采样推算，断网也能看）
+            //    单表计的楼（亿达）图例写「用电量」，不能拿"照明"顶替
             TodayEnergyTrendCard(
                 bars = state.trend,
                 totalKwh = state.trendTotalKwh,
                 cost = state.trendCost,
                 avgKwh = state.trendAvgKwh,
                 onOpen = onOpenElectricity,
+                singleMeter = isSingleMeterRoom(state.light.roomId) || isSingleMeterRoom(state.ac.roomId),
             )
 
             // ⑤ 校园卡：余额 + 今日消费
@@ -199,17 +202,29 @@ private fun ElectricityCard(
                 return@Column
             }
 
-            // 两套表计分开展示：照明与空调是独立账户，余额不能互相抵用，所以不做合计
-            MeterRow(
-                icon = Icons.Filled.Lightbulb,
-                label = "照明",
-                meter = state.light,
-            )
-            MeterRow(
-                icon = Icons.Filled.AcUnit,
-                label = "空调",
-                meter = state.ac,
-            )
+            // 只有一路表计的楼（亿达学生公寓、洛阳校区、留学生公寓）就显示一行「电量」，
+            // 别摆一个空的空调行；两套表计时才分开显示（独立账户，余额不能互抵，不做合计）
+            val single = (state.light.roomId.isNotBlank() && state.ac.roomId.isBlank()) ||
+                (state.light.roomId.isBlank() && state.ac.roomId.isNotBlank())
+            if (single) {
+                val meter = state.light.takeIf { it.roomId.isNotBlank() } ?: state.ac
+                MeterRow(
+                    icon = Icons.Filled.Bolt,
+                    label = "电量",
+                    meter = meter,
+                )
+            } else {
+                MeterRow(
+                    icon = Icons.Filled.Lightbulb,
+                    label = "照明",
+                    meter = state.light,
+                )
+                MeterRow(
+                    icon = Icons.Filled.AcUnit,
+                    label = "空调",
+                    meter = state.ac,
+                )
+            }
 
             if (state.roomHint.isNotEmpty()) {
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
