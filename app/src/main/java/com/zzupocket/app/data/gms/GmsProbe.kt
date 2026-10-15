@@ -241,37 +241,78 @@ object GmsProbe {
         val sb = StringBuilder()
         sb.appendLine("=== 身份类型自检（判断本科/研究生的依据）===")
         sb.appendLine("接口：$IDENTITY_URL")
+        sb.appendLine("（令牌已在本地校验有效；下面逐种鉴权写法试一遍，并打印服务端原话）")
         sb.appendLine()
+
+        // 顺序有讲究：zzupy 用的是 X-Id-Token，放第一个
         val variants = listOf(
+            "X-Id-Token" to mapOf("X-Id-Token" to token),
+            "X-Id-Token + 浏览器 UA" to mapOf(
+                "X-Id-Token" to token,
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+            ),
             "Authorization: 裸令牌" to mapOf("Authorization" to token),
             "Authorization: Bearer" to mapOf("Authorization" to "Bearer $token"),
-            "X-Id-Token" to mapOf("X-Id-Token" to token),
-            "裸令牌 + X-Id-Token" to mapOf("Authorization" to token, "X-Id-Token" to token),
+            "Cookie: userToken" to mapOf("Cookie" to "userToken=$token"),
+            "X-Id-Token + 裸令牌" to mapOf("X-Id-Token" to token, "Authorization" to token),
         )
         var winner = ""
         for ((label, headers) in variants) {
-            val result = runCatching {
-                val builder = Request.Builder().url(IDENTITY_URL).get()
-                headers.forEach { (k, v) -> builder.header(k, v) }
-                client.newCall(builder.build()).execute().use { r ->
-                    val text = r.body?.string().orEmpty()
-                    Triple(r.code, text.length, text)
-                }
-            }.getOrElse { Triple(0, 0, "网络失败：${it.javaClass.simpleName}") }
-            sb.appendLine("· $label → HTTP ${result.first}，${result.second} 字符")
-            if (result.first in 200..299) {
+            val r = callRaw(client, IDENTITY_URL, headers)
+            sb.appendLine("· $label → HTTP ${r.first}，响应 ${r.second.length} 字符")
+            if (r.second.isNotBlank()) sb.appendLine("    服务端原话：${maskPreview(r.second)}")
+            if (r.first in 200..299) {
                 winner = label
                 sb.appendLine("  ✔ 这个写法可用")
                 sb.appendLine("  字段结构（只列名字与类型）：")
-                shapeOf(result.third).take(40).forEach { sb.appendLine("    $it") }
-                val identity = extractIdentity(result.third)
-                sb.appendLine("  身份类型：${identity ?: "（响应里没找到 identity_type_* —— 把上面字段结构发我）"}")
+                shapeOf(r.second).take(40).forEach { sb.appendLine("    $it") }
+                sb.appendLine("  身份类型：${extractIdentity(r.second) ?: "（没找到 identity_type_* —— 把上面字段结构发我）"}")
                 break
             }
         }
-        if (winner.isEmpty()) sb.appendLine("\n四种写法都没通 —— 把这份结果发我，换别的头再试。")
-        return sb.toString()
+        if (winner.isEmpty()) sb.appendLine("\n✘ 六种写法都没通。")
+
+        // 对照组：已知能用的接口（校园卡余额，本 App 一直在用）。
+        // 它要是也失败 → 说明是令牌/网络的问题；它成功而上面失败 → 说明是 authx 这个接口的鉴权写法不对。
+        sb.appendLine()
+        sb.appendLine("—— 对照组：校园卡余额接口（本 App 一直在用，应成功）——")
+        val control = callRaw(client, PORTAL_SANITY_URL, mapOf("X-Id-Token" to token))
+        sb.appendLine("· X-Id-Token → HTTP ${control.first}，响应 ${control.second.length} 字符")
+        if (control.second.isNotBlank()) sb.appendLine("    服务端原话：${maskPreview(control.second)}")
+        sb.appendLine(
+            when {
+                control.first in 200..299 && winner.isEmpty() ->
+                    "  ✔ 对照组成功、身份接口失败 ⇒ 令牌没问题，是 authx 那接口要的鉴权写法/路径和我猜的不一样"
+                control.first in 200..299 -> "  ✔ 对照组也成功，两者一致"
+                else -> "  ✘ 对照组也失败 ⇒ 先怀疑令牌或网络，而不是 authx 的写法"
+            },
+        )
+
+        val report = sb.toString()
+        runCatching { Log.i(TAG, "IDENTITY\n$report") }
+        return report
     }
+
+    /** 校园卡余额接口：本 App 一直在用，作为"令牌是否可用"的对照组 */
+    private const val PORTAL_SANITY_URL =
+        "https://info.s.zzu.edu.cn/portal-api/v1/thrid-adapter/get-person-info-card-list"
+
+    /** 发一个原始请求，返回 (状态码, 响应体)。任何失败都变成状态码 0 + 说明文本 */
+    private fun callRaw(
+        client: okhttp3.OkHttpClient,
+        url: String,
+        headers: Map<String, String>,
+    ): Pair<Int, String> = runCatching {
+        val builder = Request.Builder().url(url).get()
+        headers.forEach { (k, v) -> builder.header(k, v) }
+        client.newCall(builder.build()).execute().use { r -> r.code to r.body?.string().orEmpty() }
+    }.getOrElse { 0 to "网络失败：${it.javaClass.simpleName} ${it.message.orEmpty().take(80)}" }
+
+    /** 响应体预览：去掉一切可能是令牌的长串，只留可读内容 */
+    private fun maskPreview(text: String): String = text
+        .replace(Regex("[A-Za-z0-9_-]{24,}"), "***")
+        .replace(Regex("\\s+"), " ")
+        .take(200)
 
     /** 只把 identity_type_* 与 roles 挑出来（不含姓名/学号） */
     private fun extractIdentity(text: String): String? = runCatching {

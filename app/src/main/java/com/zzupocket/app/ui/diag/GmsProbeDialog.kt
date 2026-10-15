@@ -48,6 +48,12 @@ import com.zzupocket.app.data.gms.GmsProbe
  * 密码不经过我们，令牌也不用我们保管。
  *
  * 记录原理见 [GmsProbe]：向页面注入脚本钩住 fetch / XHR，通过 console.log 回传。
+ *
+ * ## 两个踩过的坑（别再改回去）
+ * 1. **按钮必须放顶部**。放底部时，用户一输入（键盘弹起）按钮就被顶出屏幕，点不到。
+ * 2. **`loadUrl` 必须等视图测量出高度之后再调**。在 `factory` 里直接 load，页面会按
+ *    "视口高度=0"完成首屏布局，整条高度链塌成 0，表现是画面异常/空白
+ *    （LibraryScreen 里踩过同一个坑，注释也在那儿）。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -60,6 +66,7 @@ fun GmsProbeDialog(
     var shownUrl by remember { mutableStateOf(GmsProbe.ENTRY) }
     var hitCount by remember { mutableIntStateOf(0) }
     var navCount by remember { mutableIntStateOf(0) }
+    var ready by remember { mutableStateOf(false) }
 
     fun inject(view: WebView?) {
         view?.evaluateJavascript(GmsProbe.JS_HOOK, null)
@@ -75,27 +82,57 @@ fun GmsProbeDialog(
     ) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // 顶部：说明 + 当前进度
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text("研究生系统自检", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "用你自己的研究生账号登录（密码在学校自己的页面上输，我们不接触）。" +
-                            "登录后进「课表 / 我的课程」页面翻一下，然后点下面的「生成报告」。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "已记录请求 $hitCount 条 · 跳转 $navCount 次",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
+                // ── 顶部：标题 + 进度 + 按钮（按钮放顶部，键盘弹起也点得到）──────
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("研究生系统自检", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "已记录请求 $hitCount 条 · 跳转 $navCount 次 · ${if (ready) "页面已加载" else "加载中…"}",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "关闭",
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
                     Text(
                         text = shownUrl,
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedButton(
+                            onClick = { inject(webRef.value) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("补注入") }
+                        OutlinedButton(
+                            onClick = { webRef.value?.loadUrl(GmsProbe.ENTRY) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("重新加载") }
+                        Button(
+                            onClick = { onReport(recorder.report()) },
+                            modifier = Modifier.weight(1.4f),
+                        ) { Text("生成报告") }
+                    }
+                    Text(
+                        "用你自己的研究生账号登录（密码在学校自己的页面上输）。进去后翻到「课表/我的课程」，" +
+                            "再点「生成报告」。报告里只有接口路径与字段名，不含令牌、姓名、学号。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
 
+                // ── 下方：网页本体 ─────────────────────────────────────────
                 AndroidView(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     factory = { ctx ->
@@ -103,8 +140,26 @@ fun GmsProbeDialog(
                             if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
+                            settings.databaseEnabled = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = true
+                            settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                            // 这个站点入口会在 HTTP/HTTPS 之间跳，不放混合内容会白屏
+                            settings.mixedContentMode =
+                                android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            setBackgroundColor(android.graphics.Color.WHITE)
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+
+                            // ⚠️ 必须等测量出高度再 load（见类注释第 2 条）
+                            fun startOnce(how: String) {
+                                if (ready || width <= 0 || height <= 0) return
+                                ready = true
+                                loadUrl(GmsProbe.ENTRY)
+                            }
+                            addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> startOnce("layout") }
+                            post { startOnce("post") }
+
                             webViewClient = object : WebViewClient() {
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     url?.let {
@@ -113,7 +168,6 @@ fun GmsProbeDialog(
                                         shownUrl = it
                                         snapshotCookies(it)
                                     }
-                                    // 尽早注入：脚本钩子必须在页面自己的 JS 之前装好
                                     inject(view)
                                 }
 
@@ -128,44 +182,18 @@ fun GmsProbeDialog(
                             }
                             webChromeClient = object : WebChromeClient() {
                                 override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
-                                    val line = msg.message()
-                                    if (recorder.recordConsole(line)) {
+                                    if (recorder.recordConsole(msg.message())) {
                                         hitCount = recorder.hitCount()
                                         return true
                                     }
                                     return false
                                 }
                             }
-                            loadUrl(GmsProbe.ENTRY)
                             webRef.value = this
                         }
                     },
-                    update = { it -> webRef.value = it },
+                    update = { webRef.value = it },
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedButton(
-                        onClick = { inject(webRef.value) },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("补注入") }
-                    OutlinedButton(
-                        onClick = {
-                            webRef.value?.let { it.loadUrl(GmsProbe.ENTRY) }
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) { Text("重新加载") }
-                    Button(
-                        onClick = { onReport(recorder.report()) },
-                        modifier = Modifier.weight(1.4f),
-                    ) { Text("生成报告") }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Filled.Close, contentDescription = "关闭", modifier = Modifier.size(22.dp))
-                    }
-                }
             }
         }
     }
