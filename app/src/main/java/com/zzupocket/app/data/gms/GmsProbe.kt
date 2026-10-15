@@ -310,7 +310,9 @@ object GmsProbe {
 
     /** 响应体预览：去掉一切可能是令牌的长串，只留可读内容 */
     private fun maskPreview(text: String): String = text
-        .replace(Regex("[A-Za-z0-9_-]{24,}"), "***")
+        // 阈值取 40：JWT/accessToken 都远长于 40，而异常类名（如
+        // android.os.NetworkOnMainThreadException）在 40 以内，不该被盖掉
+        .replace(Regex("[A-Za-z0-9_-]{40,}"), "***")
         .replace(Regex("\\s+"), " ")
         .take(200)
 
