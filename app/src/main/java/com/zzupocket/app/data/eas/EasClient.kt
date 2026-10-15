@@ -398,7 +398,7 @@ class EasClient(
             val text = it.body?.string().orEmpty()
             authRejectOf(it.code, "教室占用")?.let { err ->
                 Log.w(TAG_AUTH, "教务拒绝：HTTP ${it.code} /room/place/rooms（响应体 ${text.length} 字节）")
-                throw err
+                throw rejectExplained(it.code, "教室占用", userToken, err)
             }
             if (!it.isSuccessful) {
                 throw AppError.Server(it.code, "教室查询失败（HTTP ${it.code}）：${serverMessageOf(text)}")
@@ -452,6 +452,35 @@ class EasClient(
         text.take(200)
     }
 
+    /**
+     * 教务拒绝时的「说明版」错误 —— 分清"令牌问题"与"这个账号本来就没角色"。
+     *
+     * 401/403 有两种原因，处置方式正好相反：
+     *  - 令牌被吊销 / 无效 → 重新登录有用；
+     *  - **这个账号在本科教务里没有角色**（研究生归研究生院管）→ 重登一万次也没用。
+     * 用户报告里的"重登死循环"就出在这里（2026-10-14 issue #2）。
+     *
+     * 所以这里用**同一枚令牌**顺手探一次本科教务的用户信息接口（校外可达），
+     * 判明学籍层次再决定话术。探针失败（网络问题等）**不猜**，退回原来的提示。
+     */
+    private suspend fun rejectExplained(
+        code: Int,
+        what: String,
+        userToken: String,
+        fallback: AppError,
+    ): AppError {
+        if (code != 401 && code != 403) return fallback
+        val probe = runCatching { UndergradIdentityProbe.probe(userToken, client) }.getOrNull() ?: return fallback
+        return when (probe.track) {
+            com.zzupocket.app.domain.AcademicTrack.NOT_UNDERGRAD -> AppError.Server(
+                code,
+                "你的账号在本科教务里没有课表权限（$what · HTTP $code）。研究生的课表在研究生院那套系统里，" +
+                    "本版还没接入 —— 重新登录也没用，这不是你的登录态问题。电费、校园卡不受影响。",
+            )
+            else -> fallback
+        }
+    }
+
     private suspend inline fun <reified T> getData(
         url: String,
         userToken: String,
@@ -476,7 +505,7 @@ class EasClient(
             // 五种写法一律 401 + content-length 0），所以这里只留状态码与路径供 logcat 取证。
             authRejectOf(it.code, what)?.let { err ->
                 Log.w(TAG_AUTH, "教务拒绝：HTTP ${it.code} ${url.substringAfter("zzu.edu.cn", url)}（响应体 ${text.length} 字节）")
-                throw err
+                throw rejectExplained(it.code, what, userToken, err)
             }
             if (!it.isSuccessful) throw AppError.Server(it.code, "教务返回 HTTP ${it.code}（$what）")
 
