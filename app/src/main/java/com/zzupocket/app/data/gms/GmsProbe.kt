@@ -244,6 +244,24 @@ object GmsProbe {
         sb.appendLine("（令牌已在本地校验有效；下面逐种鉴权写法试一遍，并打印服务端原话）")
         sb.appendLine()
 
+        // ── 一、本科教务探测：判断学籍层次最可靠的一条，而且校外也能用 ──────
+        // 2026-10-15 实测：authx 那个身份接口的域名在手机网络上**解析不出来**
+        // （UnknownHostException），它只在校园网内可用；而 jwxt 校外可达。
+        // 所以真正可用的信号是"本科教务认不认这个令牌"。
+        sb.appendLine("——— 一、本科教务探测（判定学籍层次，校外可用）———")
+        val eams = callRaw(client, EAMS_USER_INFO, mapOf("Authorization" to token))
+        sb.appendLine("· GET /eams-door/api/v1/portal/home/user-info")
+        sb.appendLine("  → HTTP ${eams.first}" + if (eams.second.isNotBlank()) "，服务端原话：${maskPreview(eams.second)}" else "")
+        sb.appendLine(
+            "  判定：" + when (eams.first) {
+                in 200..299 -> "本科教务可用 ⇒ 视为本科生"
+                401, 403 -> "本科教务拒绝 ⇒ 视为非本科生（研究生等）⇒ 课表要走研究生那套"
+                else -> "状态码 ${eams.first}，暂无法判定"
+            },
+        )
+        sb.appendLine()
+        sb.appendLine("——— 二、身份类型接口（只在校园网内可解析，校外必然 UnknownHost）———")
+
         // 顺序有讲究：zzupy 用的是 X-Id-Token，放第一个
         val variants = listOf(
             "X-Id-Token" to mapOf("X-Id-Token" to token),
@@ -296,6 +314,10 @@ object GmsProbe {
     /** 校园卡余额接口：本 App 一直在用，作为"令牌是否可用"的对照组 */
     private const val PORTAL_SANITY_URL =
         "https://info.s.zzu.edu.cn/portal-api/v1/thrid-adapter/get-person-info-card-list"
+
+    /** 本科教务的用户信息接口：校外可达。认它就能判定"是不是本科" */
+    private const val EAMS_USER_INFO =
+        "https://jwxt.zzu.edu.cn/eams-door/api/v1/portal/home/user-info"
 
     /** 发一个原始请求，返回 (状态码, 响应体)。任何失败都变成状态码 0 + 说明文本 */
     private fun callRaw(

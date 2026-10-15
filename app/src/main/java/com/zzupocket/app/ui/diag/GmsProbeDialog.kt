@@ -160,6 +160,19 @@ fun GmsProbeDialog(
                             addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> startOnce("layout") }
                             post { startOnce("post") }
 
+                            // 周期性补注入：实测只注入一次容易漏（页面自己的脚本可能在
+                            // onPageStarted 之后才装上 XHR，SPA/iframe 更明显），
+                            // 所以每隔 1.5 秒补一次。hook 里有 __gmsProbeInstalled 幂等保护，
+                            // 重复注入不会重复上报。
+                            val wv = this
+                            val reinject = object : Runnable {
+                                override fun run() {
+                                    inject(wv)
+                                    wv.postDelayed(this, 1500)
+                                }
+                            }
+                            postDelayed(reinject, 800)
+
                             webViewClient = object : WebViewClient() {
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     url?.let {

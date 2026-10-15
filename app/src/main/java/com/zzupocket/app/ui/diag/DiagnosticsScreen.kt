@@ -556,7 +556,7 @@ fun DiagnosticsScreen(
                                     )
                                     Spacer(Modifier.size(8.dp))
                                 }
-                                Text("身份类型自检")
+                                Text("学籍探测")
                             }
                         }
                         if (state.gmsError.isNotEmpty()) {
