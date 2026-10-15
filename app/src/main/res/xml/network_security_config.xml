@@ -6,12 +6,17 @@
   443 被校园网边界防火墙拒绝。Android 从 9 开始默认禁止明文 HTTP，不做这个例外
   就直接连接失败。
 
-  ⚠️ 只对**这一个域名**放行，其他一律仍然强制 HTTPS（教务/一卡通/CAS 不受影响）。
+  ⚠️ 只对下面这两个域名放行，其他一律仍然强制 HTTPS（教务/一卡通/CAS 不受影响）。
   这也是"最小暴露面"：明文的代价是首次登录凭据会明文经过网络（学校侧限制，我们改不了），
   所以我们的策略是**只存会话 cookie、绝不存密码**。
+
+  第二个域名是研究生系统：它的入口 `/stu` 自己会在 HTTP 与 HTTPS 之间来回跳
+  （实测 `https://…/stu` → 302 → `http://…/stu/`），不放行明文的话
+  WebView 在跳转途中会直接失败。
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">order.lib.zzu.edu.cn</domain>
+        <domain includeSubdomains="true">gmsstu.zzu.edu.cn</domain>
     </domain-config>
 </network-security-config>

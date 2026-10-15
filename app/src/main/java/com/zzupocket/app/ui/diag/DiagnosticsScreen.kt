@@ -42,7 +42,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.BuildConfig
 import com.zzupocket.app.core.AppGraph
+import com.zzupocket.app.core.net.HttpClients
 import com.zzupocket.app.data.auth.AuthRepository
+import com.zzupocket.app.data.gms.GmsProbe
 import com.zzupocket.app.data.lib.LibProbe
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -76,6 +78,12 @@ data class DiagState(
     /** 教务鉴权自检结果（令牌形态 + 各接口状态码 + 换鉴权形状的对照） */
     val easAuthReport: String = "",
     val easAuthError: String = "",
+    val probingGms: Boolean = false,
+    /** 研究生系统探测报告（登录器记录到的接口）或身份类型自检结果 */
+    val gmsReport: String = "",
+    val gmsError: String = "",
+    /** 研究生系统登录器是否打开（状态放这儿，转屏/重组都不丢） */
+    val gmsDialogOpen: Boolean = false,
 )
 
 class DiagnosticsViewModel : ViewModel() {
@@ -190,6 +198,43 @@ class DiagnosticsViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    /**
+     * 身份类型自检：「按学籍自动路由数据源」的前提 —— 先确认学校认证服务会不会告诉我们
+     * 这个账号是本科还是研究生。四种鉴权写法都试一遍，哪种能用一目了然。
+     */
+    fun runIdentityCheck() {
+        if (_state.value.probingGms) return
+        _state.update { it.copy(probingGms = true, gmsReport = "", gmsError = "") }
+        viewModelScope.launch {
+            val result = runCatching {
+                val token = auth.requireCasToken()
+                GmsProbe.identityCheck(token, HttpClients.eas)
+            }
+            _state.update {
+                it.copy(
+                    probingGms = false,
+                    gmsReport = result.getOrDefault(""),
+                    gmsError = result.exceptionOrNull()?.let { e -> e.message ?: e.toString() }
+                        .orEmpty(),
+                )
+            }
+        }
+    }
+
+    fun openGmsDialog() = _state.update { it.copy(gmsDialogOpen = true) }
+
+    fun closeGmsDialog() = _state.update { it.copy(gmsDialogOpen = false) }
+
+    /**
+     * WebView 登录器把报告交回来。
+     *
+     * 报告由 [GmsProbe.Recorder] 生成：只有请求路径、参数名、响应字段名与类型，
+     * **不含任何字段值与令牌** —— 因为这份东西是要贴到公开 issue 上的。
+     */
+    fun acceptGmsReport(text: String) = _state.update {
+        it.copy(gmsDialogOpen = false, gmsReport = text, gmsError = "")
     }
 
     fun logout(onDone: () -> Unit) {
@@ -461,6 +506,79 @@ fun DiagnosticsScreen(
                                     ),
                                 )
                             }
+                        }
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("研究生系统自检（探测）", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "研究生课表不在本科教务里，而在研究生院那套系统（它走学校统一身份认证跳转）。" +
+                                "我们这边没有研究生账号，所以只能借一次真实会话来摸接口：" +
+                                "点「打开研究生系统」会在 App 内打开它，用你自己的账号登录" +
+                                "（密码在学校自己的页面上输，我们不接触），登录后进课表页翻一下，" +
+                                "再点「生成报告」。报告里只有接口路径与字段名，不含任何令牌、姓名、学号。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { vm.openGmsDialog() },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("打开研究生系统") }
+                            OutlinedButton(
+                                onClick = { vm.runIdentityCheck() },
+                                enabled = !state.probingGms,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                if (state.probingGms) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                }
+                                Text("身份类型自检")
+                            }
+                        }
+                        if (state.gmsError.isNotEmpty()) {
+                            Text(
+                                text = "自检出错：${state.gmsError}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (state.gmsReport.isNotEmpty()) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "结果（可直接复制；也可以说一声，我从 logcat 取，tag = GmsProbe）",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                val clipboard = LocalClipboardManager.current
+                                OutlinedButton(onClick = {
+                                    clipboard.setText(AnnotatedString(state.gmsReport))
+                                }) { Text("复制结果") }
+                            }
+                            SelectionContainer {
+                                Text(
+                                    text = state.gmsReport,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                    ),
+                                )
+                            }
+                        }
+                        if (state.gmsDialogOpen) {
+                            GmsProbeDialog(
+                                onDismiss = { vm.closeGmsDialog() },
+                                onReport = { vm.acceptGmsReport(it) },
+                            )
                         }
                     }
                 }
