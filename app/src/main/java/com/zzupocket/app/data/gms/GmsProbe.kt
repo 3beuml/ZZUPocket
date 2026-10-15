@@ -260,35 +260,9 @@ object GmsProbe {
             },
         )
         sb.appendLine()
-        sb.appendLine("——— 二、身份类型接口（只在校园网内可解析，校外必然 UnknownHost）———")
-
-        // 顺序有讲究：zzupy 用的是 X-Id-Token，放第一个
-        val variants = listOf(
-            "X-Id-Token" to mapOf("X-Id-Token" to token),
-            "X-Id-Token + 浏览器 UA" to mapOf(
-                "X-Id-Token" to token,
-                "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
-            ),
-            "Authorization: 裸令牌" to mapOf("Authorization" to token),
-            "Authorization: Bearer" to mapOf("Authorization" to "Bearer $token"),
-            "Cookie: userToken" to mapOf("Cookie" to "userToken=$token"),
-            "X-Id-Token + 裸令牌" to mapOf("X-Id-Token" to token, "Authorization" to token),
-        )
-        var winner = ""
-        for ((label, headers) in variants) {
-            val r = callRaw(client, IDENTITY_URL, headers)
-            sb.appendLine("· $label → HTTP ${r.first}，响应 ${r.second.length} 字符")
-            if (r.second.isNotBlank()) sb.appendLine("    服务端原话：${maskPreview(r.second)}")
-            if (r.first in 200..299) {
-                winner = label
-                sb.appendLine("  ✔ 这个写法可用")
-                sb.appendLine("  字段结构（只列名字与类型）：")
-                shapeOf(r.second).take(40).forEach { sb.appendLine("    $it") }
-                sb.appendLine("  身份类型：${extractIdentity(r.second) ?: "（没找到 identity_type_* —— 把上面字段结构发我）"}")
-                break
-            }
-        }
-        if (winner.isEmpty()) sb.appendLine("\n✘ 六种写法都没通。")
+        sb.appendLine("——— 二、学校身份接口：已跳过 ———")
+        sb.appendLine("  authx-service.s.zzu.edu.cn 只在校园网内可解析，校外必然 UnknownHostException，")
+        sb.appendLine("  所以学籍判定改用上面「本科教务探测」的结果，不再依赖它（免得报告里全是假错误）。")
 
         // 对照组：已知能用的接口（校园卡余额，本 App 一直在用）。
         // 它要是也失败 → 说明是令牌/网络的问题；它成功而上面失败 → 说明是 authx 这个接口的鉴权写法不对。
@@ -298,11 +272,10 @@ object GmsProbe {
         sb.appendLine("· X-Id-Token → HTTP ${control.first}，响应 ${control.second.length} 字符")
         if (control.second.isNotBlank()) sb.appendLine("    服务端原话：${maskPreview(control.second)}")
         sb.appendLine(
-            when {
-                control.first in 200..299 && winner.isEmpty() ->
-                    "  ✔ 对照组成功、身份接口失败 ⇒ 令牌没问题，是 authx 那接口要的鉴权写法/路径和我猜的不一样"
-                control.first in 200..299 -> "  ✔ 对照组也成功，两者一致"
-                else -> "  ✘ 对照组也失败 ⇒ 先怀疑令牌或网络，而不是 authx 的写法"
+            if (control.first in 200..299) {
+                "  ✔ 令牌本身可用（校园卡数据真的取回来了）⇒ 上面对本科教务的判定可信"
+            } else {
+                "  ✘ 对照组也失败 ⇒ 先怀疑令牌或网络，上面那条判定先别当真"
             },
         )
 
@@ -330,10 +303,24 @@ object GmsProbe {
         client.newCall(builder.build()).execute().use { r -> r.code to r.body?.string().orEmpty() }
     }.getOrElse { 0 to "网络失败：${it.javaClass.simpleName} ${it.message.orEmpty().take(80)}" }
 
-    /** 响应体预览：去掉一切可能是令牌的长串，只留可读内容 */
+    /**
+     * 把 JSON 里的敏感字段值盖掉。
+     *
+     * ⚠️ 2026-10-15 踩过：只按"长度 ≥24 的字母数字"打码是不够的 —— 中文姓名（2-4 字）和
+     * 12 位学号都漏了过去，而这份报告是要贴到公开 issue 上的。所以改成**先按字段名盖**，
+     * 再兜底盖长数字串与长令牌串。
+     */
+    private val SENSITIVE_JSON = Regex(
+        "\"(nameZh|nameEn|name|realName|account|uid|userId|studentId|xh|phone|mobile|email|idCard|cardNo|orgName|collegeName)\"\\s*:\\s*\"[^\"]*\"",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** 响应体预览：先按字段名打码，再兜底盖掉长数字与长令牌串 */
     private fun maskPreview(text: String): String = text
-        // 阈值取 40：JWT/accessToken 都远长于 40，而异常类名（如
-        // android.os.NetworkOnMainThreadException）在 40 以内，不该被盖掉
+        .replace(SENSITIVE_JSON) { m -> "\"${m.groupValues[1]}\":\"***\"" }
+        // 学号、卡号、身份证这类长数字串
+        .replace(Regex("\\d{8,}"), "***")
+        // JWT / accessToken 这类长串（阈值 40：异常类名在 40 以内，不该被盖）
         .replace(Regex("[A-Za-z0-9_-]{40,}"), "***")
         .replace(Regex("\\s+"), " ")
         .take(200)
