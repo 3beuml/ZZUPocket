@@ -220,7 +220,12 @@ class DiagnosticsViewModel : ViewModel() {
         viewModelScope.launch {
             val result = runCatching {
                 val token = auth.requireCasToken()
-                GmsProbe.identityCheck(token, HttpClients.eas)
+                // ⚠️ 必须在 IO 线程：GmsProbe.identityCheck 里是同步 OkHttp 调用，
+                // 放在主线程会抛 NetworkOnMainThreadException（2026-10-15 踩过：
+                // 六种写法全报"网络失败"，其实是这个）。
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    GmsProbe.identityCheck(token, HttpClients.eas)
+                }
             }
             _state.update {
                 it.copy(
