@@ -57,6 +57,16 @@ import java.util.Locale
 
 private val FULL_FMT = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 
+/**
+ * 正式包（release）是否也显示下面那批「自检」卡片。
+ *
+ * 为什么要有这个开关：这些卡片原来只挂在 `BuildConfig.DEBUG` 上，于是**用户装的正式包里
+ * 根本看不到它们** —— 而它们恰恰是给用户报障时用的（2026-10-15 踩过：给用户发了个"带自检
+ * 入口"的包，结果他打开诊断页什么自检都没有）。这些都是只读诊断，不会改任何数据，
+ * 正式包显示是安全的；哪天不想给用户看，把这里改回 false 即可。
+ */
+private const val SHOW_PROBES_IN_RELEASE = true
+
 data class DiagState(
     val status: AuthRepository.TokenStatus? = null,
     val lightRoomId: String = "",
@@ -335,7 +345,7 @@ fun DiagnosticsScreen(
             // 这三块是开发期用来摸接口字段结构的（会把状态码/字段名打出来），普通用户用不到，
             // 还会把内部接口名摊在界面上，所以 release 包不显示。
             // 结论都已整理进 docs/interfaces/，需要时用 debug 包跑一遍即可。
-            if (BuildConfig.DEBUG) {
+            if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("一卡通接口自检", style = MaterialTheme.typography.titleSmall)
@@ -510,6 +520,8 @@ fun DiagnosticsScreen(
                     }
                 }
 
+                // 研究生系统探测卡片。放在图书馆自检上面一张。
+                // 背景：研究生课表不在本科教务里，而我们没有研究生账号，只能借一次真实会话摸接口。
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("研究生系统自检（探测）", style = MaterialTheme.typography.titleSmall)
