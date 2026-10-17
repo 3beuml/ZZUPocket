@@ -80,15 +80,35 @@ class GmsScheduleSource(
         return gms.expandWeeks(sessions)
     }
 
-    /** 本周课表（服务端按当前周返回，扁平列表）；元素是服务端原始 DTO，接 UI 前再映射 */
-    suspend fun currentWeek(): List<GmsClient.WeekLessonDto> {
+    /**
+     * 本周课表（服务端按当前周返回）。
+     *
+     * 本周接口给的是「7 个天槽，每个槽里一个课列表」，字段是 `KCMC`（课程名）/`ZS`（周次节次文本，
+     * 如「第7节,第8节」）/`DZ`（地点）—— 星期来自**天槽下标**，节次要自己从 `ZS` 里取。
+     * 所以这里压平成 [GradLesson]，UI 直接能用。
+     */
+    suspend fun currentWeek(): List<GradLesson> {
         requireSession()
-        return gms.fetchWeekTable().bzkb.flatMap { it.bzkb }
+        return gms.fetchWeekTable().bzkb.flatMapIndexed { index, day ->
+            day.bzkb.mapNotNull { l ->
+                val period = PERIOD_RE.find(l.ZS.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
+                    ?: return@mapNotNull null
+                val name = l.KCMC.trim().ifEmpty { return@mapNotNull null }
+                GradLesson(
+                    weekday = (index + 1).coerceIn(1, 7),
+                    period = period,
+                    courseName = name,
+                )
+            }
+        }
     }
 
+    /** 没会话就直接给出"该去哪登录"的提示，别让上层拼文案 */
     private fun requireSession() {
         if (!hasSession()) {
-            throw AppError.ReLoginRequired("研究生教务需要先登录一次：在「更多 → 登录状态 → 研究生系统自检」里完成")
+            throw AppError.ReLoginRequired(
+                "研究生教务需要先登录一次：在课表页点「登录研究生系统」完成登录",
+            )
         }
     }
 
@@ -97,5 +117,22 @@ class GmsScheduleSource(
 
         /** 落库时用这个来源名（与本科的 `"eas"` 区分，课表页按它标注来源） */
         const val SOURCE = "gms"
+
+        /** 「第7节」→ 7 */
+        private val PERIOD_RE = Regex("第\\s*(\\d{1,2})\\s*节")
     }
 }
+
+/**
+ * 研究生课表的**扁平展示单元**（本周视图用）。
+ *
+ * 为什么单独建一个模型：研究生系统那边的原始 DTO 把星期放在"天槽下标"里、节次塞在
+ * `ZS` 文本里（见 `GmsScheduleSource.currentWeek()`），直接给 UI 会很难读。
+ */
+data class GradLesson(
+    /** 1..7 = 周一..周日 */
+    val weekday: Int,
+    /** 第几节（1 起） */
+    val period: Int,
+    val courseName: String,
+)

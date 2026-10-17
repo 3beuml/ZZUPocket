@@ -167,8 +167,17 @@ fun ScheduleScreen(
                 state.weeks.isEmpty() -> NoSemesterBlock(
                     loggedIn = state.loggedIn,
                     loading = state.loading,
+                    gradMode = state.gradMode,
+                    gmsLessons = state.gmsLessons,
+                    gmsBusy = state.gmsBusy,
+                    gmsError = state.gmsError,
+                    gmsDialogOpen = state.gmsDialogOpen,
                     onLogin = onOpenLogin,
                     onRefresh = vm::refresh,
+                    onGmsLogin = vm::openGmsLogin,
+                    onGmsRefresh = vm::loadGmsWeek,
+                    onGmsDialogDismiss = vm::closeGmsLogin,
+                    onGmsAdopt = vm::adoptGmsSession,
                 )
 
                 else -> {
@@ -654,32 +663,102 @@ private fun Modifier.dashedBorder(
 private fun NoSemesterBlock(
     loggedIn: Boolean,
     loading: Boolean,
+    gradMode: Boolean,
+    gmsLessons: List<com.zzupocket.app.data.gms.GradLesson>,
+    gmsBusy: Boolean,
+    gmsError: String?,
+    gmsDialogOpen: Boolean,
     onLogin: () -> Unit,
     onRefresh: () -> Unit,
+    onGmsLogin: () -> Unit,
+    onGmsRefresh: () -> Unit,
+    onGmsDialogDismiss: () -> Unit,
+    onGmsAdopt: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        if (loading) {
-            CircularProgressIndicator(modifier = Modifier.size(28.dp))
-            Spacer(Modifier.height(12.dp))
-            Text("正在获取课表…", style = MaterialTheme.typography.bodyMedium)
-        } else if (!loggedIn) {
-            Text("登录后查看课表", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onLogin) {
-                Icon(Icons.Filled.Login, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(8.dp))
-                Text("登录")
+        when {
+            // 研究生：本科教务对这个账号没有角色，课表在研究生院那套系统里。
+            // 这里显示的是「本周课表」—— 那个接口由服务端按当前周返回，所以不需要日期。
+            gradMode -> {
+                Text("研究生课表", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "你的账号在本科教务里没有课表权限 —— 研究生课表在研究生院系统里。" +
+                        "登录用的是学校统一身份认证，密码输在学校自己的页面上。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(14.dp))
+                when {
+                    gmsBusy -> CircularProgressIndicator(modifier = Modifier.size(26.dp))
+                    gmsLessons.isEmpty() -> Button(onClick = onGmsLogin) { Text("登录研究生系统") }
+                    else -> {
+                        gmsLessons
+                            .sortedWith(compareBy({ it.weekday }, { it.period }))
+                            .forEach { l ->
+                                Text(
+                                    "周${weekdayZh(l.weekday)} · 第${l.period}节 · ${l.courseName}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(onClick = onGmsRefresh) { Text("刷新本周课表") }
+                    }
+                }
+                if (gmsError != null) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        gmsError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (gmsDialogOpen) {
+                    com.zzupocket.app.ui.diag.GmsProbeDialog(
+                        onDismiss = onGmsDialogDismiss,
+                        onReport = { onGmsAdopt() },
+                    )
+                }
             }
-        } else {
-            Text("暂时没有课表数据", style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onRefresh) { Text("重新获取") }
+
+            loading -> {
+                CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                Spacer(Modifier.height(12.dp))
+                Text("正在获取课表…", style = MaterialTheme.typography.bodyMedium)
+            }
+
+            !loggedIn -> {
+                Text("登录后查看课表", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onLogin) {
+                    Icon(Icons.Filled.Login, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("登录")
+                }
+            }
+
+            else -> {
+                Text("暂时没有课表数据", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = onRefresh) { Text("重新获取") }
+            }
         }
     }
+}
+
+/** 1..7 → 一..日 */
+private fun weekdayZh(d: Int): String = when (d) {
+    1 -> "一"
+    2 -> "二"
+    3 -> "三"
+    4 -> "四"
+    5 -> "五"
+    6 -> "六"
+    else -> "日"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
