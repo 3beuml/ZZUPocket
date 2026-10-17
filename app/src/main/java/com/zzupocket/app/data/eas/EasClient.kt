@@ -475,7 +475,8 @@ class EasClient(
             com.zzupocket.app.domain.AcademicTrack.NOT_UNDERGRAD -> AppError.Server(
                 code,
                 "你的账号在本科教务里没有课表权限（$what · HTTP $code）。研究生的课表在研究生院那套系统里，" +
-                    "本版还没接入 —— 重新登录也没用，这不是你的登录态问题。电费、校园卡不受影响。",
+                    "需要在课表页单独登录一次（点「登录研究生系统」）；重新登录本科教务没用。" +
+                    "电费、校园卡不受影响。",
             )
             else -> fallback
         }

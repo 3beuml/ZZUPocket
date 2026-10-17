@@ -142,7 +142,10 @@ fun ScheduleScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            state.error?.let { err ->
+            // 研究生账号在本科教务里本来就没有角色：那条 401/403 说明对他是噪音，
+            // 而且与下面的「研究生课表」区块自相矛盾（一边说没权限、一边请他登录研究生系统）。
+            // 切到研究生视图后不再显示这条错误；研究生链路的错误由 grad 区块自己的 gmsError 负责。
+            state.error?.takeIf { !state.gradMode }?.let { err ->
                 Text(
                     text = err,
                     style = MaterialTheme.typography.bodySmall,
@@ -178,6 +181,7 @@ fun ScheduleScreen(
                     onGmsRefresh = vm::loadGmsWeek,
                     onGmsDialogDismiss = vm::closeGmsLogin,
                     onGmsAdopt = vm::adoptGmsSession,
+                    onGradFallback = vm::useGradSchedule,
                 )
 
                 else -> {
@@ -674,6 +678,7 @@ private fun NoSemesterBlock(
     onGmsRefresh: () -> Unit,
     onGmsDialogDismiss: () -> Unit,
     onGmsAdopt: () -> Unit,
+    onGradFallback: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
@@ -746,6 +751,15 @@ private fun NoSemesterBlock(
                 Text("暂时没有课表数据", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
                 Button(onClick = onRefresh) { Text("重新获取") }
+            }
+        }
+
+        // 兜底入口：学籍探测判不出来（校外网络、接口异常等）时，这里是他唯一的出路。
+        // 做成次要的文字按钮放在最下面：本科生课表正常时压根到不了这个页面，不会被打扰。
+        if (!gradMode) {
+            Spacer(Modifier.height(22.dp))
+            TextButton(onClick = onGradFallback) {
+                Text("我是研究生，课表在研究生院系统")
             }
         }
     }
