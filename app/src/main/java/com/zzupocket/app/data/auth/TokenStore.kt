@@ -60,6 +60,11 @@ class TokenStore(context: Context) {
         get() = prefs.getString(KEY_GMS_COOKIE, null)
         set(value) = prefs.edit().putString(KEY_GMS_COOKIE, value).apply()
 
+    /** 上次登录研究生系统的时间（毫秒；0 = 从没登录过）。登录状态卡片展示用 */
+    var gmsCookieAt: Long
+        get() = prefs.getLong(KEY_GMS_COOKIE_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_GMS_COOKIE_AT, value).apply()
+
     /** 上次登录成功的时间，用于诊断页展示 */
     var lastLoginAt: Long
         get() = prefs.getLong(KEY_LAST_LOGIN, 0L)
@@ -77,6 +82,7 @@ class TokenStore(context: Context) {
         private const val KEY_ECARD_REFRESH = "ecard_refresh_token"
         private const val KEY_ECARD_AT = "ecard_token_at"
         private const val KEY_GMS_COOKIE = "gms_cookie"
+        private const val KEY_GMS_COOKIE_AT = "gms_cookie_at"
         private const val KEY_LAST_LOGIN = "last_login_at"
     }
 }
