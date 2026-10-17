@@ -253,87 +253,16 @@ class GmsClient(
     private fun unlogin() = AppError.ReLoginRequired("研究生教务未登录，请先完成账号登录")
 
     /**
-     * 网页 CAS 登录，为这个 client 的 CookieJar 取得 gmsstu 会话。
+     * 会话切换后清掉缓存的会话标识（guid）。
      *
-     * ⚠️ 保守的实验实现：实测会话是浏览器侧完成的，表单字段按 2026-10 页面原文写死；
-     * 密码加密优先浏览器 jsencrypt 形态（PKCS#1 v1.5 纯 base64），失败退 App JWT 同款
-     * `__RSA__` 前缀。真机首跑如果失败，`tools/gms_probe.py` 可以在电脑端逐条复跑定位。
-     *
-     * 流程：GET /stu（302 到 CAS）→ 抠登录页 `execution` → GET /cas/jwt/publicKey →
-     * POST 表单（username / password / execution / _eventId=submit / rememberMe / 指纹空值）→
-     * 302 回 service，OkHttp 自动落 ticket 并收下 gmsstu 会话 Cookie。
+     * 为什么这里没有账号密码登录：研究生系统只认网页 CAS 会话 Cookie（没有 JWT 可用），
+     * 而 App 的底线是「只存令牌、不存密码」。所以登录交给 App 内置 WebView —— 用户在学校
+     * 自己的页面上输密码，我方只把 CookieManager 里的会话 Cookie 经 GmsCookieJar.seed()
+     * 灌进来，之后本类的接口请求会自动带上。切账号或会话过期后调本方法，下次请求重新取 guid。
      */
-    suspend fun login(username: String, password: String) = withContext(Dispatchers.IO) {
-        val entry = executeOrNull(Request.Builder().url(STU_HOME).get().build())
-            ?: throw AppError.Network("无法连接研究生教务")
-        entry.use { landing ->
-            val page = landing.body?.string().orEmpty()
-            if (landing.request.url.host != HOST_CAS) {
-                // 会话已经活着（CAS 直接把我们弹回 /stu/）—— 吃下 guid 完事
-                guid = GUID_RE.find(page)?.groupValues?.get(1)
-                return@use
-            }
-            val loginUrl = landing.request.url.toString()
-            val execution = Regex(EXECUTION_RES).find(page)?.let { m ->
-                m.groupValues[1].ifEmpty { m.groupValues[2] }
-            }
-            if (execution == null) {
-                throw AppError.Parse("CAS 登录页缺少 execution 字段，可能已改版")
-            }
-
-            val key = fetchCasPublicKey()
-            val failures = mutableListOf<String>()
-            for (enc in listOf(rsEncryptBase64(password, key), Crypto.encryptAndEncode(password, key))) {
-                val body = FormBody.Builder()
-                    .add("username", username)
-                    .add("password", enc)
-                    .add("execution", execution)
-                    .add("_eventId", "submit")
-                    .add("rememberMe", "true")
-                    .add("geolocation", "")
-                    .add("fpVisitorId", "")
-                    .add("qrCodeKey", "")
-                    .add("mfaState", "")
-                    .build()
-                val posted = executeOrNull(
-                    Request.Builder().url(loginUrl).post(body).header("Referer", loginUrl).build(),
-                ) ?: throw AppError.Network("无法连接统一认证，请检查网络")
-                posted.use { p ->
-                    val html = p.body?.string().orEmpty()
-                    if (p.request.url.host == HOST_GMS) {
-                        // 登录成功 —— 302 已自动跟随到登录后首页，顺手装上 guid
-                        guid = GUID_RE.find(html)?.groupValues?.get(1)
-                        return@use
-                    }
-                    failures += html.replace(Regex("\\s+"), " ").take(300)
-                }
-            }
-            throw AppError.BadCredentials(
-                failures.firstOrNull { it.isNotBlank() } ?: "研究生教务登录失败（密码不对或触发验证码）",
-            )
-        }
+    fun resetSession() {
+        guid = null
     }
-
-    private suspend fun fetchCasPublicKey(): RSAPublicKey = withContext(Dispatchers.IO) {
-        val response = executeOrNull(Request.Builder().url("$CAS_BASE/cas/jwt/publicKey").get().build())
-            ?: throw AppError.Network("无法连接统一认证")
-        response.use {
-            if (!it.isSuccessful) throw AppError.Server(it.code, "统一认证公钥获取失败（HTTP ${it.code}）")
-            try {
-                Crypto.parseRsaPublicKey(it.body?.string().orEmpty().toByteArray(Charsets.UTF_8))
-            } catch (e: Exception) {
-                throw AppError.Parse("统一认证公钥格式无效", e)
-            }
-        }
-    }
-
-    /** jsencrypt 等价的密码加密形态（纯 base64，无 `__RSA__` 前缀） */
-    private fun rsEncryptBase64(plain: String, key: RSAPublicKey): String {
-        val cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, key)
-        return Base64.getEncoder().encodeToString(cipher.doFinal(plain.toByteArray(Charsets.UTF_8)))
-    }
-
     // ── 内部：单一请求通道（对齐 EasClient.getData 的职责） ───────────────
 
     private suspend fun <T> getData(
@@ -390,10 +319,10 @@ class GmsClient(
                 .replace('=', '_')
         }
 
-        /** 独立 OkHttp client：跟重定向（登录链需要）+ 会话 CookieJar + 与 HttpClients 同一套超时 */
-        fun newClient(): OkHttpClient = OkHttpClient.Builder()
+        /** 独立 OkHttp client：跟重定向（CAS 登录链靠 302）+ 会话 CookieJar + 与 HttpClients 同一套超时 */
+        fun newClient(jar: CookieJar = InMemoryCookieJar()): OkHttpClient = OkHttpClient.Builder()
             .followRedirects(true)
-            .cookieJar(InMemoryCookieJar())
+            .cookieJar(jar)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(25, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
