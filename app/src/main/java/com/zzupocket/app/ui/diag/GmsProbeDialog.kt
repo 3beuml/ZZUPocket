@@ -142,10 +142,13 @@ fun GmsProbeDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        OutlinedButton(
-                            onClick = { inject(webRef.value) },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("补注入") }
+                        // 登录模式下没有探针钩子可注入（inject 直接 return），别放一个点了没反应的按钮
+                        if (!loginMode) {
+                            OutlinedButton(
+                                onClick = { inject(webRef.value) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("补注入") }
+                        }
                         OutlinedButton(
                             onClick = { webRef.value?.loadUrl(entryUrl) },
                             modifier = Modifier.weight(1f),
@@ -153,11 +156,24 @@ fun GmsProbeDialog(
                         OutlinedButton(
                             onClick = {
                                 loadError = null
-                                if (!loginMode) resetSessions()
-                                webRef.value?.loadUrl(com.zzupocket.app.data.gms.GmsProbe.ENTRY)
+                                val wv = webRef.value
+                                if (loginMode) {
+                                    // 登录模式要**真**清一次会话：CAS 上半途而废的会话会让
+                                    // CAS ↔ 研究生系统互相重定向（实测 ERR_TOO_MANY_REDIRECTS），
+                                    // 而按名字 setCookie 空值清理不可靠，只有 removeAllCookies 有效
+                                    // —— 与首屏加载前的处理保持一致。
+                                    val cm = CookieManager.getInstance()
+                                    cm.removeAllCookies {
+                                        cm.flush()
+                                        if (wv != null) wv.post { wv.loadUrl(entryUrl) }
+                                    }
+                                } else {
+                                    resetSessions()
+                                    wv?.loadUrl(com.zzupocket.app.data.gms.GmsProbe.ENTRY)
+                                }
                             },
                             modifier = Modifier.weight(1f),
-                        ) { Text("清会话重试") }
+                        ) { Text(if (loginMode) "重新登录" else "清会话重试") }
                         Button(
                             onClick = { onReport(recorder.report()) },
                             modifier = Modifier.weight(1.4f),
@@ -166,7 +182,8 @@ fun GmsProbeDialog(
                     Text(
                         if (loginMode) {
                             "用你的研究生账号登录 —— 密码在学校自己的页面上输，我们不接触、也不保存。" +
-                                "登录成功、回到研究生系统页面之后，点下面的「完成登录」就能拉课表。"
+                                "登录成功、回到研究生系统页面之后，点下面的「完成登录」就能拉课表。" +
+                                "这页打不开或反复跳转时，点「重新登录」清掉旧会话再试。"
                         } else {
                             "用你自己的研究生账号登录（密码在学校自己的页面上输）。进去后翻到「课表/我的课程」，" +
                                 "再点「生成报告」。报告里只有接口路径与字段名，不含令牌、姓名、学号。"
