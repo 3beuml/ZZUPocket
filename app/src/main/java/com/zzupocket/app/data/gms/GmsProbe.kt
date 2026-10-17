@@ -38,6 +38,18 @@ object GmsProbe {
     /** 研究生系统入口。注意这个站点会在 HTTP/HTTPS 间跳，统一走带斜杠的 HTTPS 入口 */
     const val ENTRY = "https://gmsstu.zzu.edu.cn/stu/"
 
+    /**
+     * 直接打开 CAS 登录页（带 service 参数）——**登录器优先用它**。
+     *
+     * 为什么：从 `/stu` 进会先 302 到 `/cas/login`、再到 `/cas/s/login`、再到 `/cas/a/login`。
+     * 在部分网络下（实测手机蜂窝数据，疑似学校 IPv6/CDN 那条路径）这条链会**无限重定向**，
+     * WebView 报 `ERR_TOO_MANY_REDIRECTS`，界面上就是"网页无法打开"。
+     * 而 `/cas/a/login?service=…` 本身是 200（登录页），从它开始就能绕开中间那两跳；
+     * 登录成功后 CAS 会自动 302 回 service（研究生系统），会话照样建立。
+     */
+    const val CAS_SERVICE_ENTRY =
+        "https://cas.s.zzu.edu.cn/cas/a/login?service=https%3A%2F%2Fgmsstu.zzu.edu.cn%2Fstu%2Fcas"
+
     /** 身份类型接口：学校认证服务自己返回学籍层次（本科生/研究生），是"按学籍路由"的关键 */
     const val IDENTITY_URL = "https://authx-service.zzu.edu.cn/personal/api/v1/personal/me/user"
 

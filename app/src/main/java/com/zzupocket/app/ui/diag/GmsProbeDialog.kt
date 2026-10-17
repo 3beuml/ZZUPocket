@@ -65,12 +65,41 @@ fun GmsProbeDialog(
 ) {
     val recorder = remember { GmsProbe.Recorder() }
     val webRef = remember { mutableStateOf<WebView?>(null) }
-    var shownUrl by remember { mutableStateOf(GmsProbe.ENTRY) }
+    // 登录模式直接从 CAS 登录页进：从 /stu 进在部分网络会无限重定向（见 GmsProbe.CAS_SERVICE_ENTRY 注释）
+    val entryUrl = if (loginMode) GmsProbe.CAS_SERVICE_ENTRY else GmsProbe.ENTRY
+    var shownUrl by remember { mutableStateOf(entryUrl) }
     var hitCount by remember { mutableIntStateOf(0) }
     var navCount by remember { mutableIntStateOf(0) }
     var ready by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
 
+    /**
+     * 只清掉这两个站点的 cookie。
+     *
+     * 为什么需要：上次半途而废的登录会留下 CAS/gmsstu 的旧会话 —— CAS 以为你已登录就把你
+     * 踢回研究生系统，那边又认为没票，再踢回 CAS …… 循环几次后 WebView 报
+     * `ERR_TOO_MANY_REDIRECTS`，表现就是"网页无法打开"（2026-10-17 实测就是这个）。
+     * 不能 removeAllCookies()：那会连图书馆 WebView 的会话一起清掉。
+     */
+    fun clearHostCookies(host: String) {
+        val cm = CookieManager.getInstance()
+        val raw = cm.getCookie("https://$host") ?: return
+        raw.split(';').forEach { part ->
+            val name = part.substringBefore('=').trim()
+            if (name.isNotEmpty()) cm.setCookie("https://$host/", "$name=; Max-Age=0; path=/")
+        }
+        cm.flush()
+    }
+
+    fun resetSessions() {
+        clearHostCookies("cas.s.zzu.edu.cn")
+        clearHostCookies(com.zzupocket.app.data.gms.GmsScheduleSource.HOST)
+        loadError = null
+    }
+
+    /** 登录模式不注入探针钩子：它覆盖 fetch/XHR，登录页用不上，反而可能干扰 CAS 前端流程 */
     fun inject(view: WebView?) {
+        if (loginMode) return
         view?.evaluateJavascript(GmsProbe.JS_HOOK, null)
     }
 
@@ -118,9 +147,17 @@ fun GmsProbeDialog(
                             modifier = Modifier.weight(1f),
                         ) { Text("补注入") }
                         OutlinedButton(
-                            onClick = { webRef.value?.loadUrl(GmsProbe.ENTRY) },
+                            onClick = { webRef.value?.loadUrl(entryUrl) },
                             modifier = Modifier.weight(1f),
                         ) { Text("重新加载") }
+                        OutlinedButton(
+                            onClick = {
+                                loadError = null
+                                if (!loginMode) resetSessions()
+                                webRef.value?.loadUrl(com.zzupocket.app.data.gms.GmsProbe.ENTRY)
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("清会话重试") }
                         Button(
                             onClick = { onReport(recorder.report()) },
                             modifier = Modifier.weight(1.4f),
@@ -148,6 +185,16 @@ fun GmsProbeDialog(
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             settings.databaseEnabled = true
+                            // ⚠️ WebView 的默认 UA 里带 "; wv" 标记（"内嵌浏览器"特征）。
+                            // 实测：同一个 CAS 地址，系统浏览器能打开、我们的 WebView 却报
+                            // ERR_TOO_MANY_REDIRECTS —— 去掉这个标记就恢复了正常浏览器身份。
+                            settings.userAgentString = settings.userAgentString
+                                .replace("; wv", "")
+                                .replace(Regex(" Version/\\d+\\.\\d+"), "")
+                            android.util.Log.i(
+                                com.zzupocket.app.data.gms.GmsProbe.TAG,
+                                "UA=" + settings.userAgentString,
+                            )
                             settings.useWideViewPort = true
                             settings.loadWithOverviewMode = true
                             settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
@@ -162,7 +209,22 @@ fun GmsProbeDialog(
                             fun startOnce(how: String) {
                                 if (ready || width <= 0 || height <= 0) return
                                 ready = true
-                                loadUrl(GmsProbe.ENTRY)
+                                // 清掉上次残留的站点会话，避免 CAS ↔ 研究生系统来回重定向
+                                if (loginMode) {
+                                    // 彻底清空本 App 的 WebView cookie 再加载。
+                                    // 为什么：CAS 上一次半途而废的会话会让 CAS ↔ 研究生系统互相重定向
+                                    // （实测 ERR_TOO_MANY_REDIRECTS）；而按名字 setCookie 空值清理不可靠，
+                                    // 残留 cookie 仍在。2026-10-17 实测：刚装完（cookie 罐是空的）能打开，
+                                    // 一旦被污染就打不开。
+                                    val cm = CookieManager.getInstance()
+                                    cm.removeAllCookies {
+                                        cm.flush()
+                                        post { loadUrl(entryUrl) }
+                                    }
+                                } else {
+                                    resetSessions()
+                                    loadUrl(entryUrl)
+                                }
                             }
                             addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> startOnce("layout") }
                             post { startOnce("post") }
@@ -199,7 +261,34 @@ fun GmsProbeDialog(
                                     }
                                     inject(view)
                                 }
+                                /**
+                                 * 加载失败必须留证：WebView 自带的错误页只会说"网页无法打开"，
+ * 不告诉我们是 DNS、超时、证书还是被拦。
+                                 */
+                                override fun onReceivedError(
+                                    view: WebView?,
+                                    request: android.webkit.WebResourceRequest?,
+                                    error: android.webkit.WebResourceError?,
+                                ) {
+                                    val code = error?.errorCode ?: 0
+                                    val desc = error?.description?.toString().orEmpty()
+                                    val url = request?.url?.toString().orEmpty()
+                                    val main = request?.isForMainFrame == true
+                                    android.util.Log.w(com.zzupocket.app.data.gms.GmsProbe.TAG, "LOAD-ERR code=$code main=$main desc=$desc url=$url")
+                                    if (main) loadError = "加载失败 code=$code：$desc"
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: WebView?,
+                                    request: android.webkit.WebResourceRequest?,
+                                    response: android.webkit.WebResourceResponse?,
+                                ) {
+                                    val status = response?.statusCode ?: 0
+                                    val url = request?.url?.toString().orEmpty()
+                                    android.util.Log.w(com.zzupocket.app.data.gms.GmsProbe.TAG, "HTTP-ERR $status url=$url")
+                                }
                             }
+
                             webChromeClient = object : WebChromeClient() {
                                 override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
                                     if (recorder.recordConsole(msg.message())) {
