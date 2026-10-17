@@ -1,5 +1,6 @@
 package com.zzupocket.app.ui.diag
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -94,6 +95,14 @@ data class DiagState(
     val gmsError: String = "",
     /** 研究生系统登录器是否打开（状态放这儿，转屏/重组都不丢） */
     val gmsDialogOpen: Boolean = false,
+    // ── 研究生教务会话（固定登录位那张卡片）────────────────────────────
+    val gmsLoggedIn: Boolean = false,
+    /** 上次登录研究生系统的时间（0 = 没登录过） */
+    val gmsLoginAt: Long = 0L,
+    /** null = 还没检查；true/false = 「检查会话」的结果 */
+    val gmsAlive: Boolean? = null,
+    /** 自检工具是否展开（默认收起，别挡住日常信息） */
+    val probesOpen: Boolean = false,
 )
 
 class DiagnosticsViewModel : ViewModel() {
@@ -115,6 +124,8 @@ class DiagnosticsViewModel : ViewModel() {
                 lightRoomId = light.ifBlank { settings.lightRoomId.orEmpty() },
                 acRoomId = ac.ifBlank { settings.acRoomId.orEmpty() },
                 readingCount = repo.readingCount(),
+                gmsLoggedIn = AppGraph.gmsScheduleSource.hasSession(),
+                gmsLoginAt = AppGraph.gmsScheduleSource.loginAt(),
             )
         }
     }
@@ -242,6 +253,56 @@ class DiagnosticsViewModel : ViewModel() {
 
     fun closeGmsDialog() = _state.update { it.copy(gmsDialogOpen = false) }
 
+    // ── 研究生教务会话（固定登录位）────────────────────────────────────
+
+    /** 自检工具展开/收起（默认收起，避免挡住日常信息） */
+    fun toggleProbes() = _state.update { it.copy(probesOpen = !it.probesOpen) }
+
+    /**
+     * 采用 WebView 登录后的会话（与课表页同一套逻辑）。
+     *
+     * 从 WebView 的 CookieManager 取会话 → 交给数据源落盘。密码始终输在学校页面上，我们不接触。
+     * @param onDone 回调结果（true = 真的拿到了会话）
+     */
+    fun adoptGmsSession(onDone: (Boolean) -> Unit = {}) {
+        _state.update { it.copy(gmsDialogOpen = false, gmsError = "") }
+        viewModelScope.launch {
+            val cookie = runCatching {
+                android.webkit.CookieManager.getInstance()
+                    .getCookie("https://" + com.zzupocket.app.data.gms.GmsScheduleSource.HOST)
+            }.getOrNull()
+            val ok = AppGraph.gmsScheduleSource.onWebViewLogin(cookie)
+            refreshGmsState()
+            onDone(ok)
+        }
+    }
+
+    /** 刷新卡片上的会话状态（是否已登录 + 登录时间） */
+    fun refreshGmsState() {
+        val src = AppGraph.gmsScheduleSource
+        _state.update {
+            it.copy(gmsLoggedIn = src.hasSession(), gmsLoginAt = src.loginAt(), gmsAlive = null)
+        }
+    }
+
+    /** 「检查会话」：真发一次请求确认还有效 */
+    fun checkGmsSession() {
+        viewModelScope.launch {
+            val alive = runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    AppGraph.gmsScheduleSource.sessionAlive()
+                }
+            }.getOrDefault(false)
+            _state.update { it.copy(gmsAlive = alive) }
+        }
+    }
+
+    /** 只退出研究生教务会话，不动统一认证登录 */
+    fun logoutGms() {
+        AppGraph.gmsScheduleSource.clear()
+        refreshGmsState()
+    }
+
     /**
      * WebView 登录器把报告交回来。
      *
@@ -253,6 +314,9 @@ class DiagnosticsViewModel : ViewModel() {
     }
 
     fun logout(onDone: () -> Unit) {
+        // ⚠️ 统一认证退出时，研究生教务的会话必须一起清 ——
+        // 否则会出现"已经退出登录、但研究生课表还能看"的怪状态。
+        runCatching { AppGraph.gmsScheduleSource.clear() }
         auth.logout()
         onDone()
     }
@@ -350,7 +414,96 @@ fun DiagnosticsScreen(
             // 这三块是开发期用来摸接口字段结构的（会把状态码/字段名打出来），普通用户用不到，
             // 还会把内部接口名摊在界面上，所以 release 包不显示。
             // 结论都已整理进 docs/interfaces/，需要时用 debug 包跑一遍即可。
-            if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
+            // ── 研究生教务：固定的登录位（研究生课表要单独登录一次研究生院系统）──
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "研究生教务",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            if (state.gmsLoggedIn) "已登录" else "未登录",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (state.gmsLoggedIn) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    Text(
+                        "研究生课表在研究生院那套系统里，需要单独登录一次（本科课表用不着）。" +
+                            "登录走学校统一身份认证，密码输在学校自己的页面上，我们不接触、也不保存。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (state.gmsLoginAt > 0L) {
+                        Text(
+                            "上次登录：" + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+                                .format(java.util.Date(state.gmsLoginAt)),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    state.gmsAlive?.let { alive ->
+                        Text(
+                            if (alive) "会话有效 ✓" else "会话已失效，需要重新登录",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (alive) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { vm.openGmsDialog() },
+                            modifier = Modifier.weight(1f),
+                        ) { Text(if (state.gmsLoggedIn) "重新登录" else "登录研究生系统") }
+                        OutlinedButton(
+                            onClick = { vm.checkGmsSession() },
+                            enabled = state.gmsLoggedIn,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("检查会话") }
+                    }
+                    if (state.gmsLoggedIn) {
+                        OutlinedButton(onClick = { vm.logoutGms() }) { Text("退出研究生教务") }
+                    }
+                    if (state.gmsError.isNotEmpty()) {
+                        Text(
+                            state.gmsError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (state.gmsDialogOpen) {
+                        GmsProbeDialog(
+                            onDismiss = { vm.closeGmsDialog() },
+                            onReport = { vm.adoptGmsSession() },
+                            loginMode = true,
+                        )
+                    }
+                }
+            }
+
+            // ── 自检工具：默认收起，别挡住日常信息（用户反馈：不要太影响使用）──
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { vm.toggleProbes() }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (state.probesOpen) "收起自检工具" else "自检工具（排障用，点开）",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(if (state.probesOpen) "▲" else "▼", style = MaterialTheme.typography.titleSmall)
+                }
+            }
+
+            if (state.probesOpen && (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE)) {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("一卡通接口自检", style = MaterialTheme.typography.titleSmall)

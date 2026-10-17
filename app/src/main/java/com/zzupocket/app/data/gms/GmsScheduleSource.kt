@@ -44,16 +44,21 @@ class GmsScheduleSource(
         if (parsed.isEmpty()) return false
         jar.seed(HOST, parsed)
         store.gmsCookie = GmsCookie.join(parsed)
+        store.gmsCookieAt = System.currentTimeMillis()
         gms.resetSession()
         return true
     }
 
-    /** 退出登录：清内存与存储里的会话 */
+    /** 退出登录：清内存与存储里的会话（登录状态卡片据此回到"未登录"） */
     fun clear() {
         jar.clear()
         store.gmsCookie = null
+        store.gmsCookieAt = 0L
         gms.resetSession()
     }
+
+    /** 上次登录研究生系统的时间（毫秒；0 = 从没登录过） */
+    fun loginAt(): Long = store.gmsCookieAt
 
     fun hasSession(): Boolean = jar.size() > 0
 
