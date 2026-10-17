@@ -107,6 +107,26 @@ object AppGraph {
 
     val easClient: EasClient by lazy { EasClient(HttpClients.eas, json) }
 
+    /** 研究生教务（gmsstu）的会话 Cookie 罐：WebView 登录后注入，接口请求自动带上 */
+    val gmsCookieJar: com.zzupocket.app.data.gms.GmsCookieJar by lazy {
+        com.zzupocket.app.data.gms.GmsCookieJar()
+    }
+
+    /**
+     * 研究生课表数据源。协议、客户端与解析器由贡献者 Inspire2431 在真实会话里逆出（PR #3）；
+     * 这里只接「会话从哪来」—— 走 App 内置 WebView 登录拿 Cookie，不碰密码。
+     */
+    val gmsScheduleSource: com.zzupocket.app.data.gms.GmsScheduleSource by lazy {
+        com.zzupocket.app.data.gms.GmsScheduleSource(
+            gms = com.zzupocket.app.data.gms.GmsClient(
+                com.zzupocket.app.data.gms.GmsClient.newClient(gmsCookieJar),
+                json,
+            ),
+            jar = gmsCookieJar,
+            store = tokenStore,
+        ).also { it.restore() }
+    }
+
     val db: AppDatabase by lazy { AppDatabase.get(appContext) }
 
     val authRepository: AuthRepository by lazy {
