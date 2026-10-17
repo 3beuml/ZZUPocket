@@ -31,6 +31,19 @@ data class ScheduleUiState(
     val started: Boolean = false,
     val loading: Boolean = false,
     val loggedIn: Boolean = false,
+
+    // ── 研究生课表（gmsstu / 研究生院那套系统）────────────────────────────
+    /**
+     * 学籍判定为"非本科"（本科教务拒绝了这个账号）。此时课表不在本科教务里，
+     * 而要走进研究生系统 —— 见 `domain.AcademicTrack` 与 `data.gms.GmsScheduleSource`。
+     */
+    val gradMode: Boolean = false,
+    /** 研究生本周课表（服务端按当前周返回，所以没有日期也能正确显示） */
+    val gmsLessons: List<com.zzupocket.app.data.gms.GradLesson> = emptyList(),
+    val gmsBusy: Boolean = false,
+    val gmsError: String? = null,
+    /** WebView 登录器是否打开（状态放这儿，转屏/重组都不丢） */
+    val gmsDialogOpen: Boolean = false,
     val error: String? = null,
     /** 提示（不是错误），比如过滤后没有学期而回退到全部 */
     val notice: String? = null,
@@ -81,6 +94,84 @@ class ScheduleViewModel : ViewModel() {
     init {
         viewModelScope.launch { bootstrap() }
         viewModelScope.launch { observeEnrollmentYear() }
+        // 学籍判定：本科教务认不认这个账号。判为"非本科"就切到研究生视图。
+        viewModelScope.launch {
+            if (detectGradMode() && com.zzupocket.app.core.AppGraph.gmsScheduleSource.hasSession()) {
+                loadGmsWeek()
+            }
+        }
+    }
+
+    // ── 研究生课表（gmsstu / 研究生院那套系统）──────────────────────────
+
+    /** 学籍只判一次（每个 ViewModel 生命周期内） */
+    private var gradProbed = false
+
+    /**
+     * 学籍判定：拿同一枚令牌问一次本科教务的用户信息接口。
+     *
+     * 200 ⇒ 本科生（走现有链路，行为不变）；401/403 ⇒ 非本科（研究生）⇒ 课表走 gms。
+     * **网络失败或意外状态码一律不猜**（保持本科链路），免得把本科生的课表弄没。
+     */
+    private suspend fun detectGradMode(): Boolean {
+        if (gradProbed) return _state.value.gradMode
+        gradProbed = true
+        val track = runCatching {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val token = auth.requireCasToken()
+                com.zzupocket.app.data.eas.UndergradIdentityProbe
+                    .probe(token, com.zzupocket.app.core.net.HttpClients.eas).track
+            }
+        }.getOrNull()
+        val grad = track == com.zzupocket.app.domain.AcademicTrack.NOT_UNDERGRAD
+        if (grad) _state.update { it.copy(gradMode = true) }
+        return grad
+    }
+
+    fun openGmsLogin() = _state.update { it.copy(gmsDialogOpen = true) }
+
+    fun closeGmsLogin() = _state.update { it.copy(gmsDialogOpen = false) }
+
+    /**
+     * WebView 登录结束后调用：从 WebView 的 CookieManager 取回会话并采用，然后拉本周课表。
+     *
+     * 密码全程输在**学校自己的页面**上，我们只取它落下的会话 Cookie（不接触、不保存密码）。
+     */
+    fun adoptGmsSession() {
+        _state.update { it.copy(gmsDialogOpen = false, gmsBusy = true, gmsError = null) }
+        viewModelScope.launch {
+            val cookie = runCatching {
+                android.webkit.CookieManager.getInstance()
+                    .getCookie("https://" + com.zzupocket.app.data.gms.GmsScheduleSource.HOST)
+            }.getOrNull()
+            val adopted = com.zzupocket.app.core.AppGraph.gmsScheduleSource.onWebViewLogin(cookie)
+            if (!adopted) {
+                _state.update {
+                    it.copy(gmsBusy = false, gmsError = "没拿到研究生系统的登录会话 —— 可能还没登录成功")
+                }
+                return@launch
+            }
+            loadGmsWeek()
+        }
+    }
+
+    /** 拉研究生本周课表（服务端按当前周返回） */
+    fun loadGmsWeek() {
+        _state.update { it.copy(gmsBusy = true, gmsError = null) }
+        viewModelScope.launch {
+            val result = runCatching {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.zzupocket.app.core.AppGraph.gmsScheduleSource.currentWeek()
+                }
+            }
+            _state.update {
+                it.copy(
+                    gmsBusy = false,
+                    gmsLessons = result.getOrDefault(emptyList()),
+                    gmsError = result.exceptionOrNull()?.let { e -> e.toUserMessage() },
+                )
+            }
+        }
     }
 
     fun onResume() {
