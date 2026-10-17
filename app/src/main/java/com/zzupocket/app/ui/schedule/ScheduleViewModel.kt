@@ -130,6 +130,23 @@ class ScheduleViewModel : ViewModel() {
 
     fun openGmsLogin() = _state.update { it.copy(gmsDialogOpen = true) }
 
+    /**
+     * 手动切到研究生视图（兜底入口）。
+     *
+     * 学籍探测只在「本科教务明确回 401/403」时敢判成研究生；校外网络异常、接口改版等情况
+     * 一律判成不确定、保持本科视图 —— 那时用户会卡在「暂时没有课表数据」，找不到研究生入口。
+     * 这个入口让他自己声明一次，探测结果不再回改（gradProbed 置位）。
+     */
+    fun useGradSchedule() {
+        gradProbed = true
+        _state.update { it.copy(gradMode = true, error = null, gmsError = null) }
+        if (com.zzupocket.app.core.AppGraph.gmsScheduleSource.hasSession()) {
+            loadGmsWeek()
+        } else {
+            openGmsLogin()
+        }
+    }
+
     fun closeGmsLogin() = _state.update { it.copy(gmsDialogOpen = false) }
 
     /**
