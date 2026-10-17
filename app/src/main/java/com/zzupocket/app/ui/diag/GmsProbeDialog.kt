@@ -260,6 +260,10 @@ fun GmsProbeDialog(
                                         snapshotCookies(it)
                                     }
                                     inject(view)
+                                    // 这个 WebView 里 CSS 的 vh 恒等于 0（见
+                                    // docs/interfaces/图书馆WebView灰屏.md）：CAS 登录页靠 100vh 布局，
+                                    // 不修就会出现「账号密码登录」和「修改安全手机」叠在一起。
+                                    com.zzupocket.app.ui.web.WebViewVhFix.install(view)
                                 }
                                 /**
                                  * 加载失败必须留证：WebView 自带的错误页只会说"网页无法打开"，
