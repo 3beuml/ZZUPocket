@@ -112,7 +112,7 @@ class GmsClient(
         val weekday: Int,
 
         /** 周区间（如 10..17）；解析不出来为 null */
-        val weeks: IntRange?,
+        val weeks: List<IntRange>?,
         val courseName: String,
 
         /** 课程号_班次（如 `135505702_001`）；无课程号的课为 null */
@@ -198,8 +198,8 @@ class GmsClient(
     fun expandWeeks(lessons: List<Session>): List<WeekEntry> {
         val out = ArrayList<WeekEntry>()
         for (lesson in lessons) {
-            val weeks = lesson.weeks ?: continue
-            for (week in weeks) {
+            val ranges = lesson.weeks ?: continue
+            for (range in ranges) for (week in range) {
                 out += WeekEntry(
                     weekIndex = week,
                     weekday = lesson.weekday,
@@ -224,7 +224,7 @@ class GmsClient(
      * 会话是否存活：抓一次 `/stu/`，最终 URL 落回 CAS 登录页即未登录；
      * 成功时顺手把 guid 收好（[route] 复用）。网络错误照常上抛，不吞。
      */
-    fun isSessionAlive(): Boolean = try {
+    suspend fun isSessionAlive(): Boolean = try {
         withGuid()
         true
     } catch (_: AppError.ReLoginRequired) {

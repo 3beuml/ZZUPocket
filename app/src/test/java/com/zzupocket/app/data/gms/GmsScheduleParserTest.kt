@@ -146,7 +146,7 @@ class GmsScheduleParserTest {
         assertEquals(4, s.size)
         s.forEach {
             assertEquals(1, it.weekday)
-            assertEquals(10..17, it.weeks)
+            assertEquals(listOf(10..17), it.weeks)
             assertEquals("135505702_001", it.courseCode)
             assertEquals("北1301", it.room)
         }
@@ -161,7 +161,7 @@ class GmsScheduleParserTest {
         assertEquals(2, s.size)
         s.forEach {
             assertEquals(1, it.weekday)
-            assertEquals(2..17, it.weeks)
+            assertEquals(listOf(2..17), it.weeks)
             assertNull(it.courseCode)
             assertEquals("主校区数值分析4班", it.className)
         }
