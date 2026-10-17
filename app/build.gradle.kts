@@ -28,11 +28,11 @@ android {
         applicationId = "com.zzupocket.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = 74
+        versionCode = 75
         // 版本号只写纯数字，不再带 -P6 那种阶段后缀（阶段划分是 docs 里的事，别混进版本号）。
         // ⚠️ 升级判断只认 versionCode（Android 的规则），versionName 是给人看的；
         // 所以改名号（哪怕是"变小"的数字）都不会影响覆盖安装，每次发版 versionCode 必须 +1。
-        versionName = "0.31.2"
+        versionName = "0.31.3"
     }
 
     signingConfigs {
