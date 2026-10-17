@@ -60,6 +60,8 @@ import com.zzupocket.app.data.gms.GmsProbe
 fun GmsProbeDialog(
     onDismiss: () -> Unit,
     onReport: (String) -> Unit,
+    /** true = 当登录器用（课表页进来），false = 当自检用（诊断页进来） */
+    loginMode: Boolean = false,
 ) {
     val recorder = remember { GmsProbe.Recorder() }
     val webRef = remember { mutableStateOf<WebView?>(null) }
@@ -86,7 +88,7 @@ fun GmsProbeDialog(
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("研究生系统自检", style = MaterialTheme.typography.titleMedium)
+                            Text(if (loginMode) "登录研究生系统" else "研究生系统自检", style = MaterialTheme.typography.titleMedium)
                             Text(
                                 "已记录请求 $hitCount 条 · 跳转 $navCount 次 · ${if (ready) "页面已加载" else "加载中…"}",
                                 style = MaterialTheme.typography.labelSmall,
@@ -122,11 +124,16 @@ fun GmsProbeDialog(
                         Button(
                             onClick = { onReport(recorder.report()) },
                             modifier = Modifier.weight(1.4f),
-                        ) { Text("生成报告") }
+                        ) { Text(if (loginMode) "完成登录" else "生成报告") }
                     }
                     Text(
-                        "用你自己的研究生账号登录（密码在学校自己的页面上输）。进去后翻到「课表/我的课程」，" +
-                            "再点「生成报告」。报告里只有接口路径与字段名，不含令牌、姓名、学号。",
+                        if (loginMode) {
+                            "用你的研究生账号登录 —— 密码在学校自己的页面上输，我们不接触、也不保存。" +
+                                "登录成功、回到研究生系统页面之后，点下面的「完成登录」就能拉课表。"
+                        } else {
+                            "用你自己的研究生账号登录（密码在学校自己的页面上输）。进去后翻到「课表/我的课程」，" +
+                                "再点「生成报告」。报告里只有接口路径与字段名，不含令牌、姓名、学号。"
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

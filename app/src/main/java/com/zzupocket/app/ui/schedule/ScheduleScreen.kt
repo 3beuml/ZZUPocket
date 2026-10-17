@@ -721,6 +721,7 @@ private fun NoSemesterBlock(
                     com.zzupocket.app.ui.diag.GmsProbeDialog(
                         onDismiss = onGmsDialogDismiss,
                         onReport = { onGmsAdopt() },
+                        loginMode = true,
                     )
                 }
             }
