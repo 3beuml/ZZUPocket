@@ -273,6 +273,11 @@ class DiagnosticsViewModel : ViewModel() {
             }.getOrNull()
             val ok = AppGraph.gmsScheduleSource.onWebViewLogin(cookie)
             refreshGmsState()
+            if (!ok) {
+                _state.update {
+                    it.copy(gmsError = "没拿到研究生系统的登录会话 —— 可能还没登录成功")
+                }
+            }
             onDone(ok)
         }
     }
