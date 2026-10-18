@@ -119,7 +119,7 @@ class LoginViewModel : ViewModel() {
                         }
                     }
                     is AuthRepository.LoginStep.Success -> {
-                        _state.update { it.copy(busy = false, phase = LoginPhase.Done) }
+                        finishLogin()
                     }
                 }
             } catch (e: Throwable) {
@@ -173,10 +173,32 @@ class LoginViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 auth.submitSmsCode(pendingAccount, pendingPassword, c, code)
-                _state.update { it.copy(busy = false, phase = LoginPhase.Done) }
+                finishLogin()
             } catch (e: Throwable) {
                 // 验证码错了就把输入清掉，避免用户对着旧码反复点提交
                 _state.update { it.copy(busy = false, error = e.msg(), smsCode = "") }
+            }
+        }
+    }
+
+    /**
+     * 登录接口返回 Success 后，再确认令牌真的可用。
+     *
+     * 认证服务如果改了 idToken 的格式（不再是带 exp 的 JWT），[AuthRepository.persist]
+     * 仍会成功，但主页面的 `isLoggedIn()` 会一直是 false —— 表现就是
+     * "认证成功、闪回主页、仍显示未登录、没有任何提示"。这里停下来把令牌形态
+     * （只含段数/长度/字段名，不含值）显示出来，不再静默。
+     */
+    private fun finishLogin() {
+        if (auth.isLoggedIn()) {
+            _state.update { it.copy(busy = false, phase = LoginPhase.Done) }
+        } else {
+            _state.update {
+                it.copy(
+                    busy = false,
+                    phase = LoginPhase.Credentials,
+                    error = "登录成功，但令牌无法使用（${auth.casTokenShape()}）。请把这句话反馈给开发者。",
+                )
             }
         }
     }
