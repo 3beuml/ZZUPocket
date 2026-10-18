@@ -75,11 +75,13 @@ fun CampusScreen(
         ) {
             GroupTitle("账号")
             EntryCard {
+                // 已登录时不要再把用户丢到登录表单上：他要的多半是"看看登录状态/换号"，
+                // 直接给表单会让人以为又要重新登录（issue #2 报告者提出）。
                 Entry(
                     Icons.Filled.Login,
-                    if (loggedIn) "已登录 / 切换账号" else "登录 / 切换账号",
-                    if (loggedIn) "统一身份认证已连接" else "使用统一身份认证",
-                    onOpenLogin,
+                    if (loggedIn) "已登录" else "登录 / 切换账号",
+                    if (loggedIn) "查看登录状态，需要时可在那里退出登录" else "使用统一身份认证",
+                    if (loggedIn) onOpenDiagnostics else onOpenLogin,
                 )
                 Entry(Icons.Filled.Settings, "登录状态", "令牌有效期、本机数据统计", onOpenDiagnostics)
                 Entry(Icons.Filled.Info, "关于", "数据来源、隐私与致谢", onOpenAbout)
