@@ -199,7 +199,10 @@ object GmsProbe {
             val sb = StringBuilder()
             synchronized(this) {
                 sb.appendLine("=== 研究生系统探测报告 ===")
-                sb.appendLine("（只含字段名与路径；查询串的值已打码，不含任何令牌/姓名/学号）")
+                sb.appendLine(
+                    "（只含字段名与路径：查询串的值、请求体里的凭据类字段、" +
+                        "路径里的会话 guid 都已打码，不含任何令牌/姓名/学号）",
+                )
                 sb.appendLine()
                 sb.appendLine("【跳转链】能不能走学校统一身份认证，看这里：")
                 navigations.forEach { sb.appendLine("  → ${maskUrl(it)}") }
@@ -358,18 +361,13 @@ object GmsProbe {
 
     // ── 打码与结构提取 ───────────────────────────────────────────────────
 
-    /** URL：保留 host/path，查询串只留"参数名=*" */
-    private fun maskUrl(url: String): String = runCatching {
-        val base = url.substringBefore('?')
-        val q = url.substringAfter('?', "")
-        if (q.isBlank()) base else "$base?" + q.split('&').joinToString("&") { it.substringBefore('=') + "=*" }
-    }.getOrDefault(url.take(120))
+    /**
+     * URL：保留 host/path，查询串只留"参数名=*"
+     * 路径里的路由段（`/stu/{b64}`）由 [GmsRedact] 把 guid 盖掉、模块路径留下。
+     */
+    private fun maskUrl(url: String): String = GmsRedact.url(url)
 
-    private fun pathOf(url: String): String = runCatching {
-        val noQuery = url.substringBefore('?')
-        val idx = noQuery.indexOf("://")
-        if (idx < 0) noQuery.take(120) else noQuery.substring(noQuery.indexOf('/', idx + 3)).take(120)
-    }.getOrDefault(url.take(120))
+    private fun pathOf(url: String): String = GmsRedact.path(url)
 
     private fun queryKeysOf(url: String): List<String> =
         url.substringAfter('?', "").takeIf { it.isNotBlank() }
@@ -377,16 +375,14 @@ object GmsProbe {
 
     private fun hostOf(url: String): String = runCatching { java.net.URI(url).host ?: url }.getOrDefault(url)
 
-    /** 请求体：把看起来是凭据/个人信息的字段值打码 */
-    private fun maskJson(text: String?): String {
-        if (text.isNullOrBlank()) return ""
-        return SENSITIVE.replace(text) { m -> "${m.groupValues[1]}: \"***\"" }
-    }
-
-    private val SENSITIVE = Regex(
-        "\"(password|pwd|token|userToken|idToken|accessToken|refreshToken|ticket|code|studentId|xh|name)\"\\s*:\\s*\"[^\"]*\"",
-        RegexOption.IGNORE_CASE,
-    )
+    /**
+     * 请求体：按字段名打码，JSON 与 `application/x-www-form-urlencoded` 两种形态都覆盖。
+     *
+     * ⚠️ 原先只处理 JSON 的 `"k": "v"` 形态，而统一身份认证的 `/cas/mfa/detect`
+     * 提交的是表单，`username=…&password=…` 会原样进报告（2026-10-18 报告者指出并复现）。
+     * 现在统一走 [GmsRedact.body]。
+     */
+    private fun maskJson(text: String?): String = GmsRedact.body(text)
 
     /**
      * 只列「字段路径 + 类型 + 长度」，**一个字段值都不打印**。
