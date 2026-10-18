@@ -142,8 +142,8 @@ kblx=xs&termcode=20261      （termcode 用 2.1 的 value）
   `app/src/test/java/com/zzupocket/app/data/gms/GmsScheduleParserTest.kt`，
   夹具 = 本文 2.2 的 11 行真实响应（教师脱敏）；
 - `GmsClient`(data/gms/GmsClient.kt)：
-  - `fetchTerms()`（2.1）、`fetchTermTable(termcode)`（2.2，返回已解析的 `GmsLesson`）、
-    `fetchWeekTable()`（2.3）、`rowsToLessons()`、`expandWeeks()`；
+  - `fetchTerms()`（2.1）、`fetchTermTable(termcode)`（2.2，返回 `GmsClient.Session` 列表）、
+    `fetchWeekTable()`（2.3）、`rowsToSession()`、`expandWeeks()`；
   - `login(username, password)`：走 CAS 网页链（`/cas/a/login` 表单，密码 RSA PKCS#1 v1.5，
     公钥来自 `https://cas.s.zzu.edu.cn/cas/jwt/publicKey`，加密纯 base64，失败退 App JWT 同款
     `__RSA__` 前缀重试；默认表单带 `execution/_eventId=submit/rememberMe/指纹空值`）。
@@ -154,6 +154,19 @@ kblx=xs&termcode=20261      （termcode 用 2.1 的 value）
     302 自动回service。
 - `expandWeeks()`：把周区间展开成与本科周网格一致的「每周一条」，可直接喂给
   `CourseSessionEntity`（`sessionIdOf(...)`）。
+
+### 3.1 UI 复用（2026-10-18）
+
+`GmsScheduleMapper` 把 `WeekEntry` 映射成本科的 `domain.Session` / `Course`，
+课表页直接复用 `ScheduleGrid / WeekPager / CourseBlock`，不再单独维护一套列表 UI：
+
+- 连续节次（如第 7、8 节同一门课）合并成一个 `Session`，与本科跨节次块一致；
+- 课程按 `courseCode`（无课程号时用课程名）聚合，详情页、配色、总览共用；
+- 教学周由 `GmsWeekAlign` 用「本周课表」反推，`Semester.startDate` = 第 1 周周一；
+- 节次时刻：研究生接口不提供时钟时间；`GmsScheduleMapper.defaultPeriods()` 内置学校官方
+  《作息时间表》的 10 节课（2026-10-18 用户提供；上午 1-4、下午 5-8、晚间 9-10，
+  不收录起床/就餐/课间操/晚自习等辅助项）。本科 `periods` 可用时优先用接口数据；
+- 主讲老师：详情页始终显示；课表网格在研究生课程跨 ≥2 节时显示（单节块太矮）。
 
 ## 四、实测证据（2026-10-17）
 
@@ -173,8 +186,8 @@ kblx=xs&termcode=20261      （termcode 用 2.1 的 value）
    检测账号是否在本科教务（issue #2 中作者已实现）返回 403，则尝试 gmsstu 数据源。
 2. **学期选择**：用 `fetchTerms()` 替代本科的学期接口；值类型为字符串（如 `20261`）。
 3. **周网格**：`fetchTermTable(termcode)` → `expandWeeks()` → `CourseSessionEntity`（`source = "gms"`）。
-4. **节次时刻缺失**：gmsstu 无节次时刻表。第一版可以按「第N节」显示，或用本科的
-   `/room/system/course-units`（第 N 节时间基本一致）当推断参考 —— 但这属于作者定夺的 UX。
+4. **节次时刻缺失**：gmsstu 无节次时刻表；实现内置学校官方《作息时间表》的 10 节课
+   （见 §3.1），只显示第N节与开始时间，不显示起床/就餐/课间操/晚自习等辅助项。
 5. **本周/今日**：直接用 `fetchWeekTable()`（ 服务端自行按当前周返回），比本科端靠周推日更直接。
 
 ## 六、已知坑位/待真机复验证清单

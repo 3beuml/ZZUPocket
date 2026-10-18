@@ -81,6 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.core.ScheduleText
+import com.zzupocket.app.data.gms.GmsScheduleSource
 import com.zzupocket.app.data.prefs.BlockBorder
 import com.zzupocket.app.data.prefs.CourseColorMode
 import com.zzupocket.app.data.prefs.CourseTextMode
@@ -99,7 +100,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 
 private val CELL_HEIGHT = 54.dp
-private val UNIT_COL_WIDTH = 30.dp
+private val UNIT_COL_WIDTH = 56.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,20 +123,33 @@ fun ScheduleScreen(
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                // 左上角不显示"课表"二字，直接放学期切换
-                title = { SemesterButton(state.selectedSemester) { showSemesters = true } },
-                actions = {
-                    IconButton(onClick = { vm.openPlanEditor() }) {
-                        Icon(Icons.Filled.Add, contentDescription = "添加日程")
+                // 左上角不显示"课表"二字，直接放学期切换；研究生视图显示研究生学期名
+                title = {
+                    if (state.gradMode) {
+                        Text(
+                            text = state.gmsSemester?.displayName ?: "研究生课表",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    } else {
+                        SemesterButton(state.selectedSemester) { showSemesters = true }
                     }
-                    IconButton(onClick = vm::refresh) {
+                },
+                actions = {
+                    if (!state.gradMode) {
+                        IconButton(onClick = { vm.openPlanEditor() }) {
+                            Icon(Icons.Filled.Add, contentDescription = "添加日程")
+                        }
+                    }
+                    IconButton(onClick = { if (state.gradMode) vm.loadGmsWeek() else vm.refresh() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新课表")
                     }
                     IconButton(onClick = onOpenDisplaySettings) {
                         Icon(Icons.Filled.Tune, contentDescription = "课表显示设置")
                     }
-                    IconButton(onClick = { state.selectedSemester?.id?.let(onOpenOverview) }) {
-                        Icon(Icons.Filled.ListAlt, contentDescription = "课程总览")
+                    if (!state.gradMode) {
+                        IconButton(onClick = { state.selectedSemester?.id?.let(onOpenOverview) }) {
+                            Icon(Icons.Filled.ListAlt, contentDescription = "课程总览")
+                        }
                     }
                 },
             )
@@ -167,6 +181,29 @@ fun ScheduleScreen(
             }
 
             when {
+                // 研究生：整学期数据已经映射成本科的 Session/Course，直接复用同一套周网格。
+                // 没有数据时才退回下面的登录/空态区块。
+                state.gradMode && state.gmsSessions.isNotEmpty() -> {
+                    WeekHeader(
+                        week = state.gmsWeekIndex,
+                        total = state.gmsWeekCount,
+                        onPick = { showWeekPicker = true },
+                        onWallpaper = prefs.backgroundPath != null,
+                    )
+                    WeekPager(
+                        weeks = state.gmsWeeks,
+                        weekIndex = state.gmsWeekIndex,
+                        sessionsOf = state::gmsSessionsOf,
+                        periods = state.gmsPeriods,
+                        weekMondayOf = { week ->
+                            ScheduleText.mondayOf(state.gmsSemester?.startDate, week)
+                        },
+                        onWeekSelected = vm::goToGmsWeek,
+                        prefs = prefs,
+                        onSessionClick = vm::onSessionClick,
+                    )
+                }
+
                 // gradMode 优先：从 0.31.0 覆盖升级的账号可能已有学期缓存，weeks 非空；
                 // 只看 weeks 会让研究生区块和底部兜底入口都被本科周表格挡住。
                 state.gradMode || state.weeks.isEmpty() -> NoSemesterBlock(
@@ -201,8 +238,14 @@ fun ScheduleScreen(
                     val weekReady = state.weekResolvedOn != null || !state.loading
                     if (weekReady) {
                         WeekPager(
-                            state = state,
-                            vm = vm,
+                            weeks = state.weeks,
+                            weekIndex = state.weekIndex,
+                            sessionsOf = state::sessionsOf,
+                            periods = state.periods,
+                            weekMondayOf = { week ->
+                                ScheduleText.mondayOf(state.selectedSemester?.startDate, week)
+                            },
+                            onWeekSelected = vm::goToWeek,
                             prefs = prefs,
                             // 点课程块 → 教务课开详情，自定义日程开编辑框
                             onSessionClick = vm::onSessionClick,
@@ -228,9 +271,12 @@ fun ScheduleScreen(
 
     if (showWeekPicker) {
         WeekPickerDialog(
-            weeks = state.weeks,
-            current = state.weekIndex,
-            onPick = { vm.goToWeek(it); showWeekPicker = false },
+            weeks = if (state.gradMode) state.gmsWeeks else state.weeks,
+            current = if (state.gradMode) state.gmsWeekIndex else state.weekIndex,
+            onPick = {
+                if (state.gradMode) vm.goToGmsWeek(it) else vm.goToWeek(it)
+                showWeekPicker = false
+            },
             onDismiss = { showWeekPicker = false },
         )
     }
@@ -339,13 +385,16 @@ private val WEEKDAY_HEADER_HEIGHT = 38.dp
 
 @Composable
 private fun WeekPager(
-    state: ScheduleUiState,
-    vm: ScheduleViewModel,
+    weeks: List<Int>,
+    weekIndex: Int,
+    sessionsOf: (Int) -> List<Session>,
+    periods: List<Period>,
+    weekMondayOf: (Int) -> LocalDate?,
+    onWeekSelected: (Int) -> Unit,
     prefs: UiPrefs,
     onSessionClick: (Session) -> Unit,
 ) {
-    val weeks = state.weeks
-    val initial = weeks.indexOf(state.weekIndex).coerceAtLeast(0)
+    val initial = weeks.indexOf(weekIndex).coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initial, pageCount = { weeks.size })
 
     // ① 用户滑动 → 通知 ViewModel。
@@ -360,13 +409,13 @@ private fun WeekPager(
         snapshotFlow { pagerState.settledPage to pagerState.isScrollInProgress }
             .collect { (page, scrolling) ->
                 if (scrolling) return@collect
-                weeks.getOrNull(page)?.let { if (it != state.weekIndex) vm.goToWeek(it) }
+                weeks.getOrNull(page)?.let { if (it != weekIndex) onWeekSelected(it) }
             }
     }
     // ② ViewModel 变化（点周次选择、隔天自动回到本周）→ 滚过去。
     //    这是单向的：①不会回写中间态，所以不会再打架。
-    LaunchedEffect(state.weekIndex, weeks) {
-        val idx = weeks.indexOf(state.weekIndex)
+    LaunchedEffect(weekIndex, weeks) {
+        val idx = weeks.indexOf(weekIndex)
         if (idx >= 0 && idx != pagerState.currentPage) pagerState.animateScrollToPage(idx)
     }
 
@@ -374,11 +423,11 @@ private fun WeekPager(
         val week = weeks.getOrNull(page)
         if (week != null) {
             ScheduleGrid(
-                sessions = state.sessionsOf(week),
-                periods = state.periods,
+                sessions = sessionsOf(week),
+                periods = periods,
                 prefs = prefs,
                 // 星期表头下面那行日期要用它：算不出来（没学期/没起始日）就不显示日期
-                weekMonday = ScheduleText.mondayOf(state.selectedSemester?.startDate, week),
+                weekMonday = weekMondayOf(week),
                 onSessionClick = onSessionClick,
             )
         }
@@ -446,50 +495,82 @@ private fun ScheduleGrid(
         }
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Row(Modifier.fillMaxWidth()) {
-            // 左侧节次列：固定 10 格，与右侧各天严格对齐
-            Column(
-                modifier = Modifier.width(UNIT_COL_WIDTH),
-                verticalArrangement = Arrangement.spacedBy(gap),
+            val gridLine = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            Row(
+                modifier = Modifier.fillMaxWidth().drawBehind {
+                    val unitW = UNIT_COL_WIDTH.toPx()
+                    val rowH = cellH.toPx()
+                    val gapPx = gap.toPx()
+                    val stroke = 0.7.dp.toPx()
+                    val dash = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                    // 横向虚线：每节课的上边界 + 最后一节的下边界
+                    for (i in 0 until 10) {
+                        val y = (rowH + gapPx) * i
+                        drawLine(gridLine, Offset(0f, y), Offset(size.width, y), stroke, pathEffect = dash)
+                    }
+                    drawLine(
+                        gridLine,
+                        Offset(0f, size.height),
+                        Offset(size.width, size.height),
+                        stroke,
+                        pathEffect = dash,
+                    )
+                    // 纵向虚线：时间列与各天之间
+                    val dayCount = days.count()
+                    val dayW = (size.width - unitW) / dayCount
+                    for (i in 0..dayCount) {
+                        val x = unitW + dayW * i
+                        drawLine(gridLine, Offset(x, 0f), Offset(x, size.height), stroke, pathEffect = dash)
+                    }
+                },
             ) {
-                for (unit in 1..10) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().height(cellH),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        Text(
-                            text = "$unit",
-                            style = MaterialTheme.typography.labelMedium.copy(shadow = labelShadow),
-                        )
-                        periods.firstOrNull { it.indexNo == unit }?.let {
+                // 左侧节次列：固定 10 格，与右侧各天严格对齐
+                Column(
+                    modifier = Modifier.width(UNIT_COL_WIDTH),
+                    verticalArrangement = Arrangement.spacedBy(gap),
+                ) {
+                    for (unit in 1..10) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().height(cellH),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
                             Text(
-                                text = it.startText,
-                                fontSize = 8.sp,
-                                color = labelColor,
-                                style = LocalTextStyle.current.copy(shadow = labelShadow),
+                                text = "$unit",
+                                style = MaterialTheme.typography.labelMedium.copy(shadow = labelShadow),
                             )
+                            periods.firstOrNull { it.indexNo == unit }?.let {
+                                // 起止放在同一行，避免行高不够时和时间数字叠在一起
+                                Text(
+                                    text = "${it.startText}-${it.endText}",
+                                    fontSize = 7.sp,
+                                    lineHeight = 9.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = labelColor,
+                                    style = LocalTextStyle.current.copy(shadow = labelShadow),
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            // 每天一列 —— 只有按列排布才可能把跨节次的课画成一个连续的整块
-            for (day in days) {
-                DayColumn(
-                    modifier = Modifier.weight(1f),
-                    day = day,
-                    sessions = sessions,
-                    periods = periods,
-                    prefs = prefs,
-                    cellH = cellH,
-                    gap = gap,
-                    dark = dark,
-                    todayIso = todayIso,
-                    now = now,
-                    onSessionClick = onSessionClick,
-                )
-            }
+                // 每天一列 —— 只有按列排布才可能把跨节次的课画成一个连续的整块
+                for (day in days) {
+                    DayColumn(
+                        modifier = Modifier.weight(1f),
+                        day = day,
+                        sessions = sessions,
+                        periods = periods,
+                        prefs = prefs,
+                        cellH = cellH,
+                        gap = gap,
+                        dark = dark,
+                        todayIso = todayIso,
+                        now = now,
+                        onSessionClick = onSessionClick,
+                    )
+                }
             }
         Spacer(Modifier.height(16.dp))
         } // 关闭可滚动区（表头在上面，不跟着滚）
@@ -597,8 +678,12 @@ private fun CourseBlock(
                 fontWeight = FontWeight.Medium,
             )
             val secondary = buildList {
-                // 老师不显示在格子上了（点开课程详情能看到），一是格子太小、二是学校数据里
-                // 教师名往往很长；这里只保留地点，并用 tidyPlace 把"南2 南2_206"收拾成"南2 206"
+                // 本科格子按作者的设计只放地点（教师名长、格子小，详情页能看到）。
+                // 研究生课表用户要求看到主讲老师；单节课的块太矮，只在跨节次（span >= 2）时加，
+                // 避免把课名挤掉。
+                if (session.source == GmsScheduleSource.SOURCE && span >= 2) {
+                    session.teacherName?.takeIf { it.isNotBlank() }?.let { add(it) }
+                }
                 if (prefs.courseTextMode != CourseTextMode.NAME) {
                     ScheduleText.tidyPlace(session.roomText)?.let { add(it) }
                 }
@@ -792,9 +877,15 @@ internal fun CourseDetailSheet(course: Course, onDismiss: () -> Unit) {
             }
             val rooms = course.roomTexts.mapNotNull { ScheduleText.tidyPlace(it) }.distinct()
             if (rooms.isNotEmpty()) DetailRow("地点", rooms.joinToString("、"))
-            DetailRow("时间", ScheduleText.timeSlots(course.slots))
+            val clock = course.sessions.firstOrNull()?.let { s ->
+                listOfNotNull(s.startTime, s.endTime).takeIf { it.size == 2 }?.joinToString("–")
+            }
+            DetailRow("时间", listOfNotNull(ScheduleText.timeSlots(course.slots), clock).joinToString(" · "))
             DetailRow("周次", ScheduleText.compressWeeks(course.weeks))
-            if (course.code.isNotBlank()) DetailRow("课程代码", course.code)
+            // 研究生课程没有课程号时，mapper 会用课程名当 key；别把课程名再显示成"课程代码"
+            if (course.code.isNotBlank() && course.code != course.nameZh) {
+                DetailRow("课程代码", course.code)
+            }
             course.openDepartment?.takeIf { it.isNotBlank() }?.let { DetailRow("开课院系", it) }
 
             // 计划 vs 实际：计划 = 每周课表时长，实际 = 这门课累计的番茄钟时长

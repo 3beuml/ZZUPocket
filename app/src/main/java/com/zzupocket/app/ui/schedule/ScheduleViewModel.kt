@@ -2,11 +2,15 @@ package com.zzupocket.app.ui.schedule
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.zzupocket.app.core.AppError
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.core.Enrollment
 import com.zzupocket.app.core.ScheduleText
 import com.zzupocket.app.core.toUserMessage
 import com.zzupocket.app.data.auth.AuthRepository
+import com.zzupocket.app.data.gms.GmsScheduleMapper
+import com.zzupocket.app.data.gms.GmsWeekAlign
+import com.zzupocket.app.data.gms.GradLesson
 import com.zzupocket.app.data.prefs.UiPrefsStore
 import com.zzupocket.app.data.repo.ScheduleRepository
 import com.zzupocket.app.domain.Course
@@ -39,7 +43,20 @@ data class ScheduleUiState(
      */
     val gradMode: Boolean = false,
     /** 研究生本周课表（服务端按当前周返回，所以没有日期也能正确显示） */
-    val gmsLessons: List<com.zzupocket.app.data.gms.GradLesson> = emptyList(),
+    val gmsLessons: List<GradLesson> = emptyList(),
+    /**
+     * 研究生整学期课表：已映射成本科的 [Session]/[Course]，直接复用同一套周网格。
+     * 为空时课表页退回原来的登录/空态区块。
+     */
+    val gmsSemester: Semester? = null,
+    val gmsSessions: List<Session> = emptyList(),
+    val gmsCourses: List<Course> = emptyList(),
+    /** 研究生视图当前教学周（由「本周课表」反推） */
+    val gmsWeekIndex: Int = 1,
+    /** 研究生视图的节次时刻（本科 periods 为空时用官方作息表兜底） */
+    val gmsPeriods: List<Period> = emptyList(),
+    /** gmsWeekIndex 是按哪一天对齐的；跨天后重新拉一次 */
+    val gmsWeekResolvedOn: LocalDate? = null,
     val gmsBusy: Boolean = false,
     val gmsError: String? = null,
     /** WebView 登录器是否打开（状态放这儿，转屏/重组都不丢） */
@@ -80,6 +97,12 @@ data class ScheduleUiState(
     val weekCount: Int get() = weeks.size
 
     fun sessionsOf(week: Int): List<Session> = allSessions.filter { it.weekIndex == week }
+
+    /** 研究生视图有哪些教学周（升序） */
+    val gmsWeeks: List<Int> get() = gmsSemester?.weekIndices.orEmpty()
+    val gmsWeekCount: Int get() = gmsSemester?.weekCount ?: 0
+
+    fun gmsSessionsOf(week: Int): List<Session> = gmsSessions.filter { it.weekIndex == week }
 }
 
 class ScheduleViewModel : ViewModel() {
@@ -172,21 +195,60 @@ class ScheduleViewModel : ViewModel() {
         }
     }
 
-    /** 拉研究生本周课表（服务端按当前周返回） */
+    /**
+     * 拉研究生整学期课表并映射成本科网格。
+     *
+     * 需要三次请求：学期列表 → 整学期课表 → 本周课表（只用它对当前教学周）。
+     * 本周课表失败不阻塞整学期展示，只是表头不显示日期。
+     */
     fun loadGmsWeek() {
+        if (_state.value.gmsBusy) return
         _state.update { it.copy(gmsBusy = true, gmsError = null) }
         viewModelScope.launch {
             val result = runCatching {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.zzupocket.app.core.AppGraph.gmsScheduleSource.currentWeek()
+                    val source = AppGraph.gmsScheduleSource
+                    val terms = source.terms()
+                    val term = terms.firstOrNull { it.selected } ?: terms.firstOrNull()
+                        ?: throw AppError.Parse("研究生系统没有返回学期")
+                    val entries = source.weekEntries(term.value)
+                    val current = runCatching { source.currentWeek() }.getOrDefault(emptyList())
+                    Triple(term, entries, current)
                 }
             }
-            _state.update {
-                it.copy(
-                    gmsBusy = false,
-                    gmsLessons = result.getOrDefault(emptyList()),
-                    gmsError = result.exceptionOrNull()?.let { e -> e.toUserMessage() },
-                )
+            result.onSuccess { (term, entries, current) ->
+                if (entries.isEmpty()) {
+                    _state.update {
+                        it.copy(gmsBusy = false, gmsError = "研究生系统没有返回本学期课表数据")
+                    }
+                    return@onSuccess
+                }
+                val periods = _state.value.periods.ifEmpty { GmsScheduleMapper.defaultPeriods() }
+                val sessions = GmsScheduleMapper.toSessions(entries, periods)
+                val courses = GmsScheduleMapper.toCourses(sessions)
+                val semester = GmsScheduleMapper.toSemester(term, entries, current, LocalDate.now())
+                val week = GmsWeekAlign.currentWeekIndex(entries, current)
+                    ?: semester.firstWeek
+                    ?: 1
+                _state.update {
+                    it.copy(
+                        gmsBusy = false,
+                        gmsError = null,
+                        gmsLessons = current,
+                        gmsSemester = semester,
+                        gmsSessions = sessions,
+                        gmsCourses = courses,
+                        gmsWeekIndex = week,
+                        gmsPeriods = periods,
+                        gmsWeekResolvedOn = LocalDate.now(),
+                        periods = periods,
+                        notice = if (semester.startDate == null) {
+                            "未能自动对齐当前教学周，已从第 $week 周开始显示"
+                        } else null,
+                    )
+                }
+            }.onFailure { e ->
+                _state.update { it.copy(gmsBusy = false, gmsError = e.toUserMessage()) }
             }
         }
     }
@@ -196,6 +258,12 @@ class ScheduleViewModel : ViewModel() {
             viewModelScope.launch { bootstrap() }
         } else if (_state.value.loggedIn != auth.isLoggedIn()) {
             viewModelScope.launch { bootstrap() }
+        } else if (_state.value.gradMode) {
+            // 研究生周次是用「本周课表」反推的；跨天后重新对齐一次。
+            // 同一天切回课表页不重复拉取（3 个请求），避免无谓流量。
+            if (_state.value.gmsWeekResolvedOn != LocalDate.now() && !_state.value.gmsBusy) {
+                loadGmsWeek()
+            }
         } else {
             // 切回课表页时不重建数据，但要**对准当前周**：跨天/跨周之后，
             // 停在旧周上会让用户看到上周的课（WeekAlignment 里有完整说明）。
@@ -406,7 +474,12 @@ class ScheduleViewModel : ViewModel() {
         if (session.source == ScheduleRepository.SOURCE_CUSTOM) {
             openPlanEditor(_state.value.plans.firstOrNull { it.code == session.courseCode })
         } else {
-            _state.value.courses.firstOrNull { it.code == session.courseCode }?.let(::openDetail)
+            val pool = if (session.semesterId == GmsScheduleMapper.GRAD_SEMESTER_ID) {
+                _state.value.gmsCourses
+            } else {
+                _state.value.courses
+            }
+            pool.firstOrNull { it.code == session.courseCode }?.let(::openDetail)
         }
     }
 
@@ -431,6 +504,12 @@ class ScheduleViewModel : ViewModel() {
     fun goToWeek(week: Int) {
         if (week !in _state.value.weeks) return
         _state.update { it.copy(weekIndex = week) }
+    }
+
+    /** 研究生视图切换教学周（同样纯本地） */
+    fun goToGmsWeek(week: Int) {
+        if (week !in _state.value.gmsWeeks) return
+        _state.update { it.copy(gmsWeekIndex = week) }
     }
 
     fun refresh() {
