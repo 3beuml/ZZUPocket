@@ -48,6 +48,39 @@ class AuthRepository(
 
     fun casTokenExpiresAt(): Long? = store.casUserToken?.let { Crypto.jwtExpiresAtMillis(it) }
 
+    /**
+     * 诊断用：只描述令牌形态，不返回令牌值。
+     *
+     * 登录接口返回 Success、但 [isLoggedIn] 仍为 false 时，用它区分
+     * "令牌不是 JWT / 缺 exp" 与 "令牌已过期"，避免界面静默回到未登录。
+     */
+    fun casTokenShape(): String {
+        val token = store.casUserToken ?: return "无令牌"
+        val parts = token.split('.')
+        val payload = runCatching {
+            if (parts.size < 2) {
+                ""
+            } else {
+                String(
+                    android.util.Base64.decode(
+                        parts[1],
+                        android.util.Base64.URL_SAFE or
+                            android.util.Base64.NO_WRAP or
+                            android.util.Base64.NO_PADDING,
+                    ),
+                    Charsets.UTF_8,
+                )
+            }
+        }.getOrDefault("")
+        val keys = Regex("\"([^\"]+)\"\\s*:")
+            .findAll(payload)
+            .map { it.groupValues[1] }
+            .take(12)
+            .toList()
+        return "段数=${parts.size}，长度=${token.length}，含exp=${payload.contains("\"exp\"")}，" +
+            "载荷字段=${keys.joinToString(",")}"
+    }
+
     /** 取可用的 userToken（教务等系统直接用这个当 Authorization） */
     fun requireCasToken(): String =
         currentCasToken() ?: throw AppError.ReLoginRequired()

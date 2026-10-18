@@ -30,9 +30,16 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import com.zzupocket.app.core.AppGraph
 
 /**
  * 「校园」= 分组入口页（空教室已按需求从「课表」移到这里）。
@@ -51,6 +58,12 @@ fun CampusScreen(
     onOpenAbout: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
 ) {
+    var loggedIn by remember { mutableStateOf(AppGraph.authRepository.isLoggedIn()) }
+    // 从登录页返回时重新读一次：这一页没有自己的 ViewModel，否则会一直显示"登录 / 切换账号"
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        loggedIn = AppGraph.authRepository.isLoggedIn()
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("更多") }) },
     ) { padding ->
@@ -62,7 +75,12 @@ fun CampusScreen(
         ) {
             GroupTitle("账号")
             EntryCard {
-                Entry(Icons.Filled.Login, "登录 / 切换账号", "使用统一身份认证", onOpenLogin)
+                Entry(
+                    Icons.Filled.Login,
+                    if (loggedIn) "已登录 / 切换账号" else "登录 / 切换账号",
+                    if (loggedIn) "统一身份认证已连接" else "使用统一身份认证",
+                    onOpenLogin,
+                )
                 Entry(Icons.Filled.Settings, "登录状态", "令牌有效期、本机数据统计", onOpenDiagnostics)
                 Entry(Icons.Filled.Info, "关于", "数据来源、隐私与致谢", onOpenAbout)
             }
