@@ -28,6 +28,10 @@
      `https://gmsstu.zzu.edu.cn` 调 `CookieManager.getCookie` 取不到（2026-10-18 实测）。
    - **只带这一枚 Cookie 就能调通**学期/整学期/本周接口；CAS 侧的
      `SESSION`/`TGC` 不是必需的（同一会话下 gms-only 与 cas+gms 返回完全一致）。
+   - 2026-10-18 真机复测（0.31.3 / Android 17）：登录后 WebView 停在
+     `https://gmsstu.zzu.edu.cn/stu/index`，应用内探针在同一页面上读到
+     `cn_com_southsoft_gmis_stu`；同一时刻 App 的 adopt 路径用根路径读取返回空，
+     课表页显示「没拿到研究生系统的登录会话」，与上述路径差异一致。
 3. **业务路由是 base64 包装**：
    ```
    /stu/{b64}   b64 = 标准 base64( "{AppKey}{模块路径}#{session-guid}" )，'=' → '_'
