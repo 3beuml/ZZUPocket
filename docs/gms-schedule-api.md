@@ -179,6 +179,7 @@ kblx=xs&termcode=20261      （termcode 用 2.1 的 value）
 | 渲染一致性 | 网页实际渲染表格 vs 解析输出 | 8 行×2 大节结构一致（parse 后归一星期/节次/周次完全可比） |
 | 路由编码 | base64(b64) 逐字节比对 | 与实测字符串完全一致（`= → '_`） |
 | 外网可达 | 校外（家庭宽带）直接打开 | 可达；CAS web 登录正常 |
+| 真机 0.31.3（2026-10-18） | WebView 登录后停 `/stu/index`；同一页面探针读到 `cn_com_southsoft_gmis_stu` | 根路径 adopt 失败；改用 `/stu/` 后成功，整学期网格正常 |
 
 ## 五、接入建议（下接 App 的课表仓库/UI）
 
@@ -188,7 +189,8 @@ kblx=xs&termcode=20261      （termcode 用 2.1 的 value）
 3. **周网格**：`fetchTermTable(termcode)` → `expandWeeks()` → `CourseSessionEntity`（`source = "gms"`）。
 4. **节次时刻缺失**：gmsstu 无节次时刻表；实现内置学校官方《作息时间表》的 10 节课
    （见 §3.1），只显示第N节与开始时间，不显示起床/就餐/课间操/晚自习等辅助项。
-5. **本周/今日**：直接用 `fetchWeekTable()`（ 服务端自行按当前周返回），比本科端靠周推日更直接。
+5. **本周/今日**：课表页已用整学期网格（`bzkb_load` 只用来对齐当前周）；
+   今日页/桌面小组件若要接入，需要把 `gmsSessions` 落库（本次未做）。
 
 ## 六、已知坑位/待真机复验证清单
 
