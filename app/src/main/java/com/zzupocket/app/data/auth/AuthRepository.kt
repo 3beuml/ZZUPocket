@@ -57,28 +57,22 @@ class AuthRepository(
     fun casTokenShape(): String {
         val token = store.casUserToken ?: return "无令牌"
         val parts = token.split('.')
-        val payload = runCatching {
-            if (parts.size < 2) {
-                ""
-            } else {
+        val payload = parts.getOrNull(1)?.let { part ->
+            runCatching {
                 String(
                     android.util.Base64.decode(
-                        parts[1],
+                        part,
                         android.util.Base64.URL_SAFE or
                             android.util.Base64.NO_WRAP or
                             android.util.Base64.NO_PADDING,
                     ),
                     Charsets.UTF_8,
                 )
-            }
-        }.getOrDefault("")
-        val keys = Regex("\"([^\"]+)\"\\s*:")
-            .findAll(payload)
-            .map { it.groupValues[1] }
-            .take(12)
-            .toList()
-        return "段数=${parts.size}，长度=${token.length}，含exp=${payload.contains("\"exp\"")}，" +
-            "载荷字段=${keys.joinToString(",")}"
+            }.getOrDefault("")
+        }.orEmpty()
+        val keys = Regex("\"([^\"]+)\"\\s*:").findAll(payload)
+            .map { it.groupValues[1] }.take(12).joinToString(",")
+        return "段数=${parts.size}，长度=${token.length}，含exp=${payload.contains("\"exp\"")}，载荷字段=$keys"
     }
 
     /** 取可用的 userToken（教务等系统直接用这个当 Authorization） */
