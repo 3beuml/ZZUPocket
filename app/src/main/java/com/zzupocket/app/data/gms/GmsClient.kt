@@ -10,6 +10,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -36,10 +37,13 @@ import javax.crypto.Cipher
  *     Cookie，之后接口只认 Cookie（实测挖掉 Cookie 的同一请求直接被 302 回 CAS 页）。
  *     → [client] 必须**自带 CookieJar 且跟随重定向**（与 `HttpClients.eas` 那套「不跟跳」
  *       正好相反，最快写法是 [Companion.newClient]）。
+ *     → WebView 登录后取 Cookie 必须用 `https://gmsstu.zzu.edu.cn/stu/`：会话 Cookie
+ *       `cn_com_southsoft_gmis_stu` 的 `Path=/stu`，用根路径 `getCookie` 取不到。
  *  2. 业务 URL 是 base64 包装：`/stu/{b64}`，其中
  *     `b64 = base64("{AppKey}{模块路径}#{session-guid}")` 且 `'=' → '_'`；
- *     AppKey 固定 "MyHeartWillGoOn"，guid 会话级随机，登录后从 /stu/index 的 HTML
- *     提取（实测整段会话内不变）。
+ *     AppKey 固定 "MyHeartWillGoOn"，guid 会话级随机（实测整段会话内不变）。
+ *     **guid 就是会话 Cookie 的值**（2026-10-18 实测；当前站点 `/stu/` HTML 里已无
+ *     `#uuid`，HTML 正则仅作旧版本兜底）。
  *  3. 课表形状是 **周区间 + 节次单值、无日期、无节次时刻**：
  *     「每周一条」用 [expandWeeks] 展开；节次只有「第N节」，没有时刻表。
  */
@@ -217,7 +221,10 @@ class GmsClient(
 
     // ── 会话与登录 ────────────────────────────────────────────────────────
 
-    /** 会话路由 guid —— 登录后从 /stu/index HTML 提取，实测整段会话内不变 */
+    /**
+     * 会话路由 guid —— 优先从会话 Cookie 的值取（站点当前版本）；
+     * 旧版本页面把 `#uuid` 写在 HTML 里，保留正则兜底。
+     */
     private var guid: String? = null
 
     /**
@@ -225,6 +232,9 @@ class GmsClient(
      * 成功时顺手把 guid 收好（[route] 复用）。网络错误照常上抛，不吞。
      */
     suspend fun isSessionAlive(): Boolean = try {
+        // 清掉缓存，强制真发一次 /stu/；否则 withGuid() 会直接返回缓存的 guid，
+        // 「检查会话」就永远显示有效。
+        guid = null
         withGuid()
         true
     } catch (_: AppError.ReLoginRequired) {
@@ -242,9 +252,21 @@ class GmsClient(
                 throw unlogin()
             }
             guid = GUID_RE.find(html)?.groupValues?.get(1)
+                ?: guidFromCookie()
                 ?: throw AppError.Parse("研究生教务页面缺少会话标识（可能改版了）")
             guid!!
         }
+    }
+
+    /**
+     * 站点当前版本登录后的 HTML 里没有 `#uuid`，但会话 Cookie
+     * `cn_com_southsoft_gmis_stu` 的值就是 guid（2026-10-18 实测）。
+     * 从 CookieJar 读，取不到返回 null，交给旧版 HTML 正则或报错。
+     */
+    private fun guidFromCookie(): String? {
+        val url = STU_HOME.toHttpUrlOrNull() ?: return null
+        val cookies = client.cookieJar.loadForRequest(url).associate { it.name to it.value }
+        return GmsCookie.guidOf(cookies)
     }
 
     private suspend fun route(modulePath: String): String =

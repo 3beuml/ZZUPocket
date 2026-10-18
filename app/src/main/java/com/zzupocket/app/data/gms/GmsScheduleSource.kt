@@ -36,7 +36,7 @@ class GmsScheduleSource(
 
     /**
      * WebView 登录成功后调用：注入会话 Cookie 并落盘。
-     * @param cookieHeader `CookieManager.getCookie("https://gmsstu.zzu.edu.cn")` 的原样字符串
+     * @param cookieHeader `CookieManager.getCookie(COOKIE_URL)` 的原样字符串
      * @return 是否真的拿到了会话（false = 没登录成功，别当成功用）
      */
     fun onWebViewLogin(cookieHeader: String?): Boolean {
@@ -119,6 +119,14 @@ class GmsScheduleSource(
 
     companion object {
         const val HOST = "gmsstu.zzu.edu.cn"
+
+        /**
+         * WebView 登录后从 CookieManager 取会话的 URL。
+         *
+         * 会话 Cookie `cn_com_southsoft_gmis_stu` 的 `Path=/stu`，用根路径
+         * `https://gmsstu.zzu.edu.cn` 取不到（2026-10-18 实测）。
+         */
+        const val COOKIE_URL = "https://" + HOST + "/stu/"
 
         /** 落库时用这个来源名（与本科的 `"eas"` 区分，课表页按它标注来源） */
         const val SOURCE = "gms"
