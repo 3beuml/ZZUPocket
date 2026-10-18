@@ -1,6 +1,7 @@
 package com.zzupocket.app.data.gms
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,5 +55,35 @@ class GmsCookieTest {
         assertEquals("x", jar.loadForRequest(url).firstOrNull()?.value)
         jar.clear()
         assertEquals(0, jar.size())
+    }
+
+    @Test
+    fun `会话 Cookie 的值就是 guid`() {
+        val guid = "01234567-89ab-cdef-0123-456789abcdef"
+        val m = GmsCookie.parse("cn_com_southsoft_gmis_stu=$guid; route=1a2b")
+        assertEquals(guid, GmsCookie.guidOf(m))
+    }
+
+    @Test
+    fun `会话值不是 UUID 时不当作 guid`() {
+        assertNull(GmsCookie.guidOf(GmsCookie.parse("cn_com_southsoft_gmis_stu=not-a-uuid")))
+        assertNull(GmsCookie.guidOf(emptyMap()))
+    }
+
+    @Test
+    fun `响应只带新 cookie 时不会丢掉已注入的会话`() {
+        val jar = GmsCookieJar()
+        jar.seed("gmsstu.zzu.edu.cn", mapOf("cn_com_southsoft_gmis_stu" to "guid-value"))
+        val url = okhttp3.HttpUrl.Builder().scheme("https").host("gmsstu.zzu.edu.cn").build()
+        val route = okhttp3.Cookie.Builder()
+            .domain("gmsstu.zzu.edu.cn")
+            .path("/")
+            .name("route")
+            .value("1a2b")
+            .build()
+        jar.saveFromResponse(url, listOf(route))
+        val names = jar.loadForRequest(url).map { it.name }.toSet()
+        assertTrue("cn_com_southsoft_gmis_stu" in names)
+        assertTrue("route" in names)
     }
 }

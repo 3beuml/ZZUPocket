@@ -19,6 +19,20 @@ import okhttp3.HttpUrl
 object GmsCookie {
 
     /**
+     * 研究生系统的会话 Cookie。
+     *
+     * 它的值就是路由用的 `session-guid`（2026-10-18 实测：登录后页面发出的 12 条
+     * `/stu/{b64}` 请求解出来的 guid 与它逐字相同）。站点当前版本的 `/stu/` 与
+     * `/stu/index` HTML 里已经没有 `#uuid`，所以 guid 优先从这枚 Cookie 取。
+     */
+    const val SESSION_COOKIE = "cn_com_southsoft_gmis_stu"
+
+    private val GUID_VALUE_RE = Regex(
+        "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /**
      * 把 `CookieManager.getCookie(url)` 那种 `k=v; k2=v2` 字符串拆成 Map。
      * **纯函数，便于单测**；解析不出任何键值对就返回空 Map（调用方据此判断"没会话"）。
      */
@@ -40,6 +54,15 @@ object GmsCookie {
     /** 把 Map 拼回 `k=v; k2=v2`（写进存储用） */
     fun join(cookies: Map<String, String>): String =
         cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+
+    /**
+     * 从会话 Cookie 里取 `session-guid`；没有或形态不对返回 null。
+     *
+     * 调用方应保留 HTML 正则作为兜底：万一站点以后又改回把 guid 写进页面，
+     * 两条路都能走。
+     */
+    fun guidOf(cookies: Map<String, String>): String? =
+        cookies[SESSION_COOKIE]?.takeIf { GUID_VALUE_RE.matches(it) }
 }
 
 /**
@@ -72,7 +95,12 @@ class GmsCookieJar : CookieJar {
     fun clear() = store.clear()
 
     override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        if (cookies.isNotEmpty()) store[url.host] = cookies.toMutableList()
+        if (cookies.isEmpty()) return
+        // 合并而不是整体替换：服务端有时只在响应里回一个新 cookie（例如 route），
+        // 整体替换会把 WebView 注入的会话 cookie 一并丢掉。
+        val merged = store[url.host].orEmpty().associateBy { it.name }.toMutableMap()
+        cookies.forEach { merged[it.name] = it }
+        store[url.host] = merged.values.toMutableList()
     }
 
     override fun loadForRequest(url: HttpUrl): List<Cookie> = store[url.host].orEmpty()

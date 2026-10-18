@@ -159,7 +159,7 @@ class ScheduleViewModel : ViewModel() {
         viewModelScope.launch {
             val cookie = runCatching {
                 android.webkit.CookieManager.getInstance()
-                    .getCookie("https://" + com.zzupocket.app.data.gms.GmsScheduleSource.HOST)
+                    .getCookie(com.zzupocket.app.data.gms.GmsScheduleSource.COOKIE_URL)
             }.getOrNull()
             val adopted = com.zzupocket.app.core.AppGraph.gmsScheduleSource.onWebViewLogin(cookie)
             if (!adopted) {

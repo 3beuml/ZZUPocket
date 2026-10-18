@@ -1,7 +1,8 @@
 # 研究生教务（gmsstu.zzu.edu.cn）课表接口协议与解析实现
 
 > 来源：ZZUPocket issue #2（研究生账号把本科教务当成唯一教务菜单的「登录态失效」误报）。
-> 2026-10-17 由真实研究生账号在外网（家庭宽带）实测取证，全部接口经当次会话真机复跑确认。
+> 2026-10-17 由真实研究生账号在外网（家庭宽带）实测取证，全部接口经当次会话真机复跑确认；
+> 2026-10-18 复测补充了会话 Cookie 的路径与 guid 来源（见下）。
 > 本文与 `app/src/main/java/com/zzupocket/app/data/gms/` 的实现一一对应；
 > `tools/gms_probe.py` 是可在本机复跑整条链路的探针脚本（仅标准库）。
 
@@ -22,14 +23,22 @@
    完成 CAS 网页登录后 302 带回 ticket，gmsstu 落一组会话 Cookie。
 2. **接口只认 Cookie**（同一会话实测：把 Cookie 挖掉（fetch `credentials:'omit'` 重发同一 loadKb）
    会直接被 302 回 CAS；保持 Cookie 时返回 200 + rows）。**没有**可供替换的 JWT/Authorization。
+   - 会话 Cookie 名为 `cn_com_southsoft_gmis_stu`，`Path=/stu`，`HttpOnly`。
+     取会话必须用 `https://gmsstu.zzu.edu.cn/stu/`；用根路径
+     `https://gmsstu.zzu.edu.cn` 调 `CookieManager.getCookie` 取不到（2026-10-18 实测）。
+   - **只带这一枚 Cookie 就能调通**学期/整学期/本周接口；CAS 侧的
+     `SESSION`/`TGC` 不是必需的（同一会话下 gms-only 与 cas+gms 返回完全一致）。
 3. **业务路由是 base64 包装**：
    ```
    /stu/{b64}   b64 = 标准 base64( "{AppKey}{模块路径}#{session-guid}" )，'=' → '_'
                 AppKey 固定 "MyHeartWillGoOn"；session-guid 会话级随机
-                （实测整个会话内不变，登录后从 /stu/index 的 HTML 中 # 格式的 UUID 正则提取）
+                （实测整个会话内不变）
    ```
-   实测样例（guid 代占为 deadbeef-…）与逐字节校验在 Kotlin 侧
-   `GmsClient.encodeRoute(modulePath, guid)`，并有单元测试覆盖。
+   - `session-guid` **就是会话 Cookie `cn_com_southsoft_gmis_stu` 的值**（36 字符 UUID）。
+     2026-10-18 实测：登录后页面发出的 12 条 `/stu/{b64}` 请求解出的 guid 与 Cookie 值
+     逐字相同；当前 `/stu/`、`/stu/index` 的 HTML 里已经没有 `#uuid`，HTML 正则仅作旧版兜底。
+   - 实测样例（guid 代占为 deadbeef-…）与逐字节校验在 Kotlin 侧
+     `GmsClient.encodeRoute(modulePath, guid)`，并有单元测试覆盖。
 4. **注意**：脱离正常会话上下文对同一 URL 直接整页 GET（不经菜单/iframe 链），
    偶发 `{"code":500,"msg":"系统异常"}`；复现请保持登录 Cookie 并按正常页面流程走。
    这在 Android 端不构成问题（本就全程带 Cookie）。

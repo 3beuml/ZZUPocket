@@ -167,7 +167,9 @@ fun ScheduleScreen(
             }
 
             when {
-                state.weeks.isEmpty() -> NoSemesterBlock(
+                // gradMode 优先：从 0.31.0 覆盖升级的账号可能已有学期缓存，weeks 非空；
+                // 只看 weeks 会让研究生区块和底部兜底入口都被本科周表格挡住。
+                state.gradMode || state.weeks.isEmpty() -> NoSemesterBlock(
                     loggedIn = state.loggedIn,
                     loading = state.loading,
                     gradMode = state.gradMode,
