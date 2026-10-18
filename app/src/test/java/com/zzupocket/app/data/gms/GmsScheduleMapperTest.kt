@@ -122,7 +122,7 @@ class GmsScheduleMapperTest {
         )
         assertEquals(10, semester.firstWeek)
         assertEquals(17, semester.lastWeek)
-        assertEquals(10..17, semester.weekIndices.first()..semester.weekIndices.last())
+        assertEquals((10..17).toList(), semester.weekIndices)
         assertEquals(GmsWeekAlign.weekOneMonday(today, 12), semester.startDate)
         assertEquals(12, GmsWeekAlign.currentWeekIndex(entries, current))
     }
@@ -145,7 +145,7 @@ class GmsScheduleMapperTest {
             emptyList(),
             LocalDate.of(2026, 10, 18),
         )
-        assertEquals(3..3, semester.weekIndices.first()..semester.weekIndices.last())
+        assertEquals(listOf(3), semester.weekIndices)
         assertTrue(semester.startDate == null)
     }
 }
