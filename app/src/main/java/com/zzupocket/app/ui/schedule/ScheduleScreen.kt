@@ -140,7 +140,7 @@ fun ScheduleScreen(
                             Icon(Icons.Filled.Add, contentDescription = "添加日程")
                         }
                     }
-                    IconButton(onClick = { if (state.gradMode) vm.loadGmsWeek() else vm.refresh() }) {
+                    IconButton(onClick = { if (state.gradMode) vm.loadGmsWeek(force = true) else vm.refresh() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新课表")
                     }
                     IconButton(onClick = onOpenDisplaySettings) {
@@ -217,7 +217,7 @@ fun ScheduleScreen(
                     onLogin = onOpenLogin,
                     onRefresh = vm::refresh,
                     onGmsLogin = vm::openGmsLogin,
-                    onGmsRefresh = vm::loadGmsWeek,
+                    onGmsRefresh = { vm.loadGmsWeek(force = true) },
                     onGmsDialogDismiss = vm::closeGmsLogin,
                     onGmsAdopt = vm::adoptGmsSession,
                     onGradFallback = vm::useGradSchedule,

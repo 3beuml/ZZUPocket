@@ -164,7 +164,7 @@ class ScheduleViewModel : ViewModel() {
         gradProbed = true
         _state.update { it.copy(gradMode = true, error = null, gmsError = null) }
         if (com.zzupocket.app.core.AppGraph.gmsScheduleSource.hasSession()) {
-            loadGmsWeek()
+            loadGmsWeek(force = true)
         } else {
             openGmsLogin()
         }
@@ -191,29 +191,49 @@ class ScheduleViewModel : ViewModel() {
                 }
                 return@launch
             }
-            loadGmsWeek()
+            // force：刚拿到的会话一定是新的，别被上一次还在跑的加载挡住
+            loadGmsWeek(force = true)
         }
     }
+
+    /**
+     * 正在跑的研究生课表加载。
+     *
+     * ⚠️ 这里用 Job 而不是 `gmsBusy` 当并发闸门：0.31.4 曾经是
+     * 「adoptGmsSession 先置 gmsBusy=true，再调 loadGmsWeek，而 loadGmsWeek 第一行
+     * `if (gmsBusy) return`」——第一次走到就被自己挡住，gmsBusy 永远停在 true，
+     * 界面无限转圈且不给任何错误（issue #2 报告者复现）。用 Job 判断就不会自锁。
+     */
+    private var gmsJob: kotlinx.coroutines.Job? = null
+
+    /** 研究生课表三次请求的总预算；超了就给一句人话，别让界面无限转圈 */
+    private val GMS_TIMEOUT_MS = 30_000L
 
     /**
      * 拉研究生整学期课表并映射成本科网格。
      *
      * 需要三次请求：学期列表 → 整学期课表 → 本周课表（只用它对当前教学周）。
      * 本周课表失败不阻塞整学期展示，只是表头不显示日期。
+     *
+     * @param force true = 取消在跑的那次重新拉（刷新按钮、登录完成后都该用它）
      */
-    fun loadGmsWeek() {
-        if (_state.value.gmsBusy) return
+    fun loadGmsWeek(force: Boolean = false) {
+        if (!force && gmsJob?.isActive == true) return
+        gmsJob?.cancel()
         _state.update { it.copy(gmsBusy = true, gmsError = null) }
-        viewModelScope.launch {
+        gmsJob = viewModelScope.launch {
             val result = runCatching {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    val source = AppGraph.gmsScheduleSource
-                    val terms = source.terms()
-                    val term = terms.firstOrNull { it.selected } ?: terms.firstOrNull()
-                        ?: throw AppError.Parse("研究生系统没有返回学期")
-                    val entries = source.weekEntries(term.value)
-                    val current = runCatching { source.currentWeek() }.getOrDefault(emptyList())
-                    Triple(term, entries, current)
+                // 兜底超时：网络卡住时给一句人话，而不是让界面永远转圈
+                kotlinx.coroutines.withTimeout(GMS_TIMEOUT_MS) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val source = AppGraph.gmsScheduleSource
+                        val terms = source.terms()
+                        val term = terms.firstOrNull { it.selected } ?: terms.firstOrNull()
+                            ?: throw AppError.Parse("研究生系统没有返回学期")
+                        val entries = source.weekEntries(term.value)
+                        val current = runCatching { source.currentWeek() }.getOrDefault(emptyList())
+                        Triple(term, entries, current)
+                    }
                 }
             }
             result.onSuccess { (term, entries, current) ->
@@ -248,7 +268,18 @@ class ScheduleViewModel : ViewModel() {
                     )
                 }
             }.onFailure { e ->
-                _state.update { it.copy(gmsBusy = false, gmsError = e.toUserMessage()) }
+                // 被新一次刷新取消：静默，不要报错（新任务已经在跑）
+                if (e is kotlinx.coroutines.CancellationException &&
+                    e !is kotlinx.coroutines.TimeoutCancellationException
+                ) {
+                    return@onFailure
+                }
+                val msg = if (e is kotlinx.coroutines.TimeoutCancellationException) {
+                    "研究生系统 ${GMS_TIMEOUT_MS / 1000} 秒内没有响应，请检查网络后重试"
+                } else {
+                    e.toUserMessage()
+                }
+                _state.update { it.copy(gmsBusy = false, gmsError = msg) }
             }
         }
     }
@@ -261,7 +292,7 @@ class ScheduleViewModel : ViewModel() {
         } else if (_state.value.gradMode) {
             // 研究生周次是用「本周课表」反推的；跨天后重新对齐一次。
             // 同一天切回课表页不重复拉取（3 个请求），避免无谓流量。
-            if (_state.value.gmsWeekResolvedOn != LocalDate.now() && !_state.value.gmsBusy) {
+            if (_state.value.gmsWeekResolvedOn != LocalDate.now() && gmsJob?.isActive != true) {
                 loadGmsWeek()
             }
         } else {
