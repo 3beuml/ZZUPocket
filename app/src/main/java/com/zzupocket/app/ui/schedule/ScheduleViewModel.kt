@@ -332,6 +332,15 @@ class ScheduleViewModel : ViewModel() {
                         } else null,
                     )
                 }
+                // 顺手落库（0.31.8 只写不读：读路径等周次验证通过后再接，所以对界面零影响）
+                runCatching {
+                    repo.saveTimetable(
+                        source = com.zzupocket.app.data.gms.GmsScheduleSource.SOURCE,
+                        semesterId = GmsScheduleMapper.GRAD_SEMESTER_ID,
+                        sessions = sessions,
+                        courses = courses,
+                    )
+                }
             }.onFailure { e ->
                 // 被新一次刷新取消：静默，不要报错（新任务已经在跑）
                 if (e is kotlinx.coroutines.CancellationException &&
@@ -345,6 +354,14 @@ class ScheduleViewModel : ViewModel() {
                     e.toUserMessage()
                 }
                 _state.update { it.copy(gmsBusy = false, gmsError = msg) }
+                // 记一次失败原因：将来「有缓存但刷新失败」时要能说清是会话过期还是教务不可用
+                runCatching {
+                    repo.markSyncError(
+                        com.zzupocket.app.data.gms.GmsScheduleSource.SOURCE,
+                        GmsScheduleMapper.GRAD_SEMESTER_ID,
+                        msg,
+                    )
+                }
             }
         }
     }

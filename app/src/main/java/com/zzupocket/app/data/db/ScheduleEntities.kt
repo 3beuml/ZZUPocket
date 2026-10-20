@@ -80,8 +80,50 @@ interface CourseDao {
     suspend fun countBySemester(semesterId: Int): Int
 
     /** 番茄钟的标签候选：所有学期出现过的课名（去重） */
-    @Query("SELECT DISTINCT nameZh FROM courses ORDER BY nameZh ASC")
+    @Query("SELECT DISTINCT nameZh FROM courses WHERE semesterId >= 0 ORDER BY nameZh ASC")
     fun observeAllNames(): Flow<List<String>>
+}
+
+// ── 课表同步状态（本科 / 研究生共用）──────────────────────────────────
+
+/**
+ * 某个来源、某个学期最近一次成功抓取的时间与最近一次错误。
+ *
+ * 为什么要单独存：课表要"先显示缓存、再后台刷新"，就必须知道
+ * **这份缓存是什么时候抓的**（界面上的「数据截至 HH:MM」、以及 12 小时 TTL 判断），
+ * 以及**上次为什么失败**（区分"会话过期"与"教务不可用"，别让用户白重登）。
+ *
+ * 研究生用合成学期 id（-10001），本科用真实学期 id，靠 `source` 区分。
+ */
+@Entity(tableName = "timetable_sync", primaryKeys = ["source", "semesterId"])
+data class TimetableSyncEntity(
+    val source: String,
+    val semesterId: Int,
+    /** 最近一次**成功**抓取的时间（毫秒）；0 = 从没成功过 */
+    val fetchedAt: Long,
+    val lastError: String? = null,
+    val lastErrorAt: Long? = null,
+)
+
+@Dao
+interface TimetableSyncDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: TimetableSyncEntity)
+
+    @Query("SELECT * FROM timetable_sync WHERE source = :source AND semesterId = :semesterId")
+    suspend fun get(source: String, semesterId: Int): TimetableSyncEntity?
+
+    @Query("SELECT * FROM timetable_sync WHERE source = :source AND semesterId = :semesterId")
+    fun observe(source: String, semesterId: Int): Flow<TimetableSyncEntity?>
+
+    @Query("UPDATE timetable_sync SET lastError = :error, lastErrorAt = :at WHERE source = :source AND semesterId = :semesterId")
+    suspend fun markError(source: String, semesterId: Int, error: String, at: Long)
+
+    @Query("DELETE FROM timetable_sync")
+    suspend fun clear()
+
+    @Query("DELETE FROM timetable_sync WHERE source = :source")
+    suspend fun clearBySource(source: String)
 }
 
 // ── 上课记录 ────────────────────────────────────────────────────────────
@@ -125,6 +167,15 @@ interface CourseSessionDao {
     /** 只清理教务来源的记录，**不能碰自定义日程** */
     @Query("DELETE FROM course_sessions WHERE semesterId = :semesterId AND source = 'eas'")
     suspend fun deleteEasBySemester(semesterId: Int)
+
+    /**
+     * 按来源清理（研究生落库用 `source = 'gms'`）。
+     *
+     * ⚠️ 注意与 [deleteEasBySemester] 的区别：那边把 `'eas'` 写死在 SQL 里，
+     * 这里按参数删。**任何来源都不能顺手删到 `'custom'`** —— 那是用户自己加的日程。
+     */
+    @Query("DELETE FROM course_sessions WHERE semesterId = :semesterId AND source = :source")
+    suspend fun deleteBySemesterAndSource(semesterId: Int, source: String)
 
     /** 重写某个自定义日程：先删掉它的全部周次记录，再按新的周次插回去 */
     @Query("DELETE FROM course_sessions WHERE courseKey = :courseKey")

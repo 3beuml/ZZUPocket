@@ -8,6 +8,7 @@ import com.zzupocket.app.data.db.CourseEntity
 import com.zzupocket.app.data.db.CourseSessionEntity
 import com.zzupocket.app.data.db.PeriodEntity
 import com.zzupocket.app.data.db.SemesterEntity
+import com.zzupocket.app.data.db.TimetableSyncEntity
 import com.zzupocket.app.data.eas.EasClient
 import com.zzupocket.app.domain.Course
 import com.zzupocket.app.domain.Period
@@ -400,6 +401,112 @@ class ScheduleRepository(
 
     /** 已保存的学号 —— 用来推断入学年（学号前 4 位） */
     suspend fun settingsAccount(): String? = db.settingsDao().get()?.account
+
+    // ── 课表缓存：写入与同步状态（本科/研究生共用）──────────────────────
+
+    /**
+     * 把某个来源的课表整体写入（先按来源删、再插；**不会碰 `custom` 日程**）。
+     *
+     * 研究生走这条：`semesterId = GmsScheduleMapper.GRAD_SEMESTER_ID`、`source = "gms"`。
+     * 现在只写不读（读路径等 0.31.7 周次验证通过后再接），所以对现有界面零影响。
+     */
+    suspend fun saveTimetable(
+        source: String,
+        semesterId: Int,
+        sessions: List<Session>,
+        courses: List<Course>,
+        fetchedAt: Long = System.currentTimeMillis(),
+    ) {
+        val courseEntities = courses.map { c ->
+            CourseEntity(
+                key = courseKeyOf(semesterId, c.code),
+                semesterId = semesterId,
+                code = c.code,
+                nameZh = c.nameZh,
+                credits = c.credits,
+                openDepartment = c.openDepartment,
+                teachersCsv = c.teachers.joinToString(","),
+                updatedAt = fetchedAt,
+            )
+        }
+        val sessionEntities = sessions.map { s ->
+            CourseSessionEntity(
+                id = s.id,
+                courseKey = courseKeyOf(semesterId, s.courseCode),
+                semesterId = semesterId,
+                source = source,
+                courseName = s.courseName,
+                weekIndex = s.weekIndex,
+                weekday = s.weekday,
+                startUnit = s.startUnit,
+                endUnit = s.endUnit,
+                date = s.date,
+                startTime = s.startTime,
+                endTime = s.endTime,
+                teacherName = s.teacherName,
+                roomText = s.roomText,
+                campusText = s.campusText,
+                color = s.color,
+                updatedAt = fetchedAt,
+            )
+        }
+        db.withTransaction {
+            db.courseSessionDao().deleteBySemesterAndSource(semesterId, source)
+            db.courseDao().deleteBySemester(semesterId)
+            db.courseDao().upsertAll(courseEntities)
+            db.courseSessionDao().upsertAll(sessionEntities)
+            db.timetableSyncDao().upsert(
+                TimetableSyncEntity(
+                    source = source,
+                    semesterId = semesterId,
+                    fetchedAt = fetchedAt,
+                    lastError = null,
+                    lastErrorAt = null,
+                ),
+            )
+        }
+    }
+
+    /** 最近一次成功抓取的时间（毫秒）；null = 从没成功过 */
+    suspend fun lastFetchedAt(source: String, semesterId: Int): Long? =
+        db.timetableSyncDao().get(source, semesterId)?.fetchedAt?.takeIf { it > 0L }
+
+    /** 记一次失败原因（供「失败但保留缓存」的提示用；不要吞掉调用方的异常） */
+    suspend fun markSyncError(source: String, semesterId: Int, error: String) {
+        val now = System.currentTimeMillis()
+        val existing = db.timetableSyncDao().get(source, semesterId)
+        if (existing == null) {
+            db.timetableSyncDao().upsert(
+                TimetableSyncEntity(source, semesterId, 0L, error.take(200), now),
+            )
+        } else {
+            db.timetableSyncDao().markError(source, semesterId, error.take(200), now)
+        }
+    }
+
+    /** 某个来源已经缓存了多少节课（判断"有没有缓存可显示"用） */
+    suspend fun cachedSessionCount(source: String, semesterId: Int): Int =
+        db.courseSessionDao().bySemesterAndSource(semesterId, source).size
+
+    /** 读某个来源的缓存（返回领域模型；没有缓存就是空表） */
+    suspend fun cachedSessions(source: String, semesterId: Int): List<Session> =
+        db.courseSessionDao().bySemesterAndSource(semesterId, source).map { it.toDomain() }
+
+    fun observeTimetableSync(source: String, semesterId: Int): Flow<TimetableSyncEntity?> =
+        db.timetableSyncDao().observe(source, semesterId)
+
+    /**
+     * 清掉某个来源的缓存（退出登录时用）。
+     *
+     * 课表是按账号抓的，退出后不该留在设备上；`custom` 日程不在此列（那是用户自己的数据）。
+     */
+    suspend fun clearTimetable(source: String, semesterId: Int) {
+        db.withTransaction {
+            db.courseSessionDao().deleteBySemesterAndSource(semesterId, source)
+            db.courseDao().deleteBySemester(semesterId)
+            db.timetableSyncDao().clearBySource(source)
+        }
+    }
 
     companion object {
         const val SOURCE_EAS = "eas"
