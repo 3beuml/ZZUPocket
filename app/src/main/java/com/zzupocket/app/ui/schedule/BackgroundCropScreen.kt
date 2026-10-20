@@ -1,8 +1,12 @@
-package com.zzupocket.app.ui.schedule
+﻿package com.zzupocket.app.ui.schedule
 
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
+import android.graphics.BitmapFactory
+import java.io.File
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.withTimeoutOrNull
 import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -13,6 +17,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,12 +83,32 @@ fun BackgroundCropScreen(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
+    // 解码结果 + 失败原因。
+    //
+    // ⚠️ 必须记原因：华为等机型的相册可能给出"云相册"图片（本地只有缩略图，原图要联网下载），
+    // 读取流会卡住。以前这里没有任何超时与提示，界面就是一个永远转的圈 —— 用户只会说
+    // "换不了壁纸"。现在：超时/失败都要给一句人话，并告诉他怎么办。
+    var loadError by remember(sourceUri, useSavedSource) { mutableStateOf<String?>(null) }
     val source by produceState<Bitmap?>(initialValue = null, sourceUri, useSavedSource) {
         value = withContext(Dispatchers.IO) {
             if (useSavedSource) {
                 decodeBitmapFile(ScheduleBackground.sourceFile(context), MAX_DECODE_WIDTH)
+            } else if (sourceUri == null) {
+                null
             } else {
-                sourceUri?.let { decodeSampled(context, it) }
+                // 10 秒还没读完就放弃：正常本地图片远用不到这么久
+                val decoded = withTimeoutOrNull(DECODE_TIMEOUT_MS) {
+                    decodeSampled(context, sourceUri!!)
+                }
+                if (decoded == null) {
+                    loadError = if (sourceUri != null) {
+                        "这张图片读不出来（可能还在云端没下载到本地）。\n" +
+                            "可以：先在相册里把原图下载到本地，或换一张截图/照片试试。"
+                    } else {
+                        null
+                    }
+                }
+                decoded
             }
         }
     }
@@ -159,7 +185,24 @@ fun BackgroundCropScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             if (bitmap == null) {
-                CircularProgressIndicator()
+                val err = loadError
+                if (err == null) {
+                    CircularProgressIndicator()
+                } else {
+                    // 失败时必须说清楚，并给出可操作的建议（华为云相册是最常见的坑）
+                    Text(
+                        text = err,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "点左上角关闭，重新选一张",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 return@Column
             }
 
@@ -285,22 +328,78 @@ private fun renderCrop(src: Bitmap, frame: CoverFrame): Bitmap? {
     }.getOrNull() ?: runCatching { Bitmap.createBitmap(src) }.getOrNull()
 }
 
-/** 解码相册图片：先按需采样，再交给 ImageDecoder（它会自动按 EXIF 把方向摆正） */
-private fun decodeSampled(context: Context, uri: Uri): Bitmap? = runCatching {
-    val source = ImageDecoder.createSource(context.contentResolver, uri)
-    ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-        decoder.isMutableRequired = false
-        val width = info.size.width
-        if (width > MAX_DECODE_WIDTH) {
-            decoder.setTargetSampleSize(
-                (width / MAX_DECODE_WIDTH.toFloat()).roundToInt().coerceAtLeast(1),
+/**
+ * 解码相册图片。
+ *
+ * 关键点：**先把内容拷到本地临时文件，再从文件解码**。
+ *
+ * 为什么不能直接 `ImageDecoder.createSource(contentResolver, uri)`：部分机型（华为/荣耀等）
+ * 相册返回的可能是云端图片，`openInputStream` 会阻塞在下载上，而且没有超时 ——
+ * 表现就是"裁剪页空白 + 一直转圈"。拷到本地只需要一次顺序读，外层还有超时兜底；
+ * 拷下来之后 `ImageDecoder` 依然会按 EXIF 自动摆正方向。
+ */
+private fun decodeSampled(context: Context, uri: Uri): Bitmap? {
+    // ① 内容先落成本地文件（一次顺序读，最容易被超时覆盖）
+    val temp = runCatching {
+        val f = File(context.cacheDir, "wallpaper_src.bin")
+        val input = context.contentResolver.openInputStream(uri) ?: return null
+        input.use { ins -> f.outputStream().use { out -> ins.copyTo(out, 64 * 1024) } }
+        f.takeIf { it.length() > 0 }
+    }.getOrNull()
+
+    // ② 从本地文件解码：ImageDecoder 优先（自动处理 EXIF 方向与 HEIF）
+    if (temp != null) {
+        val fromFile = runCatching {
+            val src = ImageDecoder.createSource(temp)
+            ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.isMutableRequired = false
+                val width = info.size.width
+                if (width > MAX_DECODE_WIDTH) {
+                    decoder.setTargetSampleSize(
+                        (width / MAX_DECODE_WIDTH.toFloat()).roundToInt().coerceAtLeast(1),
+                    )
+                }
+            }
+        }.getOrNull()
+        if (fromFile != null) return fromFile
+        // ③ 再不行就 BitmapFactory（按需采样；个别 OEM 的 ImageDecoder 会失败）
+        runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(temp.absolutePath, bounds)
+            if (bounds.outWidth <= 0) return@runCatching null
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= MAX_DECODE_WIDTH) sample *= 2
+            BitmapFactory.decodeFile(
+                temp.absolutePath,
+                BitmapFactory.Options().apply {
+                    inSampleSize = sample
+                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                },
             )
-        }
+        }.getOrNull()?.let { return it }
     }
-}.getOrNull()
+
+    // ④ 最后再退回"直接读 URI"（极少数只有它能读的情况）
+    return runCatching {
+        val src = ImageDecoder.createSource(context.contentResolver, uri)
+        ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.isMutableRequired = false
+            val width = info.size.width
+            if (width > MAX_DECODE_WIDTH) {
+                decoder.setTargetSampleSize(
+                    (width / MAX_DECODE_WIDTH.toFloat()).roundToInt().coerceAtLeast(1),
+                )
+            }
+        }
+    }.getOrNull()
+}
 
 private const val MAX_DECODE_WIDTH = 2048
+
+/** 解码超时：正常本地图片远用不到这么久，超时基本就是"云相册原图没下载" */
+private const val DECODE_TIMEOUT_MS = 10_000L
 
 /** 顶部栏高度，用来算裁剪框（整页）比例和网格区域的位置 */
 private const val TOP_BAR_DP = 64
