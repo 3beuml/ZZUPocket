@@ -115,28 +115,26 @@ object WidgetData {
 
     suspend fun loadSchedule(): WidgetScheduleBundle {
         val repo = AppGraph.scheduleRepository
+        val prefsStore = AppGraph.uiPrefsStore
         val today = LocalDate.now()
         val tomorrow = today.plusDays(1)
         val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
         val nowMillis = System.currentTimeMillis()
 
-        val semester = repo.currentSemester()
-            ?: return WidgetScheduleBundle(
-                hasSchedule = false, week = null,
-                todayDate = today, tomorrowDate = tomorrow,
-                today = emptyList(), tomorrow = emptyList(),
-                nowMin = nowMin, nextBoundaryMillis = null,
-            )
-
-        val hasSchedule = repo.hasCourseData(semester.id)
+        // 本科 + 研究生统一口径（研究生账号没有学期行，也照样能取到今天/明天的课）
+        val hasSchedule = com.zzupocket.app.data.repo.TodayTimetable
+            .hasAnySchedule(repo, prefsStore)
         val periods = repo.periods()
-        val week = repo.resolveCurrentWeek(semester, today)
-        val todayCourses = repo.sessionsOn(semester.id, today, week)
+        val week = com.zzupocket.app.data.repo.TodayTimetable
+            .gradWeekAt(prefsStore, today)
+
+        val todayCourses = com.zzupocket.app.data.repo.TodayTimetable
+            .sessionsOn(repo, prefsStore, today)
             .mapNotNull { WidgetSchedule.toCourse(it, periods) }
             .sortedBy { it.startMin }
 
-        val tomorrowWeek = repo.resolveCurrentWeek(semester, tomorrow)
-        val tomorrowCourses = repo.sessionsOn(semester.id, tomorrow, tomorrowWeek)
+        val tomorrowCourses = com.zzupocket.app.data.repo.TodayTimetable
+            .sessionsOn(repo, prefsStore, tomorrow)
             .mapNotNull { WidgetSchedule.toCourse(it, periods) }
             .sortedBy { it.startMin }
 

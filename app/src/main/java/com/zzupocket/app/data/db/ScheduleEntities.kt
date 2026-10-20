@@ -1,4 +1,4 @@
-package com.zzupocket.app.data.db
+﻿package com.zzupocket.app.data.db
 
 import androidx.room.Dao
 import androidx.room.Entity
@@ -257,7 +257,7 @@ interface RoomOccupancyDao {
     @Query("DELETE FROM room_occupancy WHERE date = :date AND campusId = :campusId")
     suspend fun deleteByDateAndCampus(date: String, campusId: Long)
 
-    /** 只保留今天（及以后）的快照 */
-    @Query("DELETE FROM room_occupancy WHERE date < :beforeDate")
-    suspend fun pruneBefore(beforeDate: String)
+    /** 只保留 [minDate, maxDate] 窗口内的快照（空教室保留 7 天用） */
+    @Query("DELETE FROM room_occupancy WHERE date < :minDate OR date > :maxDate")
+    suspend fun pruneOutside(minDate: String, maxDate: String)
 }

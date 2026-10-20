@@ -175,7 +175,15 @@ fun ScheduleScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            if (state.gradMode) vm.loadGmsWeek(force = true) else vm.refresh()
+                            // 登录过期 → 点它去重新登录（重试是没用的，只会再失败一次）；
+                            // 其他失败（网络/教务挂了）→ 重试
+                            if (state.cacheNoticeNeedsLogin) {
+                                vm.openGmsLogin()
+                            } else if (state.gradMode) {
+                                vm.loadGmsWeek(force = true)
+                            } else {
+                                vm.refresh()
+                            }
                         }
                         .padding(horizontal = 16.dp, vertical = 2.dp),
                 )

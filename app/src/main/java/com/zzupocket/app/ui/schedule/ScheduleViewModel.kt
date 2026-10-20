@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.schedule
+﻿package com.zzupocket.app.ui.schedule
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -88,6 +88,8 @@ data class ScheduleUiState(
      * 而不是红色错误——红色错误会让人以为是自己账号出了问题，历史上因此反复重登。
      */
     val cacheNotice: String? = null,
+    /** true = 这条提示是"登录过期"，点它应该去重新登录而不是重试 */
+    val cacheNoticeNeedsLogin: Boolean = false,
     /** 研究生视图的节次时刻（本科 periods 为空时用官方作息表兜底） */
     val gmsPeriods: List<Period> = emptyList(),
     /** gmsWeekIndex 是按哪一天对齐的；跨天后重新拉一次 */
@@ -437,6 +439,7 @@ class ScheduleViewModel : ViewModel() {
                         dataFetchedAt = System.currentTimeMillis(),
                         refreshing = false,
                         cacheNotice = null,
+                        cacheNoticeNeedsLogin = false,
                         notice = if (settings.weekOneStart == null) {
                             "还没定教学周基准，先按第 $week 周显示；去「课程表设置」设一下开学日期"
                         } else if (!settings.confirmed) {
@@ -475,6 +478,7 @@ class ScheduleViewModel : ViewModel() {
                             gmsBusy = false,
                             refreshing = false,
                             gmsError = null,
+cacheNoticeNeedsLogin = expired,
                             cacheNotice = when {
                                 at == null && expired -> "研究生登录已过期 · 重新登录"
                                 at == null -> "暂时连不上研究生系统 · 点此重试"

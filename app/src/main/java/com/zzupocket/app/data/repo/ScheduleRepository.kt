@@ -579,8 +579,16 @@ class ScheduleRepository(
                     )
                 },
             )
-            // 空教室只缓存当天：更早的一律删掉，避免"昨天的占用"被当成今天
-            db.roomOccupancyDao().pruneBefore(date)
+            // 保留窗口：今天 ~ 今天+6（用户拍定的"七天"= 今天往后看六天）。
+            // ⚠️ 必须按**今天**算，不能按"这次抓取的日期"算 —— 否则切到未来某天抓一次，
+            // 会把今天的快照顺手删掉（旧实现正是这样）。
+            run {
+                val today = java.time.LocalDate.now()
+                db.roomOccupancyDao().pruneOutside(
+                    minDate = today.toString(),
+                    maxDate = today.plusDays(ROOM_KEEP_DAYS - 1L).toString(),
+                )
+            }
         }
     }
 
@@ -615,6 +623,9 @@ class ScheduleRepository(
 
         /** 课表缓存结构版本；改字段就 +1，旧缓存会被当作不存在 */
         const val CACHE_VERSION = 1
+
+        /** 空教室快照保留天数（今天 + 往后 6 天） */
+        const val ROOM_KEEP_DAYS = 7
 
         private const val TAG_GRID = "ScheduleGrid"
 
