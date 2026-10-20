@@ -134,12 +134,16 @@ fun GmsProbeDialog(
                             )
                         }
                     }
-                    Text(
-                        text = shownUrl,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    // 网址行只给自检/排障看：登录时它是一行技术信息，对用户没意义，
+                    // 也容易让人误以为"这是个卡片"。登录模式只留标题、按钮与说明。
+                    if (!loginMode) {
+                        Text(
+                            text = shownUrl,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
