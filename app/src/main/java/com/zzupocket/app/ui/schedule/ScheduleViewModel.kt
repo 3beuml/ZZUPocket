@@ -6,6 +6,7 @@ import com.zzupocket.app.core.AppError
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.core.Enrollment
 import com.zzupocket.app.core.ScheduleText
+import com.zzupocket.app.core.WeekMath
 import com.zzupocket.app.core.toUserMessage
 import com.zzupocket.app.data.auth.AuthRepository
 import com.zzupocket.app.data.gms.GmsScheduleMapper
@@ -61,6 +62,18 @@ data class ScheduleUiState(
      * false 时说明这次是"猜"的：界面要给出「校正周次」入口，用户点一次就永久锚定。
      */
     val gmsAnchored: Boolean = false,
+
+    // ── 教学周参数（本科/研究生共用；按学期存）─────────────────────────
+    /** 第 1 周的起始日；null = 还没定（界面显示"待设置"） */
+    val weekStart: LocalDate? = null,
+    /** 每周起始日：周一/周日 */
+    val weekStartDay: com.zzupocket.app.core.WeekStartDay = com.zzupocket.app.core.WeekStartDay.MONDAY,
+    /** 本学期总周次（用户可改；null = 用数据里的最大周） */
+    val weekTotal: Int? = null,
+    /** 周次参数是否已确认（教务校历或用户设置 ⇒ true；纯推断 ⇒ false） */
+    val weekConfirmed: Boolean = false,
+    /** 周次参数来源，界面据此标注 */
+    val weekSource: com.zzupocket.app.core.WeekSource = com.zzupocket.app.core.WeekSource.INFERRED,
     /** 研究生视图的节次时刻（本科 periods 为空时用官方作息表兜底） */
     val gmsPeriods: List<Period> = emptyList(),
     /** gmsWeekIndex 是按哪一天对齐的；跨天后重新拉一次 */
@@ -123,6 +136,8 @@ class ScheduleViewModel : ViewModel() {
     val state: StateFlow<ScheduleUiState> = _state.asStateFlow()
 
     init {
+        // 0.31.6 及以前那枚"自动推断"的周次锚点会带着 +1 的错误，进 App 时先清理一次
+        viewModelScope.launch { runCatching { uiPrefs.migrateLegacyWeekAnchor() } }
         viewModelScope.launch { bootstrap() }
         viewModelScope.launch { observeEnrollmentYear() }
         // 学籍判定：本科教务认不认这个账号。判为"非本科"就切到研究生视图。
@@ -252,48 +267,45 @@ class ScheduleViewModel : ViewModel() {
                     return@onSuccess
                 }
                 val today = LocalDate.now()
-                val prefs = runCatching { uiPrefs.flow.first() }.getOrNull()
-                // 锚点只对同一个学期有效
-                val anchorMonday = prefs
-                    ?.takeIf { it.gmsAnchorTerm == term.value }
-                    ?.gmsWeekOneEpochDay
-                    ?.let { LocalDate.ofEpochDay(it) }
                 val guess = GmsWeekAlign.guess(entries, current)
                 val periods = _state.value.periods.ifEmpty { GmsScheduleMapper.defaultPeriods() }
                 val sessions = GmsScheduleMapper.toSessions(entries, periods)
                 val courses = GmsScheduleMapper.toCourses(sessions)
+                val dataWeeks = entries.map { it.weekIndex }.distinct().sorted()
 
-                // 有锚点就用日期推算（唯一可信来源）；没有才用反推，且只有唯一解才敢用
-                val weekRaw = if (anchorMonday != null) {
-                    GmsWeekAlign.weekIndexAt(anchorMonday, today)
-                } else {
-                    guess.anchoredWeekOrNull() ?: GmsWeekAlign.currentWeekIndex(entries, current) ?: 1
+                // 周次参数：已设置就用；没有就把"唯一解"的推断结果填进去（标记待确认，绝不当成事实）
+                var settings = runCatching {
+                    uiPrefs.weekSettings(GmsScheduleMapper.GRAD_SEMESTER_ID)
+                }.getOrDefault(com.zzupocket.app.core.WeekSettings())
+                if (settings.weekOneStart == null) {
+                    guess.anchoredWeekOrNull()?.let { inferred ->
+                        settings = settings.copy(
+                            weekOneStart = WeekMath.weekOneStart(today, inferred, settings.startDay),
+                            totalWeeks = dataWeeks.maxOrNull(),
+                            confirmed = false,
+                            source = com.zzupocket.app.core.WeekSource.INFERRED,
+                        )
+                        runCatching {
+                            uiPrefs.saveWeekSettings(GmsScheduleMapper.GRAD_SEMESTER_ID, settings)
+                        }
+                    }
                 }
                 val semester = GmsScheduleMapper.toSemester(
                     term = term,
                     entries = entries,
                     current = current,
                     today = today,
-                    anchoredMonday = anchorMonday,
-                    anchoredWeek = weekRaw,
+                    anchoredMonday = settings.weekOneStart,
+                    anchoredWeek = null,
                 )
-                val week = weekRaw.coerceIn(
+                val week = if (settings.weekOneStart != null) {
+                    WeekMath.weekIndexAt(settings.weekOneStart, today)
+                } else {
+                    GmsWeekAlign.currentWeekIndex(entries, current) ?: 1
+                }.coerceIn(
                     semester.weekIndices.firstOrNull() ?: 1,
-                    semester.weekIndices.lastOrNull() ?: weekRaw,
+                    semester.weekIndices.lastOrNull() ?: Int.MAX_VALUE,
                 )
-                // 首次对齐且反推唯一 → 落库当锚点，之后不再重新猜
-                if (anchorMonday == null) {
-                    val confident = guess.anchoredWeekOrNull()
-                    if (confident != null) {
-                        runCatching {
-                            uiPrefs.setGmsWeekAnchor(
-                                term = term.value,
-                                weekOneMondayEpochDay = GmsWeekAlign
-                                    .weekOneMonday(today, confident).toEpochDay(),
-                            )
-                        }
-                    }
-                }
                 _state.update {
                     it.copy(
                         gmsBusy = false,
@@ -306,10 +318,17 @@ class ScheduleViewModel : ViewModel() {
                         gmsWeekIndex = week,
                         gmsPeriods = periods,
                         gmsWeekResolvedOn = today,
-                        gmsAnchored = anchorMonday != null || guess.anchoredWeekOrNull() != null,
+                        gmsAnchored = settings.confirmed,
                         periods = periods,
-                        notice = if (semester.startDate == null) {
-                            "未能自动判定当前教学周，已先按第 $week 周显示；点「校正周次」设置一下"
+                        weekStart = settings.weekOneStart,
+                        weekStartDay = settings.startDay,
+                        weekTotal = settings.totalWeeks ?: dataWeeks.maxOrNull(),
+                        weekConfirmed = settings.confirmed,
+                        weekSource = settings.source,
+                        notice = if (settings.weekOneStart == null) {
+                            "还没定教学周基准，先按第 $week 周显示；去「课程表设置」设一下开学日期"
+                        } else if (!settings.confirmed) {
+                            "周次基准是自动推断的，可能不准；去「课程表设置」确认一下"
                         } else null,
                     )
                 }
@@ -331,6 +350,8 @@ class ScheduleViewModel : ViewModel() {
     }
 
     fun onResume() {
+        // 从「课程表设置」改完周次参数回来：先把新参数读进来（纯本地，不联网）
+        viewModelScope.launch { reloadWeekSettings() }
         if (!_state.value.started) {
             viewModelScope.launch { bootstrap() }
         } else if (_state.value.loggedIn != auth.isLoggedIn()) {
@@ -463,10 +484,23 @@ class ScheduleViewModel : ViewModel() {
             periods = repo.periods()
         }
         val today = LocalDate.now()
-        val week = WeekAlignment.currentWeek(
-            currentWeek = repo.resolveCurrentWeek(semester, today),
-            firstWeek = semester.firstWeek,
+        // 周次参数：按学期存；教务给了学期起始日就直接当权威值填进去（不需要用户确认）
+        val settings = resolveWeekSettings(
+            semesterId = semester.id,
+            calendarStart = semester.startDate,
+            dataWeeks = semester.weekIndices,
+            today = today,
         )
+        val week = if (settings.weekOneStart != null) {
+            WeekMath
+                .weekIndexAt(settings.weekOneStart, today)
+                .coerceIn(semester.firstWeek ?: 1, semester.weekIndices.maxOrNull() ?: Int.MAX_VALUE)
+        } else {
+            WeekAlignment.currentWeek(
+                currentWeek = repo.resolveCurrentWeek(semester, today),
+                firstWeek = semester.firstWeek,
+            )
+        }
         val sessions = repo.sessionsOfSemester(semester.id)
         val courses = repo.courses(semester.id)
         val plans = repo.customPlans(semester.id)
@@ -481,8 +515,40 @@ class ScheduleViewModel : ViewModel() {
                 allSessions = sessions,
                 courses = courses,
                 plans = plans,
+                weekStart = settings.weekOneStart,
+                weekStartDay = settings.startDay,
+                weekTotal = settings.totalWeeks,
+                weekConfirmed = settings.confirmed,
+                weekSource = settings.source,
             )
         }
+    }
+
+    /**
+     * 取某学期的周次参数，必要时自动填一次。
+     *
+     * 填充顺序（用户拍定的三档）：**教务校历 → 已有设置 → 推断**。自动值只填空白项；
+     * 教务给的值视为权威（`confirmed = true`），推断出来的值必须标"待确认"。
+     */
+    private suspend fun resolveWeekSettings(
+        semesterId: Int,
+        calendarStart: LocalDate?,
+        dataWeeks: List<Int>,
+        today: LocalDate,
+    ): com.zzupocket.app.core.WeekSettings {
+        val saved = runCatching { uiPrefs.weekSettings(semesterId) }
+            .getOrDefault(com.zzupocket.app.core.WeekSettings())
+        if (saved.weekOneStart != null) return saved
+        if (calendarStart == null) return saved
+        val start = WeekMath.startOfWeek(calendarStart, saved.startDay)
+        val filled = saved.copy(
+            weekOneStart = start,
+            totalWeeks = saved.totalWeeks ?: dataWeeks.maxOrNull(),
+            confirmed = true,
+            source = com.zzupocket.app.core.WeekSource.CALENDAR,
+        )
+        runCatching { uiPrefs.saveWeekSettings(semesterId, filled) }
+        return filled
     }
 
     // ── 自定义日程 ──────────────────────────────────────────────────────
@@ -590,30 +656,164 @@ class ScheduleViewModel : ViewModel() {
     }
 
     /**
-     * 手动校正"现在实际是第几周"。
+     * 设置「当前周次」—— 等价于反推开学日期，并把这次修改记为**用户设置**（已确认）。
      *
-     * 研究生接口不返回当前周，反推在课程跨周重复时一定会有歧义 —— 这个入口是最终裁决：
-     * 用户说第 7 周就是第 7 周，据此把第 1 周周一算出来并落库，之后全部按日期推算。
+     * 研究生接口不返回当前第几周，反推在课程跨周重复时一定有歧义，所以这是最终裁决点。
+     * 本科同样可用（比如周五那周其实是第 8 周，直接改这里最直观）。
      */
-    fun setGmsCurrentWeek(week: Int) {
+    fun setCurrentWeek(week: Int) {
         val s = _state.value
-        if (week !in s.gmsWeeks) return
-        val term = s.gmsTermValue
+        val upper = s.weekTotal ?: s.weeks.lastOrNull() ?: s.gmsWeeks.lastOrNull() ?: week
+        if (week < 1 || week > maxOf(upper, week)) return
         val today = LocalDate.now()
-        val monday = GmsWeekAlign.weekOneMonday(today, week)
+        applyWeekSettings(
+            s.weekSettingsSnapshot().copy(
+                weekOneStart = WeekMath.weekOneStart(today, week, s.weekStartDay),
+                confirmed = true,
+                source = com.zzupocket.app.core.WeekSource.USER,
+            ),
+            week = week,
+            today = today,
+        )
+    }
+
+    /** 设置「开学日期（第 1 周起始日）」；选到哪天都吸附到那一周的第一天 */
+    fun setWeekStartDate(date: LocalDate) {
+        val s = _state.value
+        val start = WeekMath.startOfWeek(date, s.weekStartDay)
+        val today = LocalDate.now()
+        applyWeekSettings(
+            s.weekSettingsSnapshot().copy(
+                weekOneStart = start,
+                confirmed = true,
+                source = com.zzupocket.app.core.WeekSource.USER,
+            ),
+            week = WeekMath.weekIndexAt(start, today).coerceAtLeast(1),
+            today = today,
+        )
+    }
+
+    /** 设置「本学期总周次」；只影响显示范围，不删数据 */
+    fun setWeekTotal(total: Int?) {
+        val s = _state.value
+        applyWeekSettings(
+            s.weekSettingsSnapshot().copy(totalWeeks = total?.coerceIn(1, 30)),
+            week = if (s.gradMode) s.gmsWeekIndex else s.weekIndex,
+            today = LocalDate.now(),
+        )
+    }
+
+    /** 设置「每周起始日」（周一/周日） */
+    fun setWeekStartDay(day: com.zzupocket.app.core.WeekStartDay) {
+        val s = _state.value
+        applyWeekSettings(
+            s.weekSettingsSnapshot().copy(
+                startDay = day,
+                weekOneStart = s.weekStart?.let { WeekMath.startOfWeek(it, day) },
+            ),
+            week = if (s.gradMode) s.gmsWeekIndex else s.weekIndex,
+            today = LocalDate.now(),
+        )
+    }
+
+    /** 重置为自动值：清掉本学期设置，下次进入按「教务校历 → 推断」重新填 */
+    fun resetWeekSettings() {
+        val id = weekSemesterId() ?: return
         _state.update {
             it.copy(
-                gmsWeekIndex = week,
-                gmsSemester = it.gmsSemester?.copy(startDate = monday),
+                weekStart = null,
+                weekTotal = null,
+                weekConfirmed = false,
+                weekSource = com.zzupocket.app.core.WeekSource.INFERRED,
+                gmsAnchored = false,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { uiPrefs.clearWeekSettings(id) }
+            val s = _state.value
+            if (s.gradMode) {
+                loadGmsWeek(force = true)
+            } else {
+                s.selectedSemester?.let { loadSemester(it, auth.isLoggedIn(), forceSync = false) }
+            }
+        }
+    }
+
+    /** 当前正在看的学期在设置里的 id（研究生用合成 id） */
+    private fun weekSemesterId(): Int? = if (_state.value.gradMode) {
+        GmsScheduleMapper.GRAD_SEMESTER_ID
+    } else {
+        _state.value.selectedSemester?.id
+    }
+
+    private fun ScheduleUiState.weekSettingsSnapshot() = com.zzupocket.app.core.WeekSettings(
+        weekOneStart = weekStart,
+        startDay = weekStartDay,
+        totalWeeks = weekTotal,
+        confirmed = weekConfirmed,
+        source = weekSource,
+    )
+
+    /** 写设置 + 立刻按新基准重算当前周次（不重新联网） */
+    private fun applyWeekSettings(
+        settings: com.zzupocket.app.core.WeekSettings,
+        week: Int,
+        today: LocalDate,
+    ) {
+        val s = _state.value
+        val bounded = week.coerceIn(1, settings.totalWeeks ?: maxOf(week, 1))
+        _state.update {
+            it.copy(
+                weekStart = settings.weekOneStart,
+                weekStartDay = settings.startDay,
+                weekTotal = settings.totalWeeks,
+                weekConfirmed = settings.confirmed,
+                weekSource = settings.source,
+                weekIndex = bounded,
+                gmsWeekIndex = bounded,
+                weekResolvedOn = today,
                 gmsWeekResolvedOn = today,
-                gmsAnchored = true,
+                gmsAnchored = settings.confirmed,
+                gmsSemester = if (s.gradMode && settings.weekOneStart != null) {
+                    it.gmsSemester?.copy(startDate = settings.weekOneStart)
+                } else {
+                    it.gmsSemester
+                },
                 notice = null,
             )
         }
-        if (term != null) {
-            viewModelScope.launch {
-                runCatching { uiPrefs.setGmsWeekAnchor(term, monday.toEpochDay()) }
-            }
+        val id = weekSemesterId() ?: return
+        viewModelScope.launch { runCatching { uiPrefs.saveWeekSettings(id, settings) } }
+    }
+
+    /**
+     * 从设置页回来时重新读周次参数（纯本地，不联网）。
+     *
+     * 只更新"当前这一侧"（本科生更新 weekIndex、研究生更新 gmsWeekIndex），
+     * 免得把本科的周次写到研究生视图上。
+     */
+    private suspend fun reloadWeekSettings() {
+        val id = weekSemesterId() ?: return
+        val st = runCatching { uiPrefs.weekSettings(id) }.getOrNull() ?: return
+        val start = st.weekOneStart ?: return
+        val today = LocalDate.now()
+        val week = WeekMath.weekIndexAt(start, today).coerceIn(1, st.totalWeeks ?: Int.MAX_VALUE)
+        val grad = _state.value.gradMode
+        _state.update {
+            it.copy(
+                weekStart = start,
+                weekStartDay = st.startDay,
+                weekTotal = st.totalWeeks,
+                weekConfirmed = st.confirmed,
+                weekSource = st.source,
+                weekIndex = if (grad) it.weekIndex else week,
+                gmsWeekIndex = if (grad) week else it.gmsWeekIndex,
+                weekResolvedOn = if (grad) it.weekResolvedOn else today,
+                gmsWeekResolvedOn = if (grad) today else it.gmsWeekResolvedOn,
+                gmsAnchored = st.confirmed,
+                gmsSemester = if (grad) it.gmsSemester?.copy(startDate = start) else it.gmsSemester,
+                notice = if (st.confirmed) null else "周次基准待确认：去「课程表设置」确认一下开学日期",
+            )
         }
     }
 

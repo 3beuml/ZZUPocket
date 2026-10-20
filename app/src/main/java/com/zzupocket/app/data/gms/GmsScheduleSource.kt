@@ -89,23 +89,40 @@ class GmsScheduleSource(
      * 本周课表（服务端按当前周返回）。
      *
      * 本周接口给的是「7 个天槽，每个槽里一个课列表」，字段是 `KCMC`（课程名）/`ZS`（周次节次文本，
-     * 如「第7节,第8节」）/`DZ`（地点）—— 星期来自**天槽下标**，节次要自己从 `ZS` 里取。
+     * 如「第7节,第8节」）/`DZ`（地点）—— 星期来自天槽的 `zh`（"周一"…"周日"），节次从 `ZS` 取。
      * 所以这里压平成 [GradLesson]，UI 直接能用。
+     *
+     * ⚠️ 星期**按 `zh` 解析，不按列表下标**：早期实现用 `index + 1` 当星期，一旦服务端
+     * 天槽顺序不是"周一打头"（或某天缺失），整周键就会平移，反推周次时精确匹配不上，
+     * 进而挑错周（2026-10-20 的第 7 周被判成第 8 周，怀疑与这类平移有关）。
      */
     suspend fun currentWeek(): List<GradLesson> {
         requireSession()
         return gms.fetchWeekTable().bzkb.flatMapIndexed { index, day ->
+            // zh 解析不出来才退回下标（保底：至少不会丢课）
+            val weekday = weekdayOf(day.zh) ?: (index + 1).coerceIn(1, 7)
             day.bzkb.mapNotNull { l ->
                 val period = PERIOD_RE.find(l.ZS.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
                     ?: return@mapNotNull null
                 val name = l.KCMC.trim().ifEmpty { return@mapNotNull null }
                 GradLesson(
-                    weekday = (index + 1).coerceIn(1, 7),
+                    weekday = weekday,
                     period = period,
                     courseName = name,
                 )
             }
         }
+    }
+
+    /**
+     * "周一"…"周日" / "星期一"… → 1..7；认不出返回 null。
+     * 只认单个汉字，避免"周日"与"周天"之类的写法差异。
+     */
+    private fun weekdayOf(zh: String): Int? {
+        val text = zh.trim()
+        if (text.isEmpty()) return null
+        val ch = text.firstOrNull { it in WEEKDAY_CHARS } ?: return null
+        return WEEKDAY_CHARS.indexOf(ch) + 1
     }
 
     /** 没会话就直接给出"该去哪登录"的提示，别让上层拼文案 */
@@ -133,6 +150,9 @@ class GmsScheduleSource(
 
         /** 「第7节」→ 7 */
         private val PERIOD_RE = Regex("第\\s*(\\d{1,2})\\s*节")
+
+        /** 星期汉字，下标 +1 就是 weekday（周一=1 … 周日=7） */
+        private const val WEEKDAY_CHARS = "一二三四五六日"
     }
 }
 

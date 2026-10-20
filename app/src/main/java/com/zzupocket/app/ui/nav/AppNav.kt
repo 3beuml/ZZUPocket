@@ -238,6 +238,10 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onRecrop = {
                             navController.navigate("$ROUTE_BG_CROP/$CROP_SOURCE_SAVED")
                         },
+                        // 「课程总览」从顶栏移到设置页里（顶栏只留一个设置入口）
+                        onOpenOverview = { semesterId ->
+                            navController.navigate("$ROUTE_OVERVIEW/$semesterId")
+                        },
                     )
                 }
                 composable(

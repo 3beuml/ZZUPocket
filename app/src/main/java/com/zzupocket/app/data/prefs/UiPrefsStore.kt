@@ -9,7 +9,12 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.zzupocket.app.core.WeekSettings
+import com.zzupocket.app.core.WeekSource
+import com.zzupocket.app.core.WeekStartDay
+import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /** 课程格里显示哪些内容（老师不在这里显示：点开课程详情能看到，格子太小放不下） */
@@ -108,16 +113,6 @@ data class UiPrefs(
      */
     val lightRoomLabel: String? = null,
     val acRoomLabel: String? = null,
-    /**
-     * 研究生课表的**周次锚点**：第 1 周周一的 epochDay；null = 还没对齐过。
-     *
-     * 研究生接口不返回"当前第几周"（只给周区间 + 星期 + 节次），0.31.5 靠"拿本周课表
-     * 反查整学期哪一周课表一样"来猜，课程跨周重复时会猜错（实测把第 7 周判成第 10 周）。
-     * 所以一旦确定就把第 1 周周一落库，之后**纯日期推算**，不再每天重新猜。
-     */
-    val gmsWeekOneEpochDay: Long? = null,
-    /** 上面的锚点属于哪个学期（term value）；换学期自动失效 */
-    val gmsAnchorTerm: String? = null,
 ) {
     val dayCount: Int get() = if (showWeekend) 7 else 5
 
@@ -178,8 +173,6 @@ class UiPrefsStore(context: Context) {
                 ?: DarkMode.SYSTEM,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
-            gmsWeekOneEpochDay = p[KEY_GMS_WEEK_ONE],
-            gmsAnchorTerm = p[KEY_GMS_ANCHOR_TERM]?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -239,18 +232,68 @@ class UiPrefsStore(context: Context) {
         p[KEY_ENERGY_PRICE] = v.coerceIn(0.1f, 5f)
     }
 
+    // ── 教学周参数（按学期分开存）──────────────────────────────────────
+
     /**
-     * 写研究生课表的周次锚点（第 1 周周一的 epochDay + 所属学期）。
-     * [term] 传空 = 清掉锚点（下次重新对齐）。
+     * 读某个学期的周次参数。
+     *
+     * 为什么按学期存：不同学期开学日期不同；而且用户"手改过"这件事必须跟着学期走，
+     * 否则新学期会被上学期的旧值粘住。
      */
-    suspend fun setGmsWeekAnchor(term: String?, weekOneMondayEpochDay: Long?) = store.edit { p ->
-        if (term.isNullOrBlank() || weekOneMondayEpochDay == null) {
-            p.remove(KEY_GMS_WEEK_ONE)
-            p.remove(KEY_GMS_ANCHOR_TERM)
+    suspend fun weekSettings(semesterId: Int): WeekSettings {
+        val p = store.data.first()
+        return WeekSettings(
+            weekOneStart = p[weekOneKey(semesterId)]?.let { LocalDate.ofEpochDay(it) },
+            startDay = p[weekStartDayKey(semesterId)]
+                ?.let { v -> runCatching { WeekStartDay.valueOf(v) }.getOrNull() }
+                ?: WeekStartDay.MONDAY,
+            totalWeeks = p[weekTotalKey(semesterId)]?.takeIf { it in 1..30 },
+            confirmed = p[weekConfirmedKey(semesterId)] ?: false,
+            source = p[weekSourceKey(semesterId)]
+                ?.let { v -> runCatching { WeekSource.valueOf(v) }.getOrNull() }
+                ?: WeekSource.INFERRED,
+        )
+    }
+
+    suspend fun saveWeekSettings(semesterId: Int, s: WeekSettings) = store.edit { p ->
+        if (s.weekOneStart != null) {
+            p[weekOneKey(semesterId)] = s.weekOneStart.toEpochDay()
         } else {
-            p[KEY_GMS_WEEK_ONE] = weekOneMondayEpochDay
-            p[KEY_GMS_ANCHOR_TERM] = term
+            p.remove(weekOneKey(semesterId))
         }
+        p[weekStartDayKey(semesterId)] = s.startDay.name
+        if (s.totalWeeks != null) {
+            p[weekTotalKey(semesterId)] = s.totalWeeks
+        } else {
+            p.remove(weekTotalKey(semesterId))
+        }
+        p[weekConfirmedKey(semesterId)] = s.confirmed
+        p[weekSourceKey(semesterId)] = s.source.name
+    }
+
+    /**
+     * 一次性清理 0.31.6 及以前那枚"自动推断"的研究生锚点。
+     *
+     * 那枚锚点是用课表内容反推出来的，实测存在 +1 周的错误（第 7 周被算成第 8 周）；
+     * 如果不清理，它会被新逻辑当成"用户已确认"，错误就永远留着。
+     */
+    suspend fun migrateLegacyWeekAnchor() {
+        val p = store.data.first()
+        if (p[KEY_WEEK_SETTINGS_MIGRATED] == true) return
+        store.edit { e ->
+            e.remove(KEY_GMS_WEEK_ONE)
+            e.remove(KEY_GMS_ANCHOR_TERM)
+            e[KEY_WEEK_SETTINGS_MIGRATED] = true
+        }
+    }
+
+    /** 清掉某学期的周次参数（「重置为自动值」用）：下次进入按「教务校历 → 推断」重填 */
+    suspend fun clearWeekSettings(semesterId: Int) = store.edit { p ->
+        p.remove(weekOneKey(semesterId))
+        p.remove(weekStartDayKey(semesterId))
+        p.remove(weekTotalKey(semesterId))
+        p.remove(weekConfirmedKey(semesterId))
+        p.remove(weekSourceKey(semesterId))
     }
 
     /** 恢复默认壁纸：清掉图片和所有调节项，版本号照旧 +1（缓存一样要失效） */
@@ -285,8 +328,18 @@ class UiPrefsStore(context: Context) {
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
         val KEY_AC_ROOM_LABEL = stringPreferencesKey("ac_room_label")
 
-        /** 研究生课表周次锚点（见 [UiPrefs.gmsWeekOneEpochDay]） */
+        /** 旧版（0.31.6 及以前）研究生周次锚点：只保留键名用于一次性清理 */
         val KEY_GMS_WEEK_ONE = androidx.datastore.preferences.core.longPreferencesKey("gms_week_one_epoch_day")
         val KEY_GMS_ANCHOR_TERM = stringPreferencesKey("gms_anchor_term")
+
+        /** 一次性迁移标记：老锚点已清理（见 [UiPrefsStore.migrateLegacyWeekAnchor]） */
+        val KEY_WEEK_SETTINGS_MIGRATED = booleanPreferencesKey("week_settings_migrated_v1")
+
+        // 教学周参数按学期分开存：键名里带学期 id
+        fun weekOneKey(semesterId: Int) = androidx.datastore.preferences.core.longPreferencesKey("week_one_$semesterId")
+        fun weekStartDayKey(semesterId: Int) = stringPreferencesKey("week_start_day_$semesterId")
+        fun weekTotalKey(semesterId: Int) = intPreferencesKey("week_total_$semesterId")
+        fun weekConfirmedKey(semesterId: Int) = booleanPreferencesKey("week_confirmed_$semesterId")
+        fun weekSourceKey(semesterId: Int) = stringPreferencesKey("week_source_$semesterId")
     }
 }
