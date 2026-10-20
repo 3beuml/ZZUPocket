@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.ui.schedule
+package com.zzupocket.app.ui.schedule
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -183,9 +183,25 @@ class ScheduleViewModel : ViewModel() {
                     .probe(token, com.zzupocket.app.core.net.HttpClients.eas).track
             }
         }.getOrNull()
-        val grad = track == com.zzupocket.app.domain.AcademicTrack.NOT_UNDERGRAD
-        if (grad) _state.update { it.copy(gradMode = true) }
-        return grad
+        // 断网/探测失败时不能把研究生打回本科视图：他已经登录过研究生系统、
+        // 或者本地就有研究生课表缓存，这就是比一次探测更硬的证据。
+        // 否则一断网就看不到缓存课表，"离线可用"对研究生等于没做。
+        val gradByEvidence = if (track == com.zzupocket.app.domain.AcademicTrack.NOT_UNDERGRAD) {
+            true
+        } else if (track == null || track == com.zzupocket.app.domain.AcademicTrack.UNKNOWN) {
+            val hasSession = runCatching { AppGraph.gmsScheduleSource.hasSession() }.getOrDefault(false)
+            val hasCache = runCatching {
+                repo.cachedSessionCount(
+                    com.zzupocket.app.data.gms.GmsScheduleSource.SOURCE,
+                    com.zzupocket.app.data.gms.GmsScheduleMapper.GRAD_SEMESTER_ID,
+                ) > 0
+            }.getOrDefault(false)
+            hasSession || hasCache
+        } else {
+            false
+        }
+        if (gradByEvidence) _state.update { it.copy(gradMode = true) }
+        return gradByEvidence
     }
 
     fun openGmsLogin() = _state.update { it.copy(gmsDialogOpen = true) }
