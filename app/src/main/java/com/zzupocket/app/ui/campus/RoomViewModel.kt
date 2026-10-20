@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.campus
+﻿package com.zzupocket.app.ui.campus
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -41,6 +41,15 @@ data class RoomUiState(
     val page: Int = 1,
     val totalPages: Int = 1,
     val lastFetchedAt: Long? = null,
+    /** true = 当前表格来自本地快照（教务暂时取不到） */
+    val fromCache: Boolean = false,
+    /**
+     * 缓存提示（一行灰字）：null = 什么都不显示。
+     *
+     * 空教室是"当天某时刻"的数据，过期了会误导人，所以提示必须**常显获取时间**；
+     * 但不用红字 —— 红字会让人以为是自己账号的问题。
+     */
+    val notice: String? = null,
     val showFilter: Boolean = false,
     val showDatePicker: Boolean = false,
     /** 长按教室号弹出的原始字段（排查用） */
@@ -108,10 +117,84 @@ class RoomViewModel : ViewModel() {
             }
             val buildings = campus?.let { orderedBuildings(repo.buildings(it.id)) }.orEmpty()
             _state.update { it.copy(buildings = buildings) }
+            // ① 先用本地快照渲染（教务挂了/断网也能看今天早上抓到的状态）
+            val shownFromCache = renderCachedSnapshot(campus?.id)
+            // ② 距上次成功抓取不足 30 分钟就不联网了（空教室是分钟级数据，但也不该每秒重拉）
+            if (shownFromCache && !com.zzupocket.app.core.SyncPolicy.shouldRefresh(
+                    now = System.currentTimeMillis(),
+                    lastFetchedAt = _state.value.lastFetchedAt,
+                    ttlMs = ROOM_TTL_MS,
+                )
+            ) {
+                _state.update { it.copy(loading = false) }
+                return
+            }
             fetch(reset = true)
         } catch (e: Throwable) {
-            _state.update { it.copy(loading = false, error = e.toUserMessage()) }
+            // 有快照就别报红错，只留一行灰字
+            if (allRooms.isNotEmpty()) {
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        error = null,
+                        fromCache = true,
+                        notice = noticeOf(it.lastFetchedAt) ?: "暂时连不上教务系统 · 点此重试",
+                    )
+                }
+            } else {
+                _state.update { it.copy(loading = false, error = e.toUserMessage()) }
+            }
         }
+    }
+
+    /** 空教室缓存有效期：30 分钟（当天课表，变化少但毕竟是"现在是否有课"） */
+    private val ROOM_TTL_MS = 30L * 60 * 1000
+
+    /** 一行灰字里的"获取于 HH:MM" */
+    private fun noticeOf(fetchedAt: Long?): String? = fetchedAt?.let {
+        val t = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+        "获取于 " + t.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+    }
+
+    /**
+     * 用本地快照渲染当前日期/校区；返回 true 表示有可用快照。
+     *
+     * 快照里存的是**原始占用时间段**，所以这里用当前节次表重新算格子 ——
+     * 作息变了也不会错位。
+     */
+    private suspend fun renderCachedSnapshot(campusId: Long?): Boolean {
+        val id = campusId ?: return false
+        val s = _state.value
+        val snap = runCatching {
+            AppGraph.scheduleRepository.cachedRoomSnapshot(s.date.toString(), id)
+        }.getOrNull() ?: return false
+        if (snap.rows.isEmpty()) return false
+        val units = s.periods.map { it.startTime to it.endTime }
+        val rows = snap.rows.map { r ->
+            RoomRow(
+                id = r.roomId,
+                code = r.code,
+                buildingId = r.buildingId,
+                buildingName = r.buildingName,
+                campusName = r.campusName,
+                occupied = RoomOccupancyGrid.grid(r.occupations, units),
+            )
+        }
+        allRooms = rows
+        val groups = rebuildGroups(rows, s.buildings.map { it.id }, s.selectedUnits)
+        _state.update {
+            it.copy(
+                loading = false,
+                error = null,
+                groups = groups,
+                loadedRooms = rows.size,
+                lastFetchedAt = snap.fetchedAt,
+                fromCache = true,
+                // 只要来自快照就必须标时间，避免被当成"此刻的实时状态"
+                notice = noticeOf(snap.fetchedAt),
+            )
+        }
+        return true
     }
 
     private fun orderedBuildings(
@@ -171,6 +254,29 @@ class RoomViewModel : ViewModel() {
             )
         }
         allRooms = if (reset) newRows else (allRooms + newRows).distinctBy { it.id }
+        // 落一份当天快照：教务挂了/断网时还能看到"上次抓到的状态 + 时间"
+        if (reset) {
+            runCatching {
+                val campusId = s.campusId ?: return@runCatching
+                val cacheRows = result.data.filterNot { it.virtual }.map { room ->
+                    com.zzupocket.app.data.repo.RoomCacheRow(
+                        roomId = room.id,
+                        code = RoomNames.numberOf(room.nameZh, room.code),
+                        buildingId = room.buildingId,
+                        buildingName = buildingNames[room.buildingId] ?: "未知楼栋",
+                        campusName = room.campusNameZh.orEmpty(),
+                        occupations = room.roomOccupationInfoVms.map {
+                            RoomOccupation(it.startTime, it.endTime, it.activityType.orEmpty())
+                        },
+                    )
+                }
+                AppGraph.scheduleRepository.saveRoomSnapshot(
+                    date = s.date.toString(),
+                    campusId = campusId,
+                    rows = cacheRows,
+                )
+            }
+        }
         val totalPages = result.page?.totalPages ?: 1
         val currentPage = result.page?.currentPage ?: page
         val order = s.buildings.map { it.id }
@@ -186,6 +292,8 @@ class RoomViewModel : ViewModel() {
                 lastFetchedAt = System.currentTimeMillis(),
                 hiddenVirtual = it.hiddenVirtual + result.data.count { room -> room.virtual },
                 groups = groups,
+                fromCache = false,
+                notice = null,
             )
         }
 

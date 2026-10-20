@@ -198,6 +198,20 @@ fun RoomScreen(
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
 
+            // 来自本地快照时的提示：一行灰字 + 时间。空教室是"此刻是否有课"的数据，
+            // 必须让人知道这是什么时候抓的，但不用红字（红字像在说账号出问题了）。
+            state.notice?.let { message ->
+                Text(
+                    text = "$message · 点此刷新",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.refresh() }
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                )
+            }
+
             state.error?.let { message ->
                 Text(
                     text = message,
