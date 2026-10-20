@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.today
+﻿package com.zzupocket.app.ui.today
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -94,13 +94,11 @@ class TodayTimelineViewModel : ViewModel() {
         val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
         val today = LocalDate.now()
 
-        val semester = scheduleRepo.currentSemester()
-        val week = semester?.let { scheduleRepo.resolveCurrentWeek(it, today) }
-        val sessions = if (semester != null && week != null) {
-            scheduleRepo.sessionsOn(semester.id, today, week)
-        } else {
-            emptyList()
-        }
+        // 本科 + 研究生统一口径：研究生账号没有学期行，也要能看到今天的课
+        val sessions = runCatching {
+            com.zzupocket.app.data.repo.TodayTimetable
+                .sessionsOn(scheduleRepo, AppGraph.uiPrefsStore, today)
+        }.getOrDefault(emptyList())
         val periods = scheduleRepo.periods()
 
         // 今天（按 FocusStats 的口径：凌晨 4 点起算）的专注记录
@@ -115,11 +113,11 @@ class TodayTimelineViewModel : ViewModel() {
             .mapValues { (_, list) -> list.sumOf { it.actualSeconds } }
 
         val courseEntries = sessions
-            .mapNotNull { session -> courseEntry(session, periods, semester?.id, focusByRef) }
+            .mapNotNull { session -> courseEntry(session, periods, null, focusByRef) }
             .sortedBy { it.startMin }
         val customEntries = sessions
             .filter { it.source == ScheduleRepository.SOURCE_CUSTOM }
-            .mapNotNull { session -> courseEntry(session, periods, semester?.id, focusByRef) }
+            .mapNotNull { session -> courseEntry(session, periods, null, focusByRef) }
             .sortedBy { it.startMin }
         val focusEntries = records
             .map { record -> focusEntry(record) }
@@ -128,7 +126,7 @@ class TodayTimelineViewModel : ViewModel() {
 
         _state.value = TodayTimelineUi(
             loaded = true,
-            week = week,
+            week = com.zzupocket.app.data.repo.TodayTimetable.gradWeekAt(AppGraph.uiPrefsStore, today),
             dateText = DATE_FMT.format(today),
             // 只画**真实发生的事**：课 / 自己加的日程 / 已完成的专注。
             //
