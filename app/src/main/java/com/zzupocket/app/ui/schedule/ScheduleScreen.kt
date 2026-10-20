@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.schedule
+﻿package com.zzupocket.app.ui.schedule
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -186,8 +186,6 @@ fun ScheduleScreen(
                         total = state.gmsWeekCount,
                         onPick = { showWeekPicker = true },
                         onWallpaper = prefs.backgroundPath != null,
-                        weekStart = state.weekStart,
-                        startDay = state.weekStartDay,
                         confirmed = state.weekConfirmed,
                         onOpenSettings = onOpenDisplaySettings,
                     )
@@ -232,8 +230,6 @@ fun ScheduleScreen(
                         total = state.weekCount,
                         onPick = { showWeekPicker = true },
                         onWallpaper = prefs.backgroundPath != null,
-                        weekStart = state.weekStart,
-                        startDay = state.weekStartDay,
                         confirmed = state.weekConfirmed,
                         onOpenSettings = onOpenDisplaySettings,
                     )
@@ -356,10 +352,7 @@ private fun WeekHeader(
     total: Int,
     onPick: () -> Unit,
     onWallpaper: Boolean = false,
-    /** 第 1 周起始日；非 null 时表头显示「第 N 周 · 9/7 起」，基准错了能一眼看出来 */
-    weekStart: java.time.LocalDate? = null,
-    startDay: com.zzupocket.app.core.WeekStartDay = com.zzupocket.app.core.WeekStartDay.MONDAY,
-    /** 周次参数是否已确认；false 时下面给一行「待确认 · 去设置」 */
+    /** 周次参数是否已确认；false 时表头下面给一行小灰字提醒（不抢眼，但看得见） */
     confirmed: Boolean = true,
     onOpenSettings: (() -> Unit)? = null,
 ) {
@@ -379,31 +372,25 @@ private fun WeekHeader(
             ) {
                 // 只留周次。原来下面还有一行「9/21 - 9/27」的日期区间，用户要求删掉 ——
                 // "这是哪几天"改由星期表头下面那行日期回答（每一列都有，翻到哪一周都看得出来）。
+                // 也刻意不再显示「9/7 起」：用户觉得表头上挂基准日太啰嗦，基准改到设置页里看。
                 Text(
-                    text = buildString {
-                        append("第 $week 周")
-                        if (weekStart != null) {
-                            append(" · ")
-                            append(weekStart.monthValue)
-                            append('/')
-                            append(weekStart.dayOfMonth)
-                            append(" 起")
-                        }
-                        append(" / 共 $total 周")
-                    },
+                    text = "第 $week 周 / 共 $total 周",
                     style = MaterialTheme.typography.titleMedium.copy(shadow = shadow),
                     fontWeight = FontWeight.SemiBold,
                 )
             }
         }
         if (!confirmed && onOpenSettings != null) {
-            // 未确认时不给一句可点的提示：这次就是"藏在角落里没人看见"才出错的
-            TextButton(onClick = onOpenSettings) {
-                Text(
-                    "周次基准待确认 · 去课程表设置",
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
+            // 只在"周次是自动猜的、还没确认"时出现，确认后永久消失。
+            // 用一行小灰字而不是按钮：它是个提醒，不该抢周次的视觉重量。
+            Text(
+                text = "周次为自动推断，可在课程表设置里确认",
+                style = MaterialTheme.typography.labelSmall.copy(shadow = shadow),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clickable(onClick = onOpenSettings)
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
         }
     }
 }

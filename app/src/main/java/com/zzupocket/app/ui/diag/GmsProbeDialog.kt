@@ -118,10 +118,13 @@ fun GmsProbeDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(if (loginMode) "登录研究生系统" else "研究生系统自检", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "已记录请求 $hitCount 条 · 跳转 $navCount 次 · ${if (ready) "页面已加载" else "加载中…"}",
-                                style = MaterialTheme.typography.labelSmall,
-                            )
+                            // 计数行只在自检模式出现：登录时它纯属噪音
+                            if (!loginMode) {
+                                Text(
+                                    "已记录请求 $hitCount 条 · 跳转 $navCount 次 · ${if (ready) "页面已加载" else "加载中…"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
                         }
                         IconButton(onClick = onDismiss) {
                             Icon(
@@ -149,10 +152,14 @@ fun GmsProbeDialog(
                                 modifier = Modifier.weight(1f),
                             ) { Text("补注入") }
                         }
-                        OutlinedButton(
-                            onClick = { webRef.value?.loadUrl(entryUrl) },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("重新加载") }
+                        // 登录模式下「重新加载」没有意义（点「重新登录」会清会话再来，
+                        // 比单纯重载更干净），只留自检模式用
+                        if (!loginMode) {
+                            OutlinedButton(
+                                onClick = { webRef.value?.loadUrl(entryUrl) },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("重新加载") }
+                        }
                         OutlinedButton(
                             onClick = {
                                 loadError = null
