@@ -322,6 +322,16 @@ class DiagnosticsViewModel : ViewModel() {
         // ⚠️ 统一认证退出时，研究生教务的会话必须一起清 ——
         // 否则会出现"已经退出登录、但研究生课表还能看"的怪状态。
         runCatching { AppGraph.gmsScheduleSource.clear() }
+        // 研究生课表缓存也一起清：它是按账号抓的，退出后不该留在设备上
+        // （本科课表随学期走、且与账号绑定方式不同，不在此处处理）
+        viewModelScope.launch {
+            runCatching {
+                AppGraph.scheduleRepository.clearTimetable(
+                    source = com.zzupocket.app.data.gms.GmsScheduleSource.SOURCE,
+                    semesterId = com.zzupocket.app.data.gms.GmsScheduleMapper.GRAD_SEMESTER_ID,
+                )
+            }
+        }
         auth.logout()
         onDone()
     }

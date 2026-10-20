@@ -125,8 +125,9 @@ interface KvCacheDao {
         FocusTagEntity::class,
         FocusSessionEntity::class,
         CardTransactionEntity::class,
+        TimetableSyncEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -140,6 +141,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun focusTagDao(): FocusTagDao
     abstract fun focusSessionDao(): FocusSessionDao
     abstract fun cardTransactionDao(): CardTransactionDao
+    abstract fun timetableSyncDao(): TimetableSyncDao
 
     companion object {
         @Volatile
@@ -232,12 +234,36 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v6 新增课表同步状态表（本科/研究生共用）。
+         *
+         * 为「先显示缓存、再后台刷新」打底：要知道缓存是什么时候抓的（12 小时 TTL、
+         * 「数据截至 HH:MM」），以及上次为什么失败（区分会话过期与教务不可用）。
+         * 新表，不动旧数据。
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `timetable_sync` (" +
+                        "`source` TEXT NOT NULL, `semesterId` INTEGER NOT NULL, " +
+                        "`fetchedAt` INTEGER NOT NULL, `lastError` TEXT, `lastErrorAt` INTEGER, " +
+                        "PRIMARY KEY(`source`, `semesterId`))",
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "zzupocket.db",
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            ).addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+            )
                 .build()
                 .also { instance = it }
         }
