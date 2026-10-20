@@ -5,9 +5,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,6 +45,10 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -58,6 +66,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.core.Enrollment
+import com.zzupocket.app.core.WeekMath
 import com.zzupocket.app.data.prefs.BlockBorder
 import com.zzupocket.app.data.prefs.CourseColorMode
 import com.zzupocket.app.data.prefs.CourseTextMode
@@ -69,6 +78,25 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/**
+ * 「教学周」卡片要显示的值。
+ *
+ * 研究生系统不返回当前第几周，所以周次必须是**可设置、可确认**的参数；
+ * 这里只负责读写与展示，真正的换算在 [com.zzupocket.app.core.WeekMath]。
+ */
+data class WeekUi(
+    val semesterId: Int? = null,
+    /** 是否研究生视图（研究生用合成学期 id） */
+    val grad: Boolean = false,
+    val weekStart: java.time.LocalDate? = null,
+    val startDay: com.zzupocket.app.core.WeekStartDay = com.zzupocket.app.core.WeekStartDay.MONDAY,
+    val total: Int? = null,
+    val confirmed: Boolean = false,
+    val source: com.zzupocket.app.core.WeekSource = com.zzupocket.app.core.WeekSource.INFERRED,
+    /** 按 [weekStart] 与今天算出的当前周次 */
+    val currentWeek: Int? = null,
+)
 
 class DisplaySettingsViewModel : ViewModel() {
 
@@ -108,6 +136,122 @@ class DisplaySettingsViewModel : ViewModel() {
         }
     }
 
+    // ── 教学周参数 ────────────────────────────────────────────────────────
+
+    private val _week = kotlinx.coroutines.flow.MutableStateFlow(WeekUi())
+    val week: StateFlow<WeekUi> = _week
+
+    init {
+        viewModelScope.launch { refreshWeek() }
+    }
+
+    /** 当前该编辑哪个学期：有本科学期就用它，否则当成研究生（合成学期 id） */
+    private suspend fun targetSemester(): Pair<Int, java.time.LocalDate?> {
+        val s = runCatching { scheduleRepo.currentSemester() }.getOrNull()
+        return if (s != null) {
+            s.id to s.startDate
+        } else {
+            com.zzupocket.app.data.gms.GmsScheduleMapper.GRAD_SEMESTER_ID to null
+        }
+    }
+
+    /** 读参数；若为空且教务给了学期起始日，就自动填一次（教务校历视为权威，直接 confirmed） */
+    suspend fun refreshWeek() {
+        val (id, calendarStart) = targetSemester()
+        var st = store.weekSettings(id)
+        if (st.weekOneStart == null && calendarStart != null) {
+            st = st.copy(
+                weekOneStart = com.zzupocket.app.core.WeekMath.startOfWeek(calendarStart, st.startDay),
+                confirmed = true,
+                source = com.zzupocket.app.core.WeekSource.CALENDAR,
+            )
+            runCatching { store.saveWeekSettings(id, st) }
+        }
+        val today = java.time.LocalDate.now()
+        _week.value = WeekUi(
+            semesterId = id,
+            grad = id == com.zzupocket.app.data.gms.GmsScheduleMapper.GRAD_SEMESTER_ID,
+            weekStart = st.weekOneStart,
+            startDay = st.startDay,
+            total = st.totalWeeks,
+            confirmed = st.confirmed,
+            source = st.source,
+            currentWeek = st.weekOneStart?.let { com.zzupocket.app.core.WeekMath.weekIndexAt(it, today) },
+        )
+    }
+
+    fun setWeekStart(date: java.time.LocalDate) = viewModelScope.launch {
+        val w = _week.value
+        val id = w.semesterId ?: return@launch
+        val start = com.zzupocket.app.core.WeekMath.startOfWeek(date, w.startDay)
+        store.saveWeekSettings(
+            id,
+            com.zzupocket.app.core.WeekSettings(
+                weekOneStart = start,
+                startDay = w.startDay,
+                totalWeeks = w.total,
+                confirmed = true,
+                source = com.zzupocket.app.core.WeekSource.USER,
+            ),
+        )
+        refreshWeek()
+    }
+
+    fun setCurrentWeek(week: Int) = viewModelScope.launch {
+        val w = _week.value
+        val id = w.semesterId ?: return@launch
+        val start = com.zzupocket.app.core.WeekMath.weekOneStart(java.time.LocalDate.now(), week, w.startDay)
+        store.saveWeekSettings(
+            id,
+            com.zzupocket.app.core.WeekSettings(
+                weekOneStart = start,
+                startDay = w.startDay,
+                totalWeeks = w.total,
+                confirmed = true,
+                source = com.zzupocket.app.core.WeekSource.USER,
+            ),
+        )
+        refreshWeek()
+    }
+
+    fun setWeekTotal(total: Int?) = viewModelScope.launch {
+        val w = _week.value
+        val id = w.semesterId ?: return@launch
+        store.saveWeekSettings(
+            id,
+            com.zzupocket.app.core.WeekSettings(
+                weekOneStart = w.weekStart,
+                startDay = w.startDay,
+                totalWeeks = total,
+                confirmed = w.confirmed,
+                source = w.source,
+            ),
+        )
+        refreshWeek()
+    }
+
+    fun setWeekStartDay(day: com.zzupocket.app.core.WeekStartDay) = viewModelScope.launch {
+        val w = _week.value
+        val id = w.semesterId ?: return@launch
+        store.saveWeekSettings(
+            id,
+            com.zzupocket.app.core.WeekSettings(
+                weekOneStart = w.weekStart?.let { com.zzupocket.app.core.WeekMath.startOfWeek(it, day) },
+                startDay = day,
+                totalWeeks = w.total,
+                confirmed = w.confirmed,
+                source = w.source,
+            ),
+        )
+        refreshWeek()
+    }
+
+    fun resetWeek() = viewModelScope.launch {
+        val id = _week.value.semesterId ?: return@launch
+        store.clearWeekSettings(id)
+        refreshWeek()
+    }
+
     companion object {
         /**
          * 学号前 4 位即入学年（如 202400000001 → 2024）。
@@ -123,9 +267,12 @@ fun DisplaySettingsScreen(
     onBack: () -> Unit,
     onOpenCrop: (Uri) -> Unit = {},
     onRecrop: () -> Unit = {},
+    /** 「课程总览」入口（原顶栏图标移到设置页里） */
+    onOpenOverview: (Int) -> Unit = {},
     vm: DisplaySettingsViewModel = viewModel(),
 ) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
+    val week by vm.week.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val background = rememberScheduleBackground(
         context = context,
@@ -139,7 +286,7 @@ fun DisplaySettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("课表显示") },
+                title = { Text("课程表设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -157,6 +304,16 @@ fun DisplaySettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Spacer(Modifier.height(4.dp))
+
+            // 教学周放在最上面：周次对不对，比"好不好看"重要得多
+            WeekSettingsCard(
+                week = week,
+                onSetWeekStart = vm::setWeekStart,
+                onSetCurrentWeek = vm::setCurrentWeek,
+                onSetTotal = vm::setWeekTotal,
+                onSetStartDay = vm::setWeekStartDay,
+                onReset = vm::resetWeek,
+            )
 
             SectionCard("显示") {
                 SwitchRow(
@@ -481,4 +638,211 @@ private fun <T> ChoiceRow(
             }
         }
     }
+}
+
+// ── 教学周卡片 ──────────────────────────────────────────────────────────
+
+/**
+ * 「教学周」设置卡片。
+ *
+ * 为什么这几项必须能改：研究生系统不返回"当前第几周"，早期靠课表内容反推，
+ * 实测把第 7 周算成了第 8 周（并把错误固化）。现在这四项是唯一事实来源：
+ * 开学日期（第 1 周起始日）、当前周次、本学期总周次、每周起始日。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WeekSettingsCard(
+    week: WeekUi,
+    onSetWeekStart: (java.time.LocalDate) -> Unit,
+    onSetCurrentWeek: (Int) -> Unit,
+    onSetTotal: (Int?) -> Unit,
+    onSetStartDay: (com.zzupocket.app.core.WeekStartDay) -> Unit,
+    onReset: () -> Unit,
+) {
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showWeekPicker by remember { mutableStateOf(false) }
+    var showTotalPicker by remember { mutableStateOf(false) }
+
+    val sourceText = when (week.source) {
+        com.zzupocket.app.core.WeekSource.CALENDAR -> "来自教务校历"
+        com.zzupocket.app.core.WeekSource.USER -> "你手动设置的"
+        com.zzupocket.app.core.WeekSource.INFERRED -> "自动推断"
+    }
+    val dateText = week.weekStart?.let { "%d/%d".format(it.monthValue, it.dayOfMonth) } ?: "未设置"
+
+    SectionCard("教学周") {
+        ValueRow(
+            title = "开学日期（第 1 周${week.startDay.label}）",
+            value = dateText,
+            hint = if (week.weekStart == null) "点这里设置，否则周次和日期都会偏" else sourceText,
+            warn = week.weekStart == null || !week.confirmed,
+            onClick = { showDatePicker = true },
+        )
+        ValueRow(
+            title = "当前周次",
+            value = week.currentWeek?.takeIf { it >= 1 }?.let { "第 $it 周" } ?: "—",
+            hint = "改它等于反推开学日期（以今天为准）",
+            onClick = { showWeekPicker = true },
+        )
+        ValueRow(
+            title = "本学期总周次",
+            value = week.total?.toString() ?: "自动",
+            hint = "只影响显示范围，不会删数据",
+            onClick = { showTotalPicker = true },
+        )
+        ChoiceRow(
+            title = "每周起始日",
+            hint = "我校校历按周一起算；个别学校按周日",
+            options = listOf(
+                com.zzupocket.app.core.WeekStartDay.MONDAY to "周一",
+                com.zzupocket.app.core.WeekStartDay.SUNDAY to "周日",
+            ),
+            selected = week.startDay,
+            onSelect = onSetStartDay,
+        )
+        TextButton(
+            onClick = onReset,
+            modifier = Modifier.padding(horizontal = 8.dp),
+        ) { Text("重置为自动值") }
+    }
+
+    if (showDatePicker) {
+        val initial = week.weekStart
+            ?.atStartOfDay(java.time.ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
+        val state = rememberDatePickerState(initialSelectedDateMillis = initial)
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        state.selectedDateMillis?.let { millis ->
+                            val picked = java.time.Instant.ofEpochMilli(millis)
+                                .atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                            onSetWeekStart(picked)
+                        }
+                        showDatePicker = false
+                    },
+                ) { Text("确定") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) { Text("取消") }
+            },
+        ) {
+            DatePicker(state = state)
+        }
+    }
+
+    if (showWeekPicker) {
+        NumberGridDialog(
+            title = "现在实际是第几周？",
+            hint = "选完会按今天反推开学日期，并记住这个设置",
+            numbers = (1..(week.total ?: 25)).toList(),
+            selected = week.currentWeek,
+            onPick = { onSetCurrentWeek(it); showWeekPicker = false },
+            onDismiss = { showWeekPicker = false },
+        )
+    }
+
+    if (showTotalPicker) {
+        NumberGridDialog(
+            title = "本学期共几周？",
+            hint = "默认取课表里的最大周；调小只是不再显示后面的周",
+            numbers = (1..30).toList(),
+            selected = week.total,
+            onPick = { onSetTotal(it); showTotalPicker = false },
+            onDismiss = { showTotalPicker = false },
+        )
+    }
+}
+
+/** 设置页里的一行「标题 + 当前值」，点了进二级对话框 */
+@Composable
+private fun ValueRow(
+    title: String,
+    value: String,
+    hint: String? = null,
+    warn: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            hint?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (warn) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+/** 数字网格选择对话框（周次/总周次共用） */
+@Composable
+private fun NumberGridDialog(
+    title: String,
+    hint: String,
+    numbers: List<Int>,
+    selected: Int?,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(hint, style = MaterialTheme.typography.bodySmall)
+                numbers.chunked(6).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { n ->
+                            val isSelected = n == selected
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(
+                                        color = if (isSelected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                    )
+                                    .clickable { onPick(n) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "$n",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
