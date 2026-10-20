@@ -126,8 +126,9 @@ interface KvCacheDao {
         FocusSessionEntity::class,
         CardTransactionEntity::class,
         TimetableSyncEntity::class,
+        RoomOccupancyEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -142,6 +143,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun focusSessionDao(): FocusSessionDao
     abstract fun cardTransactionDao(): CardTransactionDao
     abstract fun timetableSyncDao(): TimetableSyncDao
+    abstract fun roomOccupancyDao(): RoomOccupancyDao
 
     companion object {
         @Volatile
@@ -252,6 +254,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v7：课表同步表补两列（内容指纹 + 缓存版本），并新增空教室占用快照表。
+         *
+         * - `contentHash`：刷新后内容没变就"一个字都不动"，靠它判断；
+         * - `cacheVersion`：结构版本，将来字段改了可直接丢弃旧缓存；
+         * - `room_occupancy`：只缓存当天的教室占用（跨天即失效），见实体注释。
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `timetable_sync` ADD COLUMN `contentHash` TEXT")
+                db.execSQL("ALTER TABLE `timetable_sync` ADD COLUMN `cacheVersion` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `room_occupancy` (" +
+                        "`date` TEXT NOT NULL, `roomId` INTEGER NOT NULL, `campusId` INTEGER NOT NULL, " +
+                        "`code` TEXT NOT NULL, `buildingId` INTEGER NOT NULL, `buildingName` TEXT NOT NULL, " +
+                        "`campusName` TEXT NOT NULL, `occupations` TEXT NOT NULL, `fetchedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`date`, `roomId`))",
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext,
@@ -263,6 +286,7 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_3_4,
                 MIGRATION_4_5,
                 MIGRATION_5_6,
+                MIGRATION_6_7,
             )
                 .build()
                 .also { instance = it }

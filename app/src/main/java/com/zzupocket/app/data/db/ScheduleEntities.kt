@@ -103,6 +103,14 @@ data class TimetableSyncEntity(
     val fetchedAt: Long,
     val lastError: String? = null,
     val lastErrorAt: Long? = null,
+    /**
+     * 课表内容指纹（每节课的 周次|星期|节次|课名|教室|教师 拼起来算）。
+     * 刷新后指纹相同 ⇒ 内容没变 ⇒ **界面一个字都不该变**（用户明确要求），
+     * 但仍要更新 [fetchedAt]，因为数据确实是刚取回来的。
+     */
+    val contentHash: String? = null,
+    /** 缓存结构版本；与当前代码不符时直接丢弃重拉，避免旧缓存缺字段导致界面异常 */
+    val cacheVersion: Int = 1,
 )
 
 @Dao
@@ -208,4 +216,48 @@ interface PeriodDao {
 
     @Query("SELECT * FROM periods ORDER BY indexNo")
     fun observeAll(): Flow<List<PeriodEntity>>
+}
+
+// ── 教室占用缓存（空教室页）────────────────────────────────────────────
+
+/**
+ * 某个日期、某间教室的占用快照。
+ *
+ * 与课表缓存的关键区别：**空教室是"当天某时刻"的数据**，过期了会误导人
+ * （显示空、跑过去有人）。所以按 (date, roomId) 存，只缓存今天，跨天直接失效；
+ * [occupations] 存的是**原始占用时间段**（"800-845,905-950"），不是布尔格子 ——
+ * 节次时间表变了还能重新算格子。
+ */
+@Entity(tableName = "room_occupancy", primaryKeys = ["date", "roomId"])
+data class RoomOccupancyEntity(
+    val date: String,
+    val roomId: Long,
+    val campusId: Long,
+    val code: String,
+    val buildingId: Long,
+    val buildingName: String,
+    val campusName: String,
+    /** 占用时间段，逗号分隔的 `startTime-endTime`（HHmm 整数） */
+    val occupations: String,
+    val fetchedAt: Long,
+)
+
+@Dao
+interface RoomOccupancyDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<RoomOccupancyEntity>)
+
+    @Query("SELECT * FROM room_occupancy WHERE date = :date AND campusId = :campusId")
+    suspend fun byDateAndCampus(date: String, campusId: Long): List<RoomOccupancyEntity>
+
+    @Query("SELECT MAX(fetchedAt) FROM room_occupancy WHERE date = :date AND campusId = :campusId")
+    suspend fun fetchedAt(date: String, campusId: Long): Long?
+
+    /** 覆盖写入前先清掉同一天同一校区的旧快照 */
+    @Query("DELETE FROM room_occupancy WHERE date = :date AND campusId = :campusId")
+    suspend fun deleteByDateAndCampus(date: String, campusId: Long)
+
+    /** 只保留今天（及以后）的快照 */
+    @Query("DELETE FROM room_occupancy WHERE date < :beforeDate")
+    suspend fun pruneBefore(beforeDate: String)
 }

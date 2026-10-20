@@ -1,4 +1,4 @@
-package com.zzupocket.app.data.repo
+﻿package com.zzupocket.app.data.repo
 
 import android.util.Log
 import androidx.room.withTransaction
@@ -8,7 +8,9 @@ import com.zzupocket.app.data.db.CourseEntity
 import com.zzupocket.app.data.db.CourseSessionEntity
 import com.zzupocket.app.data.db.PeriodEntity
 import com.zzupocket.app.data.db.SemesterEntity
+import com.zzupocket.app.data.db.RoomOccupancyEntity
 import com.zzupocket.app.data.db.TimetableSyncEntity
+import com.zzupocket.app.domain.RoomOccupation
 import com.zzupocket.app.data.eas.EasClient
 import com.zzupocket.app.domain.Course
 import com.zzupocket.app.domain.Period
@@ -128,6 +130,21 @@ class ScheduleRepository(
             db.courseDao().deleteBySemester(semesterId)
             db.courseDao().upsertAll(courseEntities)
             db.courseSessionDao().upsertAll(sessionEntities)
+            // 本科也记同步状态：界面要显示"获取于 HH:MM"，缓存优先也要按 TTL 判断
+            db.timetableSyncDao().upsert(
+                TimetableSyncEntity(
+                    source = SOURCE_EAS,
+                    semesterId = semesterId,
+                    fetchedAt = now,
+                    lastError = null,
+                    lastErrorAt = null,
+                    contentHash = sessionEntities.map { e ->
+                        "${e.weekIndex}|${e.weekday}|${e.startUnit}|${e.endUnit}|${e.courseName}|" +
+                            "${e.roomText.orEmpty()}|${e.teacherName.orEmpty()}"
+                    }.sorted().joinToString("\n").hashCode().toString(),
+                    cacheVersion = CACHE_VERSION,
+                ),
+            )
         }
         logGridCollisions(sessionEntities)
     }
@@ -408,7 +425,9 @@ class ScheduleRepository(
      * 把某个来源的课表整体写入（先按来源删、再插；**不会碰 `custom` 日程**）。
      *
      * 研究生走这条：`semesterId = GmsScheduleMapper.GRAD_SEMESTER_ID`、`source = "gms"`。
-     * 现在只写不读（读路径等 0.31.7 周次验证通过后再接），所以对现有界面零影响。
+     *
+     * @return true = 内容与上次不同（界面上课表确实变了）；false = 只是刷新了一遍，内容一模一样
+     *   —— 后者按用户要求**界面一个字都不该动**，但"获取时间"仍会更新。
      */
     suspend fun saveTimetable(
         source: String,
@@ -416,7 +435,10 @@ class ScheduleRepository(
         sessions: List<Session>,
         courses: List<Course>,
         fetchedAt: Long = System.currentTimeMillis(),
-    ) {
+    ): Boolean {
+        val hash = timetableHash(sessions)
+        val existing = db.timetableSyncDao().get(source, semesterId)
+        val changed = existing?.contentHash != hash
         val courseEntities = courses.map { c ->
             CourseEntity(
                 key = courseKeyOf(semesterId, c.code),
@@ -462,14 +484,35 @@ class ScheduleRepository(
                     fetchedAt = fetchedAt,
                     lastError = null,
                     lastErrorAt = null,
+                    contentHash = hash,
+                    cacheVersion = CACHE_VERSION,
                 ),
             )
         }
+        return changed
     }
 
-    /** 最近一次成功抓取的时间（毫秒）；null = 从没成功过 */
-    suspend fun lastFetchedAt(source: String, semesterId: Int): Long? =
-        db.timetableSyncDao().get(source, semesterId)?.fetchedAt?.takeIf { it > 0L }
+    /**
+     * 最近一次成功抓取的时间（毫秒）；null = 从没成功过，或缓存结构版本已过时。
+     *
+     * 版本过时返回 null 的效果是"当作没有缓存、重新拉"，比拿旧结构渲染出错更稳。
+     */
+    suspend fun lastFetchedAt(source: String, semesterId: Int): Long? {
+        val row = db.timetableSyncDao().get(source, semesterId) ?: return null
+        if (row.cacheVersion != CACHE_VERSION) return null
+        return row.fetchedAt.takeIf { it > 0L }
+    }
+
+    /** 缓存结构版本；改字段就 +1，旧缓存会被当作不存在 */
+    private fun timetableHash(sessions: List<Session>): String = sessions
+        .map {
+            "${it.weekIndex}|${it.weekday}|${it.startUnit}|${it.endUnit}|" +
+                "${it.courseName}|${it.roomText.orEmpty()}|${it.teacherName.orEmpty()}"
+        }
+        .sorted()
+        .joinToString("\n")
+        .hashCode()
+        .toString()
 
     /** 记一次失败原因（供「失败但保留缓存」的提示用；不要吞掉调用方的异常） */
     suspend fun markSyncError(source: String, semesterId: Int, error: String) {
@@ -508,9 +551,70 @@ class ScheduleRepository(
         }
     }
 
+    // ── 空教室快照（只缓存当天；跨天即失效）────────────────────────────
+
+    /** 写某一天、某校区的教室占用快照（覆盖写，并顺手清掉更早的） */
+    suspend fun saveRoomSnapshot(
+        date: String,
+        campusId: Long,
+        rows: List<RoomCacheRow>,
+        fetchedAt: Long = System.currentTimeMillis(),
+    ) {
+        db.withTransaction {
+            db.roomOccupancyDao().deleteByDateAndCampus(date, campusId)
+            db.roomOccupancyDao().upsertAll(
+                rows.map { r ->
+                    RoomOccupancyEntity(
+                        date = date,
+                        roomId = r.roomId,
+                        campusId = campusId,
+                        code = r.code,
+                        buildingId = r.buildingId,
+                        buildingName = r.buildingName,
+                        campusName = r.campusName,
+                        occupations = r.occupations.joinToString(",") {
+                            "${it.startTime}-${it.endTime}"
+                        },
+                        fetchedAt = fetchedAt,
+                    )
+                },
+            )
+            // 空教室只缓存当天：更早的一律删掉，避免"昨天的占用"被当成今天
+            db.roomOccupancyDao().pruneBefore(date)
+        }
+    }
+
+    /** 读某一天、某校区的快照；没有返回 null（调用方据此决定"没数据可用"） */
+    suspend fun cachedRoomSnapshot(date: String, campusId: Long): CachedRoomSnapshot? {
+        val rows = db.roomOccupancyDao().byDateAndCampus(date, campusId)
+        if (rows.isEmpty()) return null
+        val at = db.roomOccupancyDao().fetchedAt(date, campusId) ?: return null
+        return CachedRoomSnapshot(
+            fetchedAt = at,
+            rows = rows.map { e ->
+                RoomCacheRow(
+                    roomId = e.roomId,
+                    code = e.code,
+                    buildingId = e.buildingId,
+                    buildingName = e.buildingName,
+                    campusName = e.campusName,
+                    occupations = e.occupations.split(',')
+                        .mapNotNull { part ->
+                            val a = part.substringBefore('-').toIntOrNull()
+                            val b = part.substringAfter('-', "").toIntOrNull()
+                            if (a != null && b != null) RoomOccupation(a, b) else null
+                        },
+                )
+            },
+        )
+    }
+
     companion object {
         const val SOURCE_EAS = "eas"
         const val SOURCE_CUSTOM = "custom"
+
+        /** 课表缓存结构版本；改字段就 +1，旧缓存会被当作不存在 */
+        const val CACHE_VERSION = 1
 
         private const val TAG_GRID = "ScheduleGrid"
 
@@ -588,4 +692,20 @@ private fun PeriodEntity.toDomain() = Period(
     endTime = endTime,
     dayPart = dayPart,
     segmentIndex = segmentIndex,
+)
+
+/** 空教室快照里的一行（原始占用时间段，展示时再按节次表算格子） */
+data class RoomCacheRow(
+    val roomId: Long,
+    val code: String,
+    val buildingId: Long,
+    val buildingName: String,
+    val campusName: String,
+    val occupations: List<RoomOccupation>,
+)
+
+/** 某天某校区的教室占用快照 */
+data class CachedRoomSnapshot(
+    val fetchedAt: Long,
+    val rows: List<RoomCacheRow>,
 )

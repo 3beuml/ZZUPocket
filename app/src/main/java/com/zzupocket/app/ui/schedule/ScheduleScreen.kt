@@ -1,4 +1,4 @@
-﻿package com.zzupocket.app.ui.schedule
+package com.zzupocket.app.ui.schedule
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -162,6 +162,22 @@ fun ScheduleScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
+            // 缓存提示：一行小灰字，点了重试。刻意不用红色 —— 红色错误会让人以为账号出问题
+            // （历史 issue #2 反复重登就是这么来的）。刷新成功且内容没变时这里是 null，什么都不显示。
+            state.cacheNotice?.let { msg ->
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (state.gradMode) vm.loadGmsWeek(force = true) else vm.refresh()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 2.dp),
                 )
             }
 

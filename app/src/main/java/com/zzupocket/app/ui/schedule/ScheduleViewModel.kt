@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.schedule
+﻿package com.zzupocket.app.ui.schedule
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,6 +10,7 @@ import com.zzupocket.app.core.WeekMath
 import com.zzupocket.app.core.toUserMessage
 import com.zzupocket.app.data.auth.AuthRepository
 import com.zzupocket.app.data.gms.GmsScheduleMapper
+import com.zzupocket.app.data.gms.GmsScheduleSource
 import com.zzupocket.app.data.gms.GmsWeekAlign
 import com.zzupocket.app.data.gms.GradLesson
 import com.zzupocket.app.data.prefs.UiPrefsStore
@@ -74,6 +75,19 @@ data class ScheduleUiState(
     val weekConfirmed: Boolean = false,
     /** 周次参数来源，界面据此标注 */
     val weekSource: com.zzupocket.app.core.WeekSource = com.zzupocket.app.core.WeekSource.INFERRED,
+
+    // ── 缓存状态（"先显示缓存、再后台刷新"）─────────────────────────────
+    /** 当前课表数据的获取时间（毫秒）；null = 还没成功取过 */
+    val dataFetchedAt: Long? = null,
+    /** 正在后台刷新（有缓存时不显示转圈，只用于内部判断） */
+    val refreshing: Boolean = false,
+    /**
+     * 缓存提示：**一行小灰字**，null = 什么都不显示。
+     *
+     * 规则（用户拍定）：刷新成功且内容一样 → 不提示；取不到 → 才显示"显示的是 HH:MM 的课表"，
+     * 而不是红色错误——红色错误会让人以为是自己账号出了问题，历史上因此反复重登。
+     */
+    val cacheNotice: String? = null,
     /** 研究生视图的节次时刻（本科 periods 为空时用官方作息表兜底） */
     val gmsPeriods: List<Period> = emptyList(),
     /** gmsWeekIndex 是按哪一天对齐的；跨天后重新拉一次 */
@@ -232,6 +246,67 @@ class ScheduleViewModel : ViewModel() {
     /** 研究生课表三次请求的总预算；超了就给一句人话，别让界面无限转圈 */
     private val GMS_TIMEOUT_MS = 30_000L
 
+    /** 研究生课表缓存有效期：24 小时（课表变动很小，一天最多后台刷一次） */
+    private val GRAD_TTL_MS = 24L * 60 * 60 * 1000
+
+    /** `14:20` 这种口径的"获取时间" */
+    private fun hhmm(millis: Long): String =
+        java.time.Instant.ofEpochMilli(millis)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toLocalTime()
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+
+    /** 本科课表缓存有效期：24 小时（学期内基本不变，调课也罕见） */
+    private val EAS_TTL_MS = 24L * 60 * 60 * 1000
+
+    /**
+     * 用缓存先把研究生视图渲染出来（不联网）。
+     *
+     * 缓存里只有"课表本身"，学期信息（第 1 周起始日等）来自周次设置，两者拼起来就能
+     * 立刻画出网格。之后是否联网由调用方按 TTL 判断。
+     */
+    private suspend fun publishGmsFromCache(sessions: List<Session>, fetchedAt: Long?) {
+        val today = LocalDate.now()
+        val settings = runCatching { uiPrefs.weekSettings(GmsScheduleMapper.GRAD_SEMESTER_ID) }
+            .getOrDefault(com.zzupocket.app.core.WeekSettings())
+        val weeks = sessions.map { it.weekIndex }.distinct().sorted()
+        val courses = runCatching { repo.courses(GmsScheduleMapper.GRAD_SEMESTER_ID) }
+            .getOrDefault(emptyList())
+        val periods = _state.value.periods.ifEmpty { GmsScheduleMapper.defaultPeriods() }
+        val start = settings.weekOneStart
+        val week = start?.let { WeekMath.weekIndexAt(it, today) }
+            ?.coerceIn(weeks.firstOrNull() ?: 1, weeks.lastOrNull() ?: Int.MAX_VALUE)
+            ?: (weeks.firstOrNull() ?: 1)
+        _state.update {
+            it.copy(
+                gmsBusy = false,
+                gmsError = null,
+                gmsSessions = sessions,
+                gmsCourses = courses,
+                gmsPeriods = periods,
+                periods = periods,
+                gmsWeekIndex = week,
+                gmsSemester = Semester(
+                    id = GmsScheduleMapper.GRAD_SEMESTER_ID,
+                    nameZh = "研究生课表",
+                    schoolYear = "",
+                    startDate = start,
+                    endDate = null,
+                    weekStartOnSunday = settings.startDay == com.zzupocket.app.core.WeekStartDay.SUNDAY,
+                    weekIndices = weeks,
+                    isCurrent = true,
+                ),
+                weekStart = start,
+                weekStartDay = settings.startDay,
+                weekTotal = settings.totalWeeks ?: weeks.lastOrNull(),
+                weekConfirmed = settings.confirmed,
+                weekSource = settings.source,
+                gmsAnchored = settings.confirmed,
+                dataFetchedAt = fetchedAt,
+            )
+        }
+    }
+
     /**
      * 拉研究生整学期课表并映射成本科网格。
      *
@@ -243,8 +318,24 @@ class ScheduleViewModel : ViewModel() {
     fun loadGmsWeek(force: Boolean = false) {
         if (!force && gmsJob?.isActive == true) return
         gmsJob?.cancel()
-        _state.update { it.copy(gmsBusy = true, gmsError = null) }
         gmsJob = viewModelScope.launch {
+            // ① 有缓存就先渲染（秒开、断网也能看），再决定要不要联网
+            val cached = runCatching {
+                repo.cachedSessions(GmsScheduleSource.SOURCE, GmsScheduleMapper.GRAD_SEMESTER_ID)
+            }.getOrDefault(emptyList())
+            val fetchedAt = runCatching {
+                repo.lastFetchedAt(GmsScheduleSource.SOURCE, GmsScheduleMapper.GRAD_SEMESTER_ID)
+            }.getOrNull()
+            if (cached.isNotEmpty()) {
+                publishGmsFromCache(cached, fetchedAt)
+                val fresh = !com.zzupocket.app.core.SyncPolicy.shouldRefresh(
+                    now = System.currentTimeMillis(),
+                    lastFetchedAt = fetchedAt,
+                    ttlMs = GRAD_TTL_MS,
+                )
+                if (fresh && !force) return@launch
+            }
+            _state.update { it.copy(gmsBusy = cached.isEmpty(), gmsError = null, refreshing = true) }
             val result = runCatching {
                 // 兜底超时：网络卡住时给一句人话，而不是让界面永远转圈
                 kotlinx.coroutines.withTimeout(GMS_TIMEOUT_MS) {
@@ -325,6 +416,11 @@ class ScheduleViewModel : ViewModel() {
                         weekTotal = settings.totalWeeks ?: dataWeeks.maxOrNull(),
                         weekConfirmed = settings.confirmed,
                         weekSource = settings.source,
+                        // 刷新成功：更新"获取时间"，清掉缓存提示；内容是否变化由指纹判断，
+                        // 但界面本来就不显示提示，所以这里不需要分支
+                        dataFetchedAt = System.currentTimeMillis(),
+                        refreshing = false,
+                        cacheNotice = null,
                         notice = if (settings.weekOneStart == null) {
                             "还没定教学周基准，先按第 $week 周显示；去「课程表设置」设一下开学日期"
                         } else if (!settings.confirmed) {
@@ -353,8 +449,30 @@ class ScheduleViewModel : ViewModel() {
                 } else {
                     e.toUserMessage()
                 }
-                _state.update { it.copy(gmsBusy = false, gmsError = msg) }
-                // 记一次失败原因：将来「有缓存但刷新失败」时要能说清是会话过期还是教务不可用
+                // 有缓存就不报红错：改成一行小灰字，说明"这是什么时候的数据"。
+                // 红色错误会让人以为账号出问题（历史 issue #2 反复重登就是这么来的）。
+                if (_state.value.gmsSessions.isNotEmpty()) {
+                    val expired = msg.contains("登录")
+                    val at = _state.value.dataFetchedAt?.let { hhmm(it) }
+                    _state.update {
+                        it.copy(
+                            gmsBusy = false,
+                            refreshing = false,
+                            gmsError = null,
+                            cacheNotice = when {
+                                at == null && expired -> "研究生登录已过期 · 重新登录"
+                                at == null -> "暂时连不上研究生系统 · 点此重试"
+                                expired -> "研究生登录已过期，以下是 $at 的课表 · 重新登录"
+                                else -> "显示的是 $at 的课表 · 点此重试"
+                            },
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(gmsBusy = false, refreshing = false, gmsError = msg)
+                    }
+                }
+                // 记一次失败原因：将来要能说清是会话过期还是教务不可用
                 runCatching {
                     repo.markSyncError(
                         com.zzupocket.app.data.gms.GmsScheduleSource.SOURCE,
@@ -485,15 +603,38 @@ class ScheduleViewModel : ViewModel() {
 
     fun dismissNotice() = _state.update { it.copy(notice = null) }
 
-    /** 载入某学期的数据；没有缓存且已登录时顺手拉一次 */
+    /** 载入某学期的数据；没有缓存、缓存过期或强制刷新时才联网 */
     private suspend fun loadSemester(semester: Semester, loggedIn: Boolean, forceSync: Boolean) {
+        val fetchedAt = runCatching {
+            repo.lastFetchedAt(ScheduleRepository.SOURCE_EAS, semester.id)
+        }.getOrNull()
+        val stale = com.zzupocket.app.core.SyncPolicy.shouldRefresh(
+            now = System.currentTimeMillis(),
+            lastFetchedAt = fetchedAt,
+            ttlMs = EAS_TTL_MS,
+        )
+        var refreshFailed = false
         try {
-            if (loggedIn && (forceSync || !repo.hasCourseData(semester.id))) {
+            if (loggedIn && (forceSync || !repo.hasCourseData(semester.id) || stale)) {
                 repo.refreshCourseTable(semester.id)
             }
         } catch (e: Throwable) {
-            // 拉取失败不清空已有缓存，只提示
-            _state.update { it.copy(error = e.toUserMessage()) }
+            refreshFailed = true
+            if (repo.hasCourseData(semester.id)) {
+                val at = fetchedAt?.let { hhmm(it) }
+                _state.update {
+                    it.copy(
+                        cacheNotice = if (at != null) {
+                            "显示的是 $at 的课表 · 点此重试"
+                        } else {
+                            "暂时连不上教务系统 · 点此重试"
+                        },
+                        error = null,
+                    )
+                }
+            } else {
+                _state.update { it.copy(error = e.toUserMessage()) }
+            }
         }
         var periods = repo.periods()
         if (periods.isEmpty() && loggedIn) {
@@ -537,6 +678,11 @@ class ScheduleViewModel : ViewModel() {
                 weekTotal = settings.totalWeeks,
                 weekConfirmed = settings.confirmed,
                 weekSource = settings.source,
+                dataFetchedAt = runCatching {
+                    repo.lastFetchedAt(ScheduleRepository.SOURCE_EAS, semester.id)
+                }.getOrNull(),
+                // 刷新成功就清掉旧的"显示的是…"提示；失败时保留上面写进去的那行
+                cacheNotice = if (refreshFailed) it.cacheNotice else null,
             )
         }
     }
