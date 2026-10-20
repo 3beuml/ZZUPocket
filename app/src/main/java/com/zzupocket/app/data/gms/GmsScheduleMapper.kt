@@ -106,25 +106,32 @@ object GmsScheduleMapper {
             .sortedBy { it.nameZh }
 
     /**
-     * 研究生学期：周次来自整学期课表；第 1 周周一由「本周课表」反推。
+     * 研究生学期：周次来自整学期课表。
      *
-     * 对齐失败时 [Semester.startDate] 为 null —— 网格仍能显示，只是表头不显示日期。
+     * 第 1 周周一的来源按可信度排序：
+     * 1. [anchoredMonday] —— 已落库/用户手动校正过的锚点（最可信，直接采用）；
+     * 2. 由「本周课表」反推的当前周（[anchoredWeek] 或现场反推），再用
+     *    [GmsWeekAlign.weekOneMonday] 倒推。
+     *
+     * 两者都没有时 [Semester.startDate] 为 null —— 网格仍能显示，只是表头不显示日期。
      */
     fun toSemester(
         term: GmsClient.TermDto,
         entries: List<GmsClient.WeekEntry>,
         current: List<GradLesson>,
         today: LocalDate,
+        anchoredMonday: LocalDate? = null,
+        anchoredWeek: Int? = null,
     ): Semester {
         val weeks = entries.map { it.weekIndex }.distinct().sorted()
         val first = weeks.firstOrNull() ?: 1
         val last = weeks.lastOrNull() ?: first
-        val currentWeek = GmsWeekAlign.currentWeekIndex(entries, current)
+        val currentWeek = anchoredWeek ?: GmsWeekAlign.currentWeekIndex(entries, current)
         return Semester(
             id = GRAD_SEMESTER_ID,
             nameZh = term.text.ifBlank { "研究生课表" },
             schoolYear = "",
-            startDate = currentWeek?.let { GmsWeekAlign.weekOneMonday(today, it) },
+            startDate = anchoredMonday ?: currentWeek?.let { GmsWeekAlign.weekOneMonday(today, it) },
             endDate = null,
             weekStartOnSunday = false,
             weekIndices = (first..last).toList(),

@@ -68,4 +68,56 @@ class GmsWeekAlignTest {
     fun `匹配键对课程名两侧空白不敏感`() {
         assertEquals(GmsWeekAlign.key(1, 2, "高等数学"), GmsWeekAlign.key(1, 2, "  高等数学 "))
     }
+
+    // ── 以下为 2026-10-20 的回归：第 7 周被显示成第 10 周 ──────────────────
+
+    @Test
+    fun `整周课表唯一一致时才判为唯一解`() {
+        val term = listOf(
+            entry(6, 1, 1, "高等数学"),
+            entry(7, 1, 1, "高等数学"),
+            entry(7, 2, 3, "数值分析"),
+            entry(10, 1, 1, "高等数学"),
+            entry(10, 2, 3, "数值分析"),
+            entry(10, 3, 5, "机器学习"),
+        )
+        val today = listOf(lesson(1, 1, "高等数学"), lesson(2, 3, "数值分析"))
+        val guess = GmsWeekAlign.guess(term, today)
+        // 第 7 周与第 10 周都"包含"这节课，但只有第 7 周是整周完全一致
+        assertEquals(7, guess.week)
+        assertEquals(true, guess.unique)
+        assertEquals(7, guess.anchoredWeekOrNull())
+    }
+
+    @Test
+    fun `每周课表完全相同时判为无法区分_不产出锚点`() {
+        // 一周只有一门每周都上的课 —— 光看课程根本分不出是哪一周
+        val term = (1..19).map { entry(it, 1, 1, "高等数学") }
+        val today = listOf(lesson(1, 1, "高等数学"))
+        val guess = GmsWeekAlign.guess(term, today)
+        assertNull(guess.week)
+        assertEquals(false, guess.unique)
+        assertNull(guess.anchoredWeekOrNull())
+    }
+
+    @Test
+    fun `锚点按日期推算当前周_跨周不漂移`() {
+        // 2026-09-07 是第 1 周周一；调查里"今天是 2026-10-19" = 开学后第 7 周
+        val weekOne = LocalDate.of(2026, 9, 7)
+        assertEquals(1, GmsWeekAlign.weekIndexAt(weekOne, LocalDate.of(2026, 9, 7)))
+        assertEquals(1, GmsWeekAlign.weekIndexAt(weekOne, LocalDate.of(2026, 9, 13)))
+        assertEquals(2, GmsWeekAlign.weekIndexAt(weekOne, LocalDate.of(2026, 9, 14)))
+        assertEquals(7, GmsWeekAlign.weekIndexAt(weekOne, LocalDate.of(2026, 10, 19)))
+        assertEquals(7, GmsWeekAlign.weekIndexAt(weekOne, LocalDate.of(2026, 10, 25)))
+        assertEquals(8, GmsWeekAlign.weekIndexAt(weekOne, LocalDate.of(2026, 10, 26)))
+    }
+
+    @Test
+    fun `手动校正后由校正周次倒推第 1 周周一再算回来要一致`() {
+        val today = LocalDate.of(2026, 10, 19)
+        for (week in 1..19) {
+            val monday = GmsWeekAlign.weekOneMonday(today, week)
+            assertEquals(week, GmsWeekAlign.weekIndexAt(monday, today))
+        }
+    }
 }

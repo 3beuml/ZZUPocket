@@ -51,8 +51,16 @@ data class ScheduleUiState(
     val gmsSemester: Semester? = null,
     val gmsSessions: List<Session> = emptyList(),
     val gmsCourses: List<Course> = emptyList(),
-    /** 研究生视图当前教学周（由「本周课表」反推） */
+    /** 研究生视图当前教学周（优先由落库锚点按日期推算） */
     val gmsWeekIndex: Int = 1,
+    /** 当前学期在研究生系统里的 term value（写锚点用） */
+    val gmsTermValue: String? = null,
+    /**
+     * 周次是否已被锚定（落库过或用户手动校正过）。
+     *
+     * false 时说明这次是"猜"的：界面要给出「校正周次」入口，用户点一次就永久锚定。
+     */
+    val gmsAnchored: Boolean = false,
     /** 研究生视图的节次时刻（本科 periods 为空时用官方作息表兜底） */
     val gmsPeriods: List<Period> = emptyList(),
     /** gmsWeekIndex 是按哪一天对齐的；跨天后重新拉一次 */
@@ -243,27 +251,65 @@ class ScheduleViewModel : ViewModel() {
                     }
                     return@onSuccess
                 }
+                val today = LocalDate.now()
+                val prefs = runCatching { uiPrefs.flow.first() }.getOrNull()
+                // 锚点只对同一个学期有效
+                val anchorMonday = prefs
+                    ?.takeIf { it.gmsAnchorTerm == term.value }
+                    ?.gmsWeekOneEpochDay
+                    ?.let { LocalDate.ofEpochDay(it) }
+                val guess = GmsWeekAlign.guess(entries, current)
                 val periods = _state.value.periods.ifEmpty { GmsScheduleMapper.defaultPeriods() }
                 val sessions = GmsScheduleMapper.toSessions(entries, periods)
                 val courses = GmsScheduleMapper.toCourses(sessions)
-                val semester = GmsScheduleMapper.toSemester(term, entries, current, LocalDate.now())
-                val week = GmsWeekAlign.currentWeekIndex(entries, current)
-                    ?: semester.firstWeek
-                    ?: 1
+
+                // 有锚点就用日期推算（唯一可信来源）；没有才用反推，且只有唯一解才敢用
+                val weekRaw = if (anchorMonday != null) {
+                    GmsWeekAlign.weekIndexAt(anchorMonday, today)
+                } else {
+                    guess.anchoredWeekOrNull() ?: GmsWeekAlign.currentWeekIndex(entries, current) ?: 1
+                }
+                val semester = GmsScheduleMapper.toSemester(
+                    term = term,
+                    entries = entries,
+                    current = current,
+                    today = today,
+                    anchoredMonday = anchorMonday,
+                    anchoredWeek = weekRaw,
+                )
+                val week = weekRaw.coerceIn(
+                    semester.weekIndices.firstOrNull() ?: 1,
+                    semester.weekIndices.lastOrNull() ?: weekRaw,
+                )
+                // 首次对齐且反推唯一 → 落库当锚点，之后不再重新猜
+                if (anchorMonday == null) {
+                    val confident = guess.anchoredWeekOrNull()
+                    if (confident != null) {
+                        runCatching {
+                            uiPrefs.setGmsWeekAnchor(
+                                term = term.value,
+                                weekOneMondayEpochDay = GmsWeekAlign
+                                    .weekOneMonday(today, confident).toEpochDay(),
+                            )
+                        }
+                    }
+                }
                 _state.update {
                     it.copy(
                         gmsBusy = false,
                         gmsError = null,
+                        gmsTermValue = term.value,
                         gmsLessons = current,
                         gmsSemester = semester,
                         gmsSessions = sessions,
                         gmsCourses = courses,
                         gmsWeekIndex = week,
                         gmsPeriods = periods,
-                        gmsWeekResolvedOn = LocalDate.now(),
+                        gmsWeekResolvedOn = today,
+                        gmsAnchored = anchorMonday != null || guess.anchoredWeekOrNull() != null,
                         periods = periods,
                         notice = if (semester.startDate == null) {
-                            "未能自动对齐当前教学周，已从第 $week 周开始显示"
+                            "未能自动判定当前教学周，已先按第 $week 周显示；点「校正周次」设置一下"
                         } else null,
                     )
                 }
@@ -541,6 +587,34 @@ class ScheduleViewModel : ViewModel() {
     fun goToGmsWeek(week: Int) {
         if (week !in _state.value.gmsWeeks) return
         _state.update { it.copy(gmsWeekIndex = week) }
+    }
+
+    /**
+     * 手动校正"现在实际是第几周"。
+     *
+     * 研究生接口不返回当前周，反推在课程跨周重复时一定会有歧义 —— 这个入口是最终裁决：
+     * 用户说第 7 周就是第 7 周，据此把第 1 周周一算出来并落库，之后全部按日期推算。
+     */
+    fun setGmsCurrentWeek(week: Int) {
+        val s = _state.value
+        if (week !in s.gmsWeeks) return
+        val term = s.gmsTermValue
+        val today = LocalDate.now()
+        val monday = GmsWeekAlign.weekOneMonday(today, week)
+        _state.update {
+            it.copy(
+                gmsWeekIndex = week,
+                gmsSemester = it.gmsSemester?.copy(startDate = monday),
+                gmsWeekResolvedOn = today,
+                gmsAnchored = true,
+                notice = null,
+            )
+        }
+        if (term != null) {
+            viewModelScope.launch {
+                runCatching { uiPrefs.setGmsWeekAnchor(term, monday.toEpochDay()) }
+            }
+        }
     }
 
     fun refresh() {
