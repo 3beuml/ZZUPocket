@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.diag
+﻿package com.zzupocket.app.ui.diag
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,12 +61,15 @@ private val FULL_FMT = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 /**
  * 正式包（release）是否也显示下面那批「自检」卡片。
  *
- * 为什么要有这个开关：这些卡片原来只挂在 `BuildConfig.DEBUG` 上，于是**用户装的正式包里
- * 根本看不到它们** —— 而它们恰恰是给用户报障时用的（2026-10-15 踩过：给用户发了个"带自检
- * 入口"的包，结果他打开诊断页什么自检都没有）。这些都是只读诊断，不会改任何数据，
- * 正式包显示是安全的；哪天不想给用户看，把这里改回 false 即可。
+ * 历史：2026-10-15 为了让用户能自己跑自检报障，这里临时改成 true；
+ * **2026-10-20 恢复为 false** —— 研究生链路已经跑通，普通用户的界面上不该再出现
+ * 「一卡通/教室/鉴权/研究生探测/图书馆」这些内部工具。
+ *
+ * 排障时怎么办：让用户装 debug 包（自检卡片仍在 debug 里），或者临时发一个 true 的包。
+ * 登录状态页里的「研究生教务」卡片（已登录/检查会话/重新登录/退出）**不受此开关影响**，
+ * 那是给用户用的正式功能，不是自检。
  */
-private const val SHOW_PROBES_IN_RELEASE = true
+private const val SHOW_PROBES_IN_RELEASE = false
 
 data class DiagState(
     val status: AuthRepository.TokenStatus? = null,
@@ -504,17 +507,20 @@ fun DiagnosticsScreen(
             }
 
             // ── 自检工具：默认收起，别挡住日常信息（用户反馈：不要太影响使用）──
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().clickable { vm.toggleProbes() }.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        if (state.probesOpen) "收起自检工具" else "自检工具（排障用，点开）",
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(if (state.probesOpen) "▲" else "▼", style = MaterialTheme.typography.titleSmall)
+            // 只有 debug 包（或显式打开开关）才出现整个入口，正式包里连这行都不显示
+            if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { vm.toggleProbes() }.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (state.probesOpen) "收起自检工具" else "自检工具（排障用，点开）",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(if (state.probesOpen) "▲" else "▼", style = MaterialTheme.typography.titleSmall)
+                    }
                 }
             }
 
