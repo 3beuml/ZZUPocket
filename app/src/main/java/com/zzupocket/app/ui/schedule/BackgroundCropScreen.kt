@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.graphics.BitmapFactory
+import android.util.Log
 import java.io.File
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.withTimeoutOrNull
@@ -85,9 +86,9 @@ fun BackgroundCropScreen(
 
     // 解码结果 + 失败原因。
     //
-    // ⚠️ 必须记原因：华为等机型的相册可能给出"云相册"图片（本地只有缩略图，原图要联网下载），
-    // 读取流会卡住。以前这里没有任何超时与提示，界面就是一个永远转的圈 —— 用户只会说
-    // "换不了壁纸"。现在：超时/失败都要给一句人话，并告诉他怎么办。
+    // ⚠️ 必须记原因：把异常吞掉只留一句"读不出来"，用户和我们都无从下手
+    // （华为 Mate 70 Pro 反馈就是"系统说文件在本地，App 说读不出来"）。
+    // 现在把**失败发生在哪一步 + 异常类型**写进提示里，用户截图就能定位。
     var loadError by remember(sourceUri, useSavedSource) { mutableStateOf<String?>(null) }
     val source by produceState<Bitmap?>(initialValue = null, sourceUri, useSavedSource) {
         value = withContext(Dispatchers.IO) {
@@ -97,15 +98,18 @@ fun BackgroundCropScreen(
                 null
             } else {
                 // 10 秒还没读完就放弃：正常本地图片远用不到这么久
+                var result: DecodeResult? = null
                 val decoded = withTimeoutOrNull(DECODE_TIMEOUT_MS) {
-                    decodeSampled(context, sourceUri!!)
-                }
+                    decodeSampled(context, sourceUri!!).also { result = it }
+                }?.bitmap
                 if (decoded == null) {
-                    loadError = if (sourceUri != null) {
-                        "这张图片读不出来（可能还在云端没下载到本地）。\n" +
-                            "可以：先在相册里把原图下载到本地，或换一张截图/照片试试。"
+                    loadError = if (result == null) {
+                        "读取超时（超过 ${DECODE_TIMEOUT_MS / 1000} 秒）。\n" +
+                            "可以：换一张照片，或先在相册里另存一份再选。"
                     } else {
-                        null
+                        "这张图片读不出来。\n" +
+                            "原因：${result!!.reason}\n" +
+                            "可以：换一张截图/照片试试（截图一定能读）。"
                     }
                 }
                 decoded
@@ -338,52 +342,43 @@ private fun renderCrop(src: Bitmap, frame: CoverFrame): Bitmap? {
  * 表现就是"裁剪页空白 + 一直转圈"。拷到本地只需要一次顺序读，外层还有超时兜底；
  * 拷下来之后 `ImageDecoder` 依然会按 EXIF 自动摆正方向。
  */
-private fun decodeSampled(context: Context, uri: Uri): Bitmap? {
-    // ① 内容先落成本地文件（一次顺序读，最容易被超时覆盖）
-    val temp = runCatching {
-        val f = File(context.cacheDir, "wallpaper_src.bin")
-        val input = context.contentResolver.openInputStream(uri) ?: return null
-        input.use { ins -> f.outputStream().use { out -> ins.copyTo(out, 64 * 1024) } }
-        f.takeIf { it.length() > 0 }
-    }.getOrNull()
+/**
+ * 解码结果：要么有图，要么带着"卡在哪一步 + 异常类型"的原因。
+ *
+ * 为什么要带原因：华为 Mate 70 Pro 反馈"系统说文件在本地，App 说读不出来"。
+ * 只吞异常、只给一句"读不出来"，用户没法自救、我们没法定位。现在把失败阶段写进提示。
+ */
+private data class DecodeResult(val bitmap: Bitmap?, val reason: String?)
 
-    // ② 从本地文件解码：ImageDecoder 优先（自动处理 EXIF 方向与 HEIF）
-    if (temp != null) {
-        val fromFile = runCatching {
-            val src = ImageDecoder.createSource(temp)
-            ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                decoder.isMutableRequired = false
-                val width = info.size.width
-                if (width > MAX_DECODE_WIDTH) {
-                    decoder.setTargetSampleSize(
-                        (width / MAX_DECODE_WIDTH.toFloat()).roundToInt().coerceAtLeast(1),
-                    )
-                }
-            }
-        }.getOrNull()
-        if (fromFile != null) return fromFile
-        // ③ 再不行就 BitmapFactory（按需采样；个别 OEM 的 ImageDecoder 会失败）
-        runCatching {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(temp.absolutePath, bounds)
-            if (bounds.outWidth <= 0) return@runCatching null
-            var sample = 1
-            while (bounds.outWidth / (sample * 2) >= MAX_DECODE_WIDTH) sample *= 2
-            BitmapFactory.decodeFile(
-                temp.absolutePath,
-                BitmapFactory.Options().apply {
-                    inSampleSize = sample
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
-                },
-            )
-        }.getOrNull()?.let { return it }
+private const val TAG = "WallpaperDecode"
+
+/**
+ * 解码相册图片（带分阶段诊断）。
+ *
+ * 关键点：**先把内容拷到本地临时文件，再从文件解码**。相册 provider 的读取路径
+ * 在部分机型上会有怪行为（阻塞、返回空流、只支持 openFileDescriptor 等），
+ * 拷到本地只需要一次顺序读，外层还有超时兜底；拷下来后 `ImageDecoder` 仍会按 EXIF 摆正方向。
+ */
+private fun decodeSampled(context: Context, uri: Uri): DecodeResult {
+    val temp = File(context.cacheDir, "wallpaper_src.bin")
+    val readError = readToTempFile(context, uri, temp)
+    if (readError == null) {
+        val (bmp, decodeError) = decodeLocalFile(temp)
+        if (bmp != null) return DecodeResult(bmp, null)
+        val reason = buildString {
+            append("本地文件解码失败")
+            if (decodeError != null) append("（$decodeError）")
+        }
+        Log.w(TAG, "decode failed: $reason, size=${temp.length()}")
+        return DecodeResult(null, reason)
     }
 
-    // ④ 最后再退回"直接读 URI"（极少数只有它能读的情况）
-    return runCatching {
-        val src = ImageDecoder.createSource(context.contentResolver, uri)
-        ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
+    Log.w(TAG, "read failed: $readError")
+    // 兜底：极少数 provider 只有"直接读 URI"这条能走
+    val direct = runCatching {
+        ImageDecoder.decodeBitmap(
+            ImageDecoder.createSource(context.contentResolver, uri),
+        ) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             decoder.isMutableRequired = false
             val width = info.size.width
@@ -394,8 +389,62 @@ private fun decodeSampled(context: Context, uri: Uri): Bitmap? {
             }
         }
     }.getOrNull()
+    return if (direct != null) DecodeResult(direct, null) else DecodeResult(null, readError)
 }
 
+/** 把 URI 内容读进 [temp]；返回 null 表示成功，否则是失败原因 */
+private fun readToTempFile(context: Context, uri: Uri, temp: File): String? = try {
+    val input = context.contentResolver.openInputStream(uri)
+    if (input != null) {
+        input.use { ins -> temp.outputStream().use { out -> ins.copyTo(out, 64 * 1024) } }
+    } else {
+        // 部分 OEM 的 provider 用 openInputStream 返回 null，但 openFileDescriptor 可用
+        val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            ?: return "无法打开文件（provider 返回空流）"
+        pfd.use { fd ->
+            java.io.FileInputStream(fd.fileDescriptor).use { ins ->
+                temp.outputStream().use { out -> ins.copyTo(out, 64 * 1024) }
+            }
+        }
+    }
+    if (temp.length() <= 0) "读到 0 字节" else null
+} catch (e: Throwable) {
+    "读取异常 ${e.javaClass.simpleName}"
+}
+
+/** 本地文件解码：ImageDecoder 优先（EXIF/HEIF），失败再 BitmapFactory 按需采样 */
+private fun decodeLocalFile(file: File): Pair<Bitmap?, String?> {
+    val imageDecoderError = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.isMutableRequired = false
+            val width = info.size.width
+            if (width > MAX_DECODE_WIDTH) {
+                decoder.setTargetSampleSize(
+                    (width / MAX_DECODE_WIDTH.toFloat()).roundToInt().coerceAtLeast(1),
+                )
+            }
+        }
+    }.exceptionOrNull()
+
+    val byFactory = runCatching {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        if (bounds.outWidth <= 0) return@runCatching null
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= MAX_DECODE_WIDTH) sample *= 2
+        BitmapFactory.decodeFile(
+            file.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            },
+        )
+    }.getOrNull()
+
+    if (byFactory != null) return byFactory to null
+    return null to imageDecoderError?.javaClass?.simpleName
+}
 private const val MAX_DECODE_WIDTH = 2048
 
 /** 解码超时：正常本地图片远用不到这么久，超时基本就是"云相册原图没下载" */
