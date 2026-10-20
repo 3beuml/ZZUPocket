@@ -1,4 +1,4 @@
-package com.zzupocket.app.ui.widget
+﻿package com.zzupocket.app.ui.widget
 
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.data.prefs.UiPrefs
@@ -125,8 +125,7 @@ object WidgetData {
         val hasSchedule = com.zzupocket.app.data.repo.TodayTimetable
             .hasAnySchedule(repo, prefsStore)
         val periods = repo.periods()
-        val week = com.zzupocket.app.data.repo.TodayTimetable
-            .gradWeekAt(prefsStore, today)
+        val week = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(repo, prefsStore, today)
 
         val todayCourses = com.zzupocket.app.data.repo.TodayTimetable
             .sessionsOn(repo, prefsStore, today)

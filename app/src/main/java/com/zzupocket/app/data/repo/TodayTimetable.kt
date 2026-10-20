@@ -54,6 +54,26 @@ object TodayTimetable {
     }
 
     /**
+     * [date] 属于第几教学周：**本科优先**，没有本科学期再用研究生周次。
+     *
+     * ⚠️ 这个值不只是"显示第几周"：今日页与组件用它判断"是不是在学期内"，
+     * `null` 会被当成**假期**。所以绝不能"只取研究生周次" —— 本科账号会因此
+     * 被误判成放假（2026-10-20 的回归就是这样来的）。
+     */
+    suspend fun currentWeekAt(
+        repo: ScheduleRepository,
+        prefs: UiPrefsStore,
+        date: LocalDate,
+    ): Int? {
+        val semester = runCatching { repo.currentSemester() }.getOrNull()
+        if (semester != null) {
+            val week = runCatching { repo.resolveCurrentWeek(semester, date) }.getOrNull()
+            if (week != null) return week
+        }
+        return gradWeekAt(prefs, date)
+    }
+
+    /**
      * 有没有"任何"课表数据（本科缓存或研究生缓存）。
      *
      * 组件用它区分「还没同步过」和「今天没课」——这两种情况显示不同文案，不能混。

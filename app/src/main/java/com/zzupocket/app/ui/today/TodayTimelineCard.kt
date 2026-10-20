@@ -126,7 +126,7 @@ class TodayTimelineViewModel : ViewModel() {
 
         _state.value = TodayTimelineUi(
             loaded = true,
-            week = com.zzupocket.app.data.repo.TodayTimetable.gradWeekAt(AppGraph.uiPrefsStore, today),
+            week = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(scheduleRepo, AppGraph.uiPrefsStore, today),
             dateText = DATE_FMT.format(today),
             // 只画**真实发生的事**：课 / 自己加的日程 / 已完成的专注。
             //
