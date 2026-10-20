@@ -108,6 +108,16 @@ data class UiPrefs(
      */
     val lightRoomLabel: String? = null,
     val acRoomLabel: String? = null,
+    /**
+     * 研究生课表的**周次锚点**：第 1 周周一的 epochDay；null = 还没对齐过。
+     *
+     * 研究生接口不返回"当前第几周"（只给周区间 + 星期 + 节次），0.31.5 靠"拿本周课表
+     * 反查整学期哪一周课表一样"来猜，课程跨周重复时会猜错（实测把第 7 周判成第 10 周）。
+     * 所以一旦确定就把第 1 周周一落库，之后**纯日期推算**，不再每天重新猜。
+     */
+    val gmsWeekOneEpochDay: Long? = null,
+    /** 上面的锚点属于哪个学期（term value）；换学期自动失效 */
+    val gmsAnchorTerm: String? = null,
 ) {
     val dayCount: Int get() = if (showWeekend) 7 else 5
 
@@ -168,6 +178,8 @@ class UiPrefsStore(context: Context) {
                 ?: DarkMode.SYSTEM,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
+            gmsWeekOneEpochDay = p[KEY_GMS_WEEK_ONE],
+            gmsAnchorTerm = p[KEY_GMS_ANCHOR_TERM]?.takeIf { it.isNotBlank() },
         )
     }
 
@@ -227,6 +239,20 @@ class UiPrefsStore(context: Context) {
         p[KEY_ENERGY_PRICE] = v.coerceIn(0.1f, 5f)
     }
 
+    /**
+     * 写研究生课表的周次锚点（第 1 周周一的 epochDay + 所属学期）。
+     * [term] 传空 = 清掉锚点（下次重新对齐）。
+     */
+    suspend fun setGmsWeekAnchor(term: String?, weekOneMondayEpochDay: Long?) = store.edit { p ->
+        if (term.isNullOrBlank() || weekOneMondayEpochDay == null) {
+            p.remove(KEY_GMS_WEEK_ONE)
+            p.remove(KEY_GMS_ANCHOR_TERM)
+        } else {
+            p[KEY_GMS_WEEK_ONE] = weekOneMondayEpochDay
+            p[KEY_GMS_ANCHOR_TERM] = term
+        }
+    }
+
     /** 恢复默认壁纸：清掉图片和所有调节项，版本号照旧 +1（缓存一样要失效） */
     suspend fun clearBackground() = store.edit { p ->
         p.remove(KEY_BG_PATH)
@@ -258,5 +284,9 @@ class UiPrefsStore(context: Context) {
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
         val KEY_AC_ROOM_LABEL = stringPreferencesKey("ac_room_label")
+
+        /** 研究生课表周次锚点（见 [UiPrefs.gmsWeekOneEpochDay]） */
+        val KEY_GMS_WEEK_ONE = androidx.datastore.preferences.core.longPreferencesKey("gms_week_one_epoch_day")
+        val KEY_GMS_ANCHOR_TERM = stringPreferencesKey("gms_anchor_term")
     }
 }

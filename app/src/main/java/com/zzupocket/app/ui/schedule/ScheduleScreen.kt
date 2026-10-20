@@ -114,6 +114,8 @@ fun ScheduleScreen(
     val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
     var showSemesters by remember { mutableStateOf(false) }
     var showWeekPicker by remember { mutableStateOf(false) }
+    /** 研究生视图的「校正当前周」对话框 */
+    var showGmsWeekFix by remember { mutableStateOf(false) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.onResume() }
 
@@ -189,7 +191,17 @@ fun ScheduleScreen(
                         total = state.gmsWeekCount,
                         onPick = { showWeekPicker = true },
                         onWallpaper = prefs.backgroundPath != null,
+                        // 研究生接口不返回"当前第几周"，反推在多周课表相同时会有歧义
+                        // （实测把第 7 周显示成第 10 周）。这里常驻一个校正入口，点一次就永久锚定。
+                        onFixWeek = if (state.gmsAnchored) null else {
+                            { showGmsWeekFix = true }
+                        },
                     )
+                    if (!state.gmsAnchored) {
+                        TextButton(onClick = { showGmsWeekFix = true }) {
+                            Text("周次对不上？点这里校正当前周")
+                        }
+                    }
                     WeekPager(
                         weeks = state.gmsWeeks,
                         weekIndex = state.gmsWeekIndex,
@@ -202,6 +214,17 @@ fun ScheduleScreen(
                         prefs = prefs,
                         onSessionClick = vm::onSessionClick,
                     )
+                    if (showGmsWeekFix) {
+                        GmsWeekFixDialog(
+                            weeks = state.gmsWeeks,
+                            current = state.gmsWeekIndex,
+                            onSet = { w ->
+                                vm.setGmsCurrentWeek(w)
+                                showGmsWeekFix = false
+                            },
+                            onDismiss = { showGmsWeekFix = false },
+                        )
+                    }
                 }
 
                 // gradMode 优先：从 0.31.0 覆盖升级的账号可能已有学期缓存，weeks 非空；
@@ -347,6 +370,8 @@ private fun WeekHeader(
     total: Int,
     onPick: () -> Unit,
     onWallpaper: Boolean = false,
+    /** 非 null 时在周次右边显示一个小「校正」按钮（研究生视图用） */
+    onFixWeek: (() -> Unit)? = null,
 ) {
     val shadow = wallpaperShadow(onWallpaper, MaterialTheme.colorScheme.surface)
     Row(
@@ -365,6 +390,12 @@ private fun WeekHeader(
                 style = MaterialTheme.typography.titleMedium.copy(shadow = shadow),
                 fontWeight = FontWeight.SemiBold,
             )
+        }
+        if (onFixWeek != null) {
+            Spacer(Modifier.width(4.dp))
+            TextButton(onClick = onFixWeek) {
+                Text("校正", style = MaterialTheme.typography.labelMedium)
+            }
         }
     }
 }
@@ -1093,5 +1124,70 @@ private fun WeekPickerDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/**
+ * 研究生「校正当前周」对话框。
+ *
+ * 为什么需要它：研究生系统只给周区间，不返回"当前第几周"；靠比对整学期课表去猜，
+ * 课程每周重复时一定会有歧义（实测把第 7 周显示成第 10 周）。与其继续猜，不如让用户
+ * 点一次事实——选完把第 1 周周一落库，之后全部按日期推算。
+ */
+@Composable
+private fun GmsWeekFixDialog(
+    weeks: List<Int>,
+    current: Int,
+    onSet: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var picked by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("现在实际是第几周？") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "研究生系统不返回当前教学周，只能靠比对猜。按实际选一次，" +
+                        "之后会自动按日期推算，不用再选。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                weeks.chunked(6).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { w ->
+                            val selected = w == picked
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .background(
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                    )
+                                    .clickable { picked = w },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "$w",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSet(picked) }) { Text("设为第 $picked 周") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
