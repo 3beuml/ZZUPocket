@@ -52,31 +52,26 @@
 #### ⚠️ 关键坑：默认返回 =「不含实验」视图（issue #7 根因，已解决）
 
 - micro-server 的 course-table **不带参数时，实验 / 见习类排课不在响应里**。
-- 学校自己的两个客户端都有「含实验」开关：教务 **PC 端课表页**与豫见郑大「教学管理平台」H5。
+- 学校自己的两个客户端都有「含实验」开关：教务 **PC 端课表页**与豫见郑大「教学管理平台」H5
+  的「课表查询」（服务 `eams-student-course-table-app`）。
 - 2026-10-25 实测比对（同一学生第 7 周）：ZZUPocket 与豫见郑大「我的日程」**同缺**
   「人体寄生虫学 周五1-6节(7周)」「机能学实验② 周三6-8节(7周)」；PC 端勾选含实验后两条都在。
   医学生（东校区）课表里实验/见习占比极高，因此缺课最明显。
-- **解决方案（2026-10-25 从用户 HAR 抓包确认）**：PC 端课表页的真实数据源不是
-  micro-server，而是经典学生门户（`/student/for-std/...`）——见 2.4。
-  含实验勾选在网页端是**前端过滤**（`filterActByExperiment` 按 `activity.experiment` 筛），
-  数据本身就在 print-data 响应里；请求侧同时带 `hasExperiment=true` 参数。
-- 已知同类缺口：micro-server course-table 实测**不含周末补课**（见 `EasClient.kt` 注释）。
-- micro-server 是否也接受 `hasExperiment` 参数：**未测试**（当前方案不需要它）。
+- **✅ 最终解（2026-10-25 晚，自 eams-student-course-table-app 的 JS 逆向确认）**：
+  移动端「课表查询」H5 调的就是**本接口**，只是带查询参数
+  `GET /lesson/student/course-table/{semesterId}?hasExperiment=true`（勾选框默认开，
+  `value:"1"`）。App 已带上该参数（`EasClient.fetchCourseTable`），实验排课随主数据一起返回，
+  `lessonType=EXPERIMENT` 打实验标（`course_sessions.experiment`）。
+- PC 端走的是另一套经典门户（`/student/for-std/...`，见 2.4），其「含实验」勾选在网页端是
+  **前端过滤**（`filterActByExperiment`）——两端的"含实验"不是同一个开关，但数据都全。
+- 已知同类缺口：course-table 实测**不含周末补课**（见 `EasClient.kt` 注释）。
 
-#### `lessonType` 取值域（2026-10-25 自 secondary-portal 页面内置枚举取证）
+#### `lessonType` 实测值域
 
-| 值 | 含义 |
-|---|---|
-| `theory.course` | 理论课 |
-| `experiment.course` | 实验课 |
-| `practice.course` | 实践课 |
-| `test.course` | PBL 课 |
-| `machine.course` | 上机课 |
-| `design.course` | 设计课 |
-| `extra.course` | 实训 |
-
-完整分布靠 logcat `ScheduleRaw` 行观察（`logScheduleShape`）。修 issue #7 时需要把
-`lessonType` 落库（`CourseSessionEntity` 加列 → `CACHE_VERSION` +1），UI 据此区分实验课样式。
+响应里 schedules 的 `lessonType` 实测只有 **`THEORY` / `EXPERIMENT`** 两种
+（logcat `ScheduleRaw` 取证；与 secondary-portal 页面那套
+`theory.course`/`experiment.course`/`practice.course`… 常量枚举**不是同一套值**，注意别混）。
+完整分布靠 logcat `ScheduleRaw` 行观察（`logScheduleShape`）。
 
 ### 2.2 配套接口
 
@@ -99,27 +94,42 @@ GET https://info.s.zzu.edu.cn/portal-api/v1/calendar/share/schedule/getWeekOfTea
 - **研究生周次对齐的候选解**：gmsstu 不给学期起止日，现在靠「本周课表」反推 + 手动校正；
   若研究生会话能调通本接口（⚠️ 待真机验证），`GmsWeekAlign` 可弃启发式。
 
-### 2.4 经典学生门户接口（PC 端课表页真实数据源，2026-10-25 自用户 HAR 取证）
+### 2.4 经典学生门户（PC 端课表页数据源；App 鉴权不可达，仅协议参考）
 
-PC 端课表页（`/student/for-std/course-table`）不走 micro-server，全部在 `/student/...` 下，
-鉴权靠**网页会话 Cookie**（HAR 导出已脱敏，令牌形式未验证——App 用 `Authorization` 头调用，
-失败时降级，见 `EasClient.fetchPrintActivities`）：
+PC 端课表页（`/student/for-std/course-table`）不走 micro-server，全部在 `/student/...` 下。
+**⚠️ 该层与 App 无缘（2026-10-25 真机实测）**：经典门户只认自己的网页会话——
+`Authorization` 裸令牌 / `Cookie: userToken=…` / `X-Id-Token` 三种鉴权全部 302 到
+`/student/login?refer=…`；带 userToken Cookie 走 `/student/login` 换会话也失败
+（登录页 200 渲染表单、无跳转；本地账密 + 微信扫码，SSO 链接列表为空）。
+**仅作协议参考**，实验课数据请用 2.1 的 `hasExperiment=true`：
 
 | 接口 | 响应要点 |
 |---|---|
-| `GET /student/for-std/course-table/semester/{id}/print-data?semesterId={id}&hasExperiment=true` | **结构化全量排课**（App 的实验排课来源）：`studentTableVms[].activities[]`，每条带 `weekday/startUnit/endUnit/weekIndexes[]/room/building/campus/startTime/endTime/teachers[]/experiment`；`experiment=true` 即实验/见习段；**无 `date` 字段** |
-| `GET /student/for-std/course-table/get-data?semesterId={id}&dataId={数据ID}&bizTypeId=2` | lessons（**文本形态**排课：`scheduleText` 如 `3,7~15(单)周 星期二 5~6节`）+ `experimentSchedules`（实测某账号为空）+ `currentWeek` + `weekIndices` |
-| `GET /student/home/get-current-teach-week` | `{"currentSemester":"2026-2027-1","weekIndex":7,"isInSemester":true}` ——**服务器权威当前周** |
+| `GET /student/for-std/course-table/semester/{id}/print-data?semesterId={id}&hasExperiment=true` | 结构化全量排课：`studentTableVms[].activities[]`，每条带 `weekday/startUnit/endUnit/weekIndexes[]/room/building/campus/startTime/endTime/teachers[]/experiment`；无 `date` 字段 |
+| `GET /student/for-std/course-table/get-data?semesterId={id}&dataId={数据ID}&bizTypeId=2` | lessons（文本形态排课 `scheduleText`）+ `experimentSchedules`（实验排课表，CS 账号实测为空）+ `currentWeek` + `weekIndices` |
+| `GET /student/home/get-current-teach-week` | `{"currentSemester":"2026-2027-1","weekIndex":7,"isInSemester":true}` ——服务器权威当前周 |
 | `GET /student/ws/semester/get/{id}` | 完整学期记录：**`startDate`/`endDate`**（PC 页"学期起始日期"的来源） |
 
 「含实验」勾选框的行为（自 `new-course-table.js` 逆向）：数据请求带 `hasExperiment: true`，
 勾选切换时**前端过滤**（`filterActByExperiment` 按 `activity.experiment` 筛选重渲染）——
 所以两次抓包的响应可以逐字节相同（2026-10-25 实测）。
 
-App 侧的用法（`ScheduleRepository.refreshCourseTable`）：micro-server 主数据**完全优先**
-（它带 `date`，是补课/调休匹配的锚），print-data 只补主数据没有的键
-（`courseKey|weekday|startUnit|weekIndex`），补上的记录带 `experiment` 标志、`date=null`；
-print-data 任何失败都降级为"只用主数据"。合并是纯函数（`mergePrintActivities`），有单测。
+### 2.5 移动端「课表查询」H5（eams-student-course-table-app，2026-10-25 逆向）
+
+豫见郑大「教学管理平台」里的**课表查询**（带「含实验」勾选框）不是经典门户，而是一个
+独立的 uni-app H5：`https://jwxt.zzu.edu.cn/eams-student-course-table-app/index.html`
+（**公开静态资源**，JS 可直接拉取分析）。要点：
+
+- API 基址 = `https://jwxt.zzu.edu.cn/eams-micro-server/api/v1`（**与 App 完全一致**）；
+- 课表 = `GET /lesson/student/course-table/{semesterId}`，参数 `hasExperiment`
+  （勾选框默认开、值 `"1"`）——**issue #7 的最终解就这一个参数**；
+- 其余端点：`/semester/std-semesters`、`/semester/current-semester`、`/system/course-units`、
+  `/semester/current-week/{id}`（按学期的当前周）、`/lesson/student/class-mates[-exp]`；
+- 鉴权 = `Authorization: <userToken>` + `X-Device-Info`（brand+model+version 拼接，非签名）
+  + `X-Terminal-Info`（空串）——`eams-door/api/v1/service/list-app`（服务目录，JWT 可调）
+  里每个服务带 `serviceUrl`，顺藤摸瓜找到本 H5。
+- 「我的日程」模块则是另一组：eams-door `/api/v1/protal-schedule/getSchedules`（typo 是原样），
+  与课表查询**数据源不同**——这就是「学校 App 里日程缺课、课表查询不缺」的原因。
 
 ## 三、学校客户端数据面（对照用）
 
@@ -135,18 +145,17 @@ print-data 任何失败都降级为"只用主数据"。合并是纯函数（`mer
 
 ## 四、已知坑位清单
 
-1. ~~含实验参数名未定~~ **已解决（2026-10-25）**：实验排课来自经典门户 print-data
-   （见 2.4），App 已接入（`EasClient.fetchPrintActivities` + `mergePrintActivities`）。
-   ⚠️ 剩余验证点：`Authorization` 令牌调 `/student/for-std/*` 是否通行（不行则需会话
-   Cookie 方案）——失败已降级，不影响现有功能。
-2. `lessonType` 仍未落库；实验/见习目前用 print-data 的 **`experiment` 布尔标志**
-   落库（`course_sessions.experiment` 列，v8 迁移），网格里显示「（实验）」后缀。
-3. 合并后**同格多门课会变多**（实验常与理论同时段）：周网格一格只画一门课
-   （`ScheduleScreen.DayColumn` 的 `firstOrNull`），`logGridCollisions` 已统计冲突，需决定呈现策略。
-4. 教室名自带楼栋前缀且可能**无分隔符**（如 `物理馆X101`）→ `tidyPlace` 前缀去重失效，
+1. ~~含实验缺数据~~ **已解决（2026-10-25 晚，终极解）**：course-table 带 `hasExperiment=true`
+   （移动端课表查询 H5 同款参数，见 2.1/2.5）；实验记录按 `lessonType=EXPERIMENT` 打标
+   （`course_sessions.experiment`，DB v8）。曾试过经典门户 print-data 补全，因会话鉴权
+   不可达已**整体移除**（见 2.4 的三连 302 实测）。
+2. 同格多门课只画第一门（实验常与理论同时段）：`ScheduleScreen.DayColumn` 的 `firstOrNull`，
+   `logGridCollisions` 已统计冲突，呈现策略待定。
+3. 教室名自带楼栋前缀且可能**无分隔符**（如 `物理馆X101`）→ `tidyPlace` 前缀去重失效，
    楼名显示两遍（issue #6）——已修复（前缀剥离，仅非数字结尾楼名）。
-5. `state` / `lessonType` 的完整取值分布只有日志级观察，改版时先看 logcat `ScheduleRaw`。
-6. print-data 的 `startTime` 小时不补零（`8:00`），入库前统一成 `08:00`（`normalizeHhmm`）。
+4. `state`（未完成/已结束）的语义未使用；改版时先看 logcat `ScheduleRaw`。
+5. ⚠️ Kotlin 块注释**支持嵌套**：KDoc 里写「/路径＋星号」（如 `/student/` 后跟 `*`）会被
+   当成新注释开头吞掉后面的代码（2026-10-25 踩过，编译错误定位在百行之外）。
 
 ## 五、实测证据索引（2026-10-25）
 
@@ -156,8 +165,10 @@ print-data 任何失败都降级为"只用主数据"。合并是纯函数（`mer
 | 豫见郑大模块直连 | ADB 打开模块后抓进程 TLS 连接 | H5Activity → jwxt.zzu.edu.cn:443 |
 | ZZU.Py 同源 | `zzupy/app/auth.py` 源码 | `APP_ID = "com.supwisdom.zzu"` |
 | getWeekOfTeaching | 无 token 直调 | 200 + 「没有访问权限01」（端点存在，需 token） |
-| lessonType 枚举 | secondary-portal 页面 HTML | 理论/实验/实践/PBL/上机/设计/实训 7 种取值 |
 | 学校移动日程对照 | 豫见郑大「我的日程」截图 | 与 App 同缺（同源旁证） |
-| **print-data 结构化全量** | 用户 HAR 抓包（`/student/for-std/.../print-data?hasExperiment=true`） | 18 条 activities，含 `experiment` 标志、`weekIndexes`；两份抓包（勾/不勾）响应逐字节相同 → 勾选是前端过滤 |
+| **print-data 结构化全量** | 用户 HAR 抓包（`/student/for-std/.../print-data?hasExperiment=true`） | 18 条 activities，含 `experiment` 标志、`weekIndexes`；两份抓包（勾/不勾）响应逐字节相同 → PC 端勾选是前端过滤 |
 | **当前周/学期起止** | HAR：`get-current-teach-week`、`ws/semester/get/194` | `weekIndex=7`；`startDate=2026-09-07` |
-| 合并实现 | `EasPrintDataTest`（夹具=真实响应切片，教师脱敏） | 330 项单测全过 |
+| **经典门户鉴权墙** | 真机 App 阶梯探测（Authorization/Cookie/X-Id-Token + 登录链 6 跳） | 全部 302 `/student/login`；登录页本地账密+微信，SSO 列表空 → App 无法使用该层 |
+| **课表查询 H5 逆向** | 拉取 `eams-student-course-table-app` 全部 JS | API= micro-server 同款；`getCourseTables(id,{hasExperiment})` → issue #7 终极解 |
+| **服务目录** | 真机探 `eams-door/api/v1/service/list-app`（JWT+X-Device-Info） | 课表查询 serviceUrl 指向上述 H5；「我的日程」走 protal-schedule 系（数据源不同） |
+| **真机回归** | 0.32.4-dev 刷新课表 + logcat | `hasExperiment=true` 下 152 条全量入库、无异常；参数与学校 H5 行为一致 |
