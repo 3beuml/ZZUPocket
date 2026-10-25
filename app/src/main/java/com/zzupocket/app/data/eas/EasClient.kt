@@ -137,6 +137,8 @@ class EasClient(
         val roomText: String?,
         val campusText: String?,
         val customPlace: String?,
+        /** 实验/见习排课（lessonType=EXPERIMENT；只有 hasExperiment=true 时接口才返回） */
+        val experiment: Boolean = false,
     )
 
     // ── API ──────────────────────────────────────────────────────────────
@@ -185,9 +187,14 @@ class EasClient(
     /**
      * 拉取整学期课表并扁平化成 [Session] 列表。
      * 注意：这里**不**按周过滤，一次拿全，之后切周纯本地。
+     *
+     * `hasExperiment=true`：学校移动端「课表查询」H5（eams-student-course-table-app）同款参数，
+     * 缺省时接口**不返回实验/见习排课**（issue #7：医学生课表缺课的根因；PC 端与
+     * 教学管理平台的「含实验」勾选框对应的就是它，2026-10-25 自该 H5 的 JS 逆向确认）。
+     * 带上之后多出的记录带 `lessonType=EXPERIMENT`（实测值域：THEORY / EXPERIMENT）。
      */
     suspend fun fetchCourseTable(userToken: String, semesterId: Int): List<Session> {
-        val url = "$COURSE_URL/$semesterId"
+        val url = "$COURSE_URL/$semesterId?hasExperiment=true"
         val data = getData<List<DatumDto>>(url, userToken, "课表")
         val out = ArrayList<Session>(data.size * 2)
         var noGridKept = 0
@@ -225,81 +232,13 @@ class EasClient(
                     roomText = roomTextOf(s),
                     campusText = s.room?.campus?.nameZh,
                     customPlace = s.customPlace?.takeIf { it.isNotBlank() },
+                    experiment = s.lessonType == LESSON_TYPE_EXPERIMENT,
                 )
             }
         }
         logScheduleShape(data, out.size, noGridKept, dropped)
         return out
     }
-
-    /**
-     * 学生课表打印接口（PC 端课表页同款，issue #7 的数据源）。
-     *
-     * 与 micro-server 的 course-table 相比：
-     *  - **结构化**：每条记录直接带 weekday/startUnit/endUnit/weekIndexes，无文本要解析；
-     *  - **含实验**：`hasExperiment=true` 时返回实验/见习排课——micro-server 的 course-table
-     *    不带这批（东校区医学生缺课的根因）；`experiment` 标志区分实验段；
-     *  - 无 `date` 字段（周网格够用，但补课按日期匹配的能力仍靠 micro-server 主数据）。
-     *
-     * ⚠️ 该接口在网页端靠**会话 Cookie** 鉴权（浏览器抓包证实）；令牌是否能过鉴权未在
-     * 真机验证。所以这里**任何失败都降级为空列表**——调用方继续用 micro-server 主数据，
-     * 只是缺实验排课，绝不因此让整个课表刷新失败（打日志留证）。
-     */
-    @Serializable
-    data class PrintActivityDto(
-        val courseCode: String? = null,
-        val courseName: String? = null,
-        val weekday: Int = 0,
-        val startUnit: Int = 0,
-        val endUnit: Int = 0,
-        /** 覆盖的教学周（服务端乱序返回，用前排序） */
-        val weekIndexes: List<Int> = emptyList(),
-        val room: String? = null,
-        val building: String? = null,
-        val campus: String? = null,
-        val startTime: String? = null,
-        val endTime: String? = null,
-        val teachers: List<String> = emptyList(),
-        val experiment: Boolean = false,
-    )
-
-    @Serializable
-    data class PrintTableVm(val activities: List<PrintActivityDto> = emptyList())
-
-    @Serializable
-    data class PrintEnvelope(val studentTableVms: List<PrintTableVm> = emptyList())
-
-    /** PC 端课表打印数据：`/student/for-std/course-table/semester/{id}/print-data` */
-    suspend fun fetchPrintActivities(userToken: String, semesterId: Int): List<PrintActivityDto> =
-        withContext(Dispatchers.IO) {
-            val url = "$JWXT/student/for-std/course-table/semester/$semesterId/print-data" +
-                "?semesterId=$semesterId&hasExperiment=true"
-            val request = Request.Builder().url(url.toHttpUrl())
-                .header("Authorization", userToken)
-                .header("X-Requested-With", "XMLHttpRequest")
-                .get()
-                .build()
-            val response = try {
-                client.newCall(request).execute()
-            } catch (e: IOException) {
-                Log.w(TAG_PRINT, "print-data 网络失败，跳过实验排课补充：${e.message}")
-                return@withContext emptyList()
-            }
-            response.use {
-                val text = it.body?.string().orEmpty()
-                if (!it.isSuccessful) {
-                    Log.w(TAG_PRINT, "print-data HTTP ${it.code}，跳过实验排课补充（响应体 ${text.length} 字节）")
-                    return@withContext emptyList()
-                }
-                try {
-                    json.decodeFromString<PrintEnvelope>(text).studentTableVms
-                        .maxByOrNull { vm -> vm.activities.size }?.activities ?: emptyList()
-                } catch (e: Exception) {
-                    Log.w(TAG_PRINT, "print-data 解析失败，跳过实验排课补充（开头 80 字：${text.take(80)}）")
-                    emptyList()
-                }
-            }
-        }
 
     /**
      * 课表原始形状的**一行小结**（`ScheduleRaw` 标签）。
@@ -596,7 +535,9 @@ class EasClient(
 
     companion object {
         private const val TAG_SCHEDULE = "ScheduleRaw"
-        private const val TAG_PRINT = "SchedulePrint"
+
+        /** lessonType 实测值域：THEORY / EXPERIMENT（ScheduleRaw 日志取证） */
+        internal const val LESSON_TYPE_EXPERIMENT = "EXPERIMENT"
 
         /** 教室占用的 activityType 分布（判断补课有没有被登记成 ScheduleChange） */
         private const val TAG_OCCUPANCY = "RoomOccupancy"
