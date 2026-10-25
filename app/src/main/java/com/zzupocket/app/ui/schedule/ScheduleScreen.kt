@@ -718,7 +718,11 @@ private fun CourseBlock(
             modifier = Modifier.padding(horizontal = 2.dp),
         ) {
             Text(
-                text = session.courseName,
+                text = if (session.experiment && !session.courseName.contains("实验")) {
+                    session.courseName + "（实验）"
+                } else {
+                    session.courseName
+                },
                 fontSize = prefs.courseFontSp.sp,
                 lineHeight = (prefs.courseFontSp + 2).sp,
                 // 合并后的块更高，可以多放几行

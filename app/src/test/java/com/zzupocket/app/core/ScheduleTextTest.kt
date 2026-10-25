@@ -96,6 +96,13 @@ class ScheduleTextTest {
     }
 
     @Test
+    fun `短连续区间不被误判成单周加补周`() {
+        // 真实案例（issue #5）：研究生课 5-9 周连续，曾显示成 "5-9周（单周） + 6, 8周"
+        assertEquals("5-9周", ScheduleText.compressWeeks((5..9).toList()))
+        assertEquals("2-9周", ScheduleText.compressWeeks((2..9).toList()))
+    }
+
+    @Test
     fun `偶数个但非全同奇偶时不套用单双周`() {
         // 1..8 全都有，不应该被当成单周或双周
         assertEquals("1-8周", ScheduleText.compressWeeks((1..8).toList()))
@@ -122,5 +129,34 @@ class ScheduleTextTest {
         assertEquals("08:00", ScheduleText.timeOfDay("2026-09-22T08:00:00+08:00"))
         assertEquals(null, ScheduleText.timeOfDay(null))
         assertEquals(null, ScheduleText.timeOfDay("不是时间"))
+    }
+
+    // ── 地点规整 ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `相邻重复合并_带下划线的原有形态`() {
+        assertEquals("南2 206", ScheduleText.tidyPlace("南2 南2_206"))
+        assertEquals("南2 206", ScheduleText.tidyPlace("南2_206"))
+    }
+
+    @Test
+    fun `楼名前缀被带进教室名时剥掉前缀`() {
+        // 真实案例（issue #6）：馆名楼的教室号不带分隔符（"物理馆X101"），拼楼栋名后显示两遍
+        assertEquals("物理馆 X101", ScheduleText.tidyPlace("物理馆 物理馆X101"))
+        assertEquals("材料馆 203", ScheduleText.tidyPlace("材料馆 材料馆203"))
+    }
+
+    @Test
+    fun `数字结尾的楼栋不做前缀剥离`() {
+        // `南2 南209` 一旦剥前缀会把房号剥坏成 "南2 09" —— 宁可保持原样
+        assertEquals("南2 南209", ScheduleText.tidyPlace("南2 南209"))
+        // 正常的楼栋+房号不受影响
+        assertEquals("南2 206", ScheduleText.tidyPlace("南2 206"))
+    }
+
+    @Test
+    fun `地点规整是幂等的`() {
+        assertEquals("物理馆 X101", ScheduleText.tidyPlace("物理馆 X101"))
+        assertEquals("南2 206", ScheduleText.tidyPlace("南2 206"))
     }
 }

@@ -43,6 +43,7 @@ object ScheduleText {
      * 把教学周集合压成人类可读的文本。
      *
      *  - [1,2,3,4,6..16]              → "1-4, 6-16周"
+     *  - [1..9]（5..9 等短连续区间同）  → "1-9周"
      *  - [1,3,5,7,9,11,13,15]         → "1-15周（单周）"
      *  - [1,3,...,15] + [16]          → "1-15周（单周） + 第16周"   ← 单周课偶尔多上一周
      *  - [2,4,6,8]                    → "2-8周（双周）"
@@ -51,6 +52,10 @@ object ScheduleText {
     fun compressWeeks(weeks: List<Int>): String {
         val w = weeks.filter { it > 0 }.distinct().sorted()
         if (w.isEmpty()) return "—"
+
+        // 整段连续（如 5..9）直接按区间输出 —— 否则短连续区间会被下面的单双周规则
+        // 误判成「单周 + 零星补周」：5-9 周 → "5-9周（单周） + 6, 8周"（issue #5 实测）
+        if (w.zipWithNext().all { (a, b) -> b - a == 1 }) return rangeText(w) + "周"
 
         val odds = w.filter { it % 2 == 1 }
         val evens = w.filter { it % 2 == 0 }
@@ -124,10 +129,14 @@ object ScheduleText {
      *
      *  - 下划线换成空格（`南2_206` → `南2 206`）
      *  - **合并相邻重复的片段**（`南2 南2 206` → `南2 206`）
+     *  - **剥掉被带进教室名的楼名前缀**（`物理馆 物理馆X101` → `物理馆 X101`）——
+     *    馆名楼的教室号不带分隔符（issue #6）。只对**不以数字结尾**的楼名做：
+     *    `南2`/`东区1` 这类数字结尾的楼栋不剥，否则 `南2 南209` 会把房号剥坏成 `南2 09`
      *  - 压缩多余空格、去掉首尾空白
      *
      * 幂等：`南2 206` 再规整一次还是 `南2 206`。所以入库时与显示时都能放心调用
-     * ——库里已有的旧串（`南2 南2_206`）会在下次显示时当场被修好，不用重新同步课表。
+     * ——库里已有的旧串（`南2 南2_206`、`物理馆 物理馆X101`）会在下次显示时当场被修好，
+     * 不用重新同步课表。
      */
     fun tidyPlace(raw: String?): String? {
         val t = raw?.trim().orEmpty()
@@ -139,9 +148,17 @@ object ScheduleText {
         if (tokens.isEmpty()) return null
         val out = mutableListOf<String>()
         tokens.forEach { token ->
-            // 只合并「相邻」重复：`南2 南2 206` 里第二个「南2」要去掉，
-            // 而正常的 `南2 206`（楼栋 + 房号）不受影响
-            if (out.lastOrNull() != token) out += token
+            val last = out.lastOrNull()
+            when {
+                // 只合并「相邻」重复：`南2 南2 206` 里第二个「南2」要去掉，
+                // 而正常的 `南2 206`（楼栋 + 房号）不受影响
+                last == token -> Unit
+                // 前缀剥离：教室名 = 楼名 + 房号黏在一起。楼名以数字结尾时不剥（见上）
+                last != null && token.length > last.length &&
+                    token.startsWith(last) && !last.last().isDigit() ->
+                    out += token.substring(last.length)
+                else -> out += token
+            }
         }
         return out.joinToString(" ").ifBlank { null }
     }

@@ -80,21 +80,6 @@ class ScheduleRepository(
         val semester = semester(semesterId)
         val now = System.currentTimeMillis()
 
-        // 一门课 = 按课程代码聚合，sessions 全部挂在它下面
-        val grouped = sessions.groupBy { it.courseCode }
-        val courseEntities = grouped.map { (code, list) ->
-            val first = list.first()
-            CourseEntity(
-                key = courseKeyOf(semesterId, code),
-                semesterId = semesterId,
-                code = code,
-                nameZh = first.courseName,
-                credits = first.credits,
-                openDepartment = first.openDepartment,
-                teachersCsv = first.teachers.joinToString(","),
-                updatedAt = now,
-            )
-        }
         val sessionEntities = sessions.map { s ->
             // ⚠️ 学校的**临时补课**经常只给日期、不给教学周/星期（`weekIndex`/`weekday` 是 0）。
             // 按日期把这两样补出来：这样它既能在"今天"按日期匹配到，
@@ -121,15 +106,60 @@ class ScheduleRepository(
                 roomText = s.roomText,
                 campusText = s.campusText,
                 color = null,
+                experiment = false,
                 updatedAt = now,
             )
         }
 
+        // issue #7：micro-server 的 course-table 不含实验/见习排课（东校区缺课根因）。
+        // PC 端课表页同款 print-data 接口（hasExperiment=true）返回结构化全量，用来补全；
+        // 该接口网页端靠会话 Cookie 鉴权，令牌是否通行未验证——**任何失败都降级**：
+        // 只用 micro-server 主数据，绝不因此让整次刷新失败。
+        val printActivities = runCatching { eas.fetchPrintActivities(token, semesterId) }
+            .onFailure { Log.w(TAG_GRID, "print-data 拉取异常：${it.message}") }
+            .getOrDefault(emptyList())
+        val merged = mergePrintActivities(sessionEntities, printActivities, semesterId, now)
+
+        //一门课 = 按课程代码聚合，sessions 全部挂在它下面
+        val grouped = sessions.groupBy { it.courseCode }
+        val courseEntities = grouped.map { (code, list) ->
+            val first = list.first()
+            CourseEntity(
+                key = courseKeyOf(semesterId, code),
+                semesterId = semesterId,
+                code = code,
+                nameZh = first.courseName,
+                credits = first.credits,
+                openDepartment = first.openDepartment,
+                teachersCsv = first.teachers.joinToString(","),
+                updatedAt = now,
+            )
+        }
+        // print-data 里 micro-server 完全没给的课（如独立排课的实验课）也要有 Course 行，
+        // 否则 buildCourses 会把这些课的 sessions 丢掉
+        val extraCourseEntities = merged
+            .map { it.courseKey.substringAfter(':') }
+            .distinct()
+            .filter { it !in grouped.keys }
+            .map { code ->
+                val first = merged.first { it.courseKey == courseKeyOf(semesterId, code) }
+                CourseEntity(
+                    key = courseKeyOf(semesterId, code),
+                    semesterId = semesterId,
+                    code = code,
+                    nameZh = first.courseName,
+                    credits = 0.0,
+                    openDepartment = null,
+                    teachersCsv = first.teacherName.orEmpty(),
+                    updatedAt = now,
+                )
+            }
+
         db.withTransaction {
             db.courseSessionDao().deleteEasBySemester(semesterId)
             db.courseDao().deleteBySemester(semesterId)
-            db.courseDao().upsertAll(courseEntities)
-            db.courseSessionDao().upsertAll(sessionEntities)
+            db.courseDao().upsertAll(courseEntities + extraCourseEntities)
+            db.courseSessionDao().upsertAll(merged)
             // 本科也记同步状态：界面要显示"获取于 HH:MM"，缓存优先也要按 TTL 判断
             db.timetableSyncDao().upsert(
                 TimetableSyncEntity(
@@ -138,7 +168,7 @@ class ScheduleRepository(
                     fetchedAt = now,
                     lastError = null,
                     lastErrorAt = null,
-                    contentHash = sessionEntities.map { e ->
+                    contentHash = merged.map { e ->
                         "${e.weekIndex}|${e.weekday}|${e.startUnit}|${e.endUnit}|${e.courseName}|" +
                             "${e.roomText.orEmpty()}|${e.teacherName.orEmpty()}"
                     }.sorted().joinToString("\n").hashCode().toString(),
@@ -146,7 +176,7 @@ class ScheduleRepository(
                 ),
             )
         }
-        logGridCollisions(sessionEntities)
+        logGridCollisions(merged)
     }
 
     /** 节次时刻表（作息）。内容基本不变，拉一次长期有效。 */
@@ -465,12 +495,13 @@ class ScheduleRepository(
                 date = s.date,
                 startTime = s.startTime,
                 endTime = s.endTime,
-                teacherName = s.teacherName,
-                roomText = s.roomText,
-                campusText = s.campusText,
-                color = s.color,
-                updatedAt = fetchedAt,
-            )
+                    teacherName = s.teacherName,
+                    roomText = s.roomText,
+                    campusText = s.campusText,
+                    color = s.color,
+                    experiment = s.experiment,
+                    updatedAt = fetchedAt,
+                )
         }
         db.withTransaction {
             db.courseSessionDao().deleteBySemesterAndSource(semesterId, source)
@@ -621,13 +652,94 @@ class ScheduleRepository(
         const val SOURCE_EAS = "eas"
         const val SOURCE_CUSTOM = "custom"
 
-        /** 课表缓存结构版本；改字段就 +1，旧缓存会被当作不存在 */
-        const val CACHE_VERSION = 1
+        /**
+         * 课表缓存结构版本；改字段就 +1，旧缓存会被当作不存在。
+         *
+         * v2（2026-10-25）：研究生解析修复（一格多条 `<br/>`）会改变同一接口的解析结果，
+         * 而缓存 TTL 是 24 小时——不升版本的话，升级后旧解析结果（缺周次）最长滞留一天。
+         * 升版本的效果：`lastFetchedAt` 视为无缓存 → 立即触发一次后台刷新；
+         * 旧缓存仍先显示（内容哈希没变的界面纹丝不动，变了才更新）。
+         */
+        const val CACHE_VERSION = 2
 
         /** 空教室快照保留天数（今天 + 往后 6 天） */
         const val ROOM_KEEP_DAYS = 7
 
         private const val TAG_GRID = "ScheduleGrid"
+
+        /**
+         * print-data 的结构化排课合并进 micro-server 主数据（issue #7）。
+         *
+         * 合并键 = `courseKey|weekday|startUnit|weekIndex`：
+         *  - **主数据完全优先**：键冲突时 print 数据一律跳过（主数据带真实日期，
+         *    是补课/调休匹配的锚）；主数据内部同键保留 endUnit 更宽的一条；
+         *  - print-data 只补主数据没有的键——包括整段缺失的实验/见习（医学号上缺的就是这些）
+         *    和主数据没给的课程；
+         *  - print 数据补的记录 `date = null`（该接口无日期字段），按「星期+教学周」进网格。
+         *
+         * 纯函数，便于单测（见 EasPrintDataTest）。
+         */
+        fun mergePrintActivities(
+            base: List<CourseSessionEntity>,
+            extras: List<EasClient.PrintActivityDto>,
+            semesterId: Int,
+            fetchedAt: Long,
+        ): List<CourseSessionEntity> {
+            val byKey = LinkedHashMap<String, CourseSessionEntity>()
+            for (e in base) {
+                val key = "${e.courseKey}|${e.weekday}|${e.startUnit}|${e.weekIndex}"
+                val prev = byKey[key]
+                if (prev == null || e.endUnit > prev.endUnit) byKey[key] = e
+            }
+            for (a in extras) {
+                val name = a.courseName?.trim().orEmpty()
+                if (name.isEmpty()) continue
+                val code = a.courseCode?.trim().takeUnless { it.isNullOrEmpty() } ?: name
+                if (a.weekday !in 1..7 || a.startUnit <= 0) continue
+                val weeks = a.weekIndexes.filter { it > 0 }.distinct()
+                if (weeks.isEmpty()) continue
+                val roomText = com.zzupocket.app.core.ScheduleText.tidyPlace(
+                    listOfNotNull(
+                        a.building?.trim().takeUnless { it.isNullOrEmpty() },
+                        a.room?.trim().takeUnless { it.isNullOrEmpty() },
+                    ).joinToString(" ").takeIf { it.isNotEmpty() },
+                )
+                for (week in weeks) {
+                    val key = "${courseKeyOf(semesterId, code)}|${a.weekday}|${a.startUnit}|$week"
+                    if (byKey.containsKey(key)) continue
+                    byKey[key] = CourseSessionEntity(
+                        id = sessionIdOf(semesterId, code, week, a.weekday, a.startUnit),
+                        courseKey = courseKeyOf(semesterId, code),
+                        semesterId = semesterId,
+                        source = SOURCE_EAS,
+                        courseName = name,
+                        weekIndex = week,
+                        weekday = a.weekday,
+                        startUnit = a.startUnit,
+                        endUnit = maxOf(a.endUnit, a.startUnit),
+                        date = null,
+                        startTime = normalizeHhmm(a.startTime),
+                        endTime = normalizeHhmm(a.endTime),
+                        teacherName = a.teachers.filter { it.isNotBlank() }
+                            .joinToString("、").takeIf { it.isNotEmpty() },
+                        roomText = roomText,
+                        campusText = a.campus?.trim().takeUnless { it.isNullOrEmpty() },
+                        color = null,
+                        experiment = a.experiment,
+                        updatedAt = fetchedAt,
+                    )
+                }
+            }
+            return byKey.values.toList()
+        }
+
+        /** print-data 的时刻是 "8:00"（小时不补零），统一成 "08:00"；解析不了原样返回 */
+        private fun normalizeHhmm(raw: String?): String? {
+            val t = raw?.trim().orEmpty()
+            if (t.isEmpty()) return null
+            val m = Regex("(\\d{1,2}):(\\d{2})").find(t) ?: return t
+            return String.format(java.util.Locale.US, "%02d:%02d", m.groupValues[1].toInt(), m.groupValues[2].toInt())
+        }
 
         fun courseKeyOf(semesterId: Int, courseCode: String) = "$semesterId:$courseCode"
 
@@ -694,6 +806,7 @@ private fun CourseSessionEntity.toDomain() = Session(
     roomText = roomText,
     campusText = campusText,
     color = color,
+    experiment = experiment,
 )
 
 private fun PeriodEntity.toDomain() = Period(
