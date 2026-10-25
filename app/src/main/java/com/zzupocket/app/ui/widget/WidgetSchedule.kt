@@ -417,8 +417,12 @@ object WidgetSchedule {
     // ⚠️ 实测（MEIZU 21 Note / Android 16）：4×2 真实画布 **342×195dp**、2×2 是 **163×195dp**。
     // 官方老公式算出来的 250×110dp 是错的（那台启动器的格子和公式差三成）。
 
-    /** 一行课的高度：课名（大）+ 地点/时间段（小）≈ 44dp（不撑时的内容高） */
-    const val COURSE_ROW_HEIGHT_DP = 46
+    /**
+     * 一行课的自然内容高：课名**可两行**（13dp × 2 ≈ 32）+ 地点/时间段（12dp ≈ 14）
+     * + 上下内边距 12 ≈ 56（issue #6：长班级名换行而不是省略，行高随之抬高；
+     * 短课名的行被 minHeight 撑到同一高度，内容竖直居中不受影响）。
+     */
+    const val COURSE_ROW_HEIGHT_DP = 56
 
     /**
      * 撑高的上限（相对不撑时的自然高度）。
@@ -459,6 +463,18 @@ object WidgetSchedule {
         if (heightDp <= 0) return 2
         return ((heightDp - LIST_CHROME_DP) / COURSE_ROW_HEIGHT_DP).coerceIn(1, 5)
     }
+
+    /**
+     * 行字号按画布高度分档（issue #6）：不同启动器的 4×2 槽位高度差异大，
+     * 一套字号打天下会在矮盒子上裁字。≥170dp 标准档（课名 13 / 小字 12），
+     * 更矮用紧凑档（12 / 11）；返回 (课名, 小字)。
+     */
+    fun rowFontSizes(heightDp: Int): Pair<Int, Int> =
+        if (heightDp <= 0 || heightDp >= 170) 13 to 12 else 12 to 11
+
+    /** 2×2「下一节课」的大字课名：标准档 17dp，矮盒子 15dp */
+    fun bigNameSizeDp(heightDp: Int): Int =
+        if (heightDp <= 0 || heightDp >= 170) 17 else 15
 
     /**
      * 「2×2」能放几行预告。

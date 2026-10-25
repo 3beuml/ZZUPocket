@@ -2,10 +2,10 @@
 <!--
   课表里的一行课程块（4×2 与 2×2 **共用同一套行样式**，两个组件的观感才一致）。
 
-      ▌大学物理              ← 课名 15dp 粗（主角）
+      ▌大学物理              ← 课名 13dp 粗、可两行（issue #6：长班级名不截断）
         南3 101   10:00-11:35 ← 地点(左) 时间段(右) 12dp 弱色
 
-  · 结构与拾光课程表的 `widget_item_course_common` 一致：左侧竖色条 + 课名 + 一行小字。
+  · 结构与拾光课程表的 `widget_item_course_common` 一致：左侧竖色条 + 课名（两行）+ 一行小字。
   · **不显示老师** —— 用户明确要求（App 内"格子里不显示老师"的约定延续到组件）。
   · 时间段用 `10:00-11:35`（拾光就是这么拼的，中间没有空格）。
   · 行高由 App 在渲染时用 `setMinimumHeight` 撑开：可见行数按实测画布高度算，
@@ -41,7 +41,7 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:includeFontPadding="false"
-            android:maxLines="1"
+            android:maxLines="2"
             android:text="@string/widget_preview_class1_name"
             android:textColor="@color/widget_text"
             android:textSize="@dimen/widget_row_name"

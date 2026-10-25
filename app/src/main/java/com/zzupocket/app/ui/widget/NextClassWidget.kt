@@ -107,6 +107,7 @@ class NextClassWidget : AppWidgetProvider() {
                     dark = dark,
                     click = click,
                     detail = WidgetSchedule.nextClassDetail(heightDp),
+                    heightDp = heightDp,
                 )
                 runCatching { mgr.updateAppWidget(id, rv) }
             }
@@ -119,10 +120,17 @@ class NextClassWidget : AppWidgetProvider() {
             dark: Boolean,
             click: PendingIntent,
             detail: WidgetSchedule.RowDetail,
+            heightDp: Int,
         ): RemoteViews {
             val rv = RemoteViews(context.packageName, R.layout.widget_next_class)
             WidgetStyle.tint(rv, R.id.card, colors.bg)
             rv.setOnClickPendingIntent(R.id.widget_root, click)
+            // 大字课名按画布高度分档（矮盒子缩一号防裁字，issue #6）
+            rv.setTextViewTextSize(
+                R.id.tv_course_name,
+                android.util.TypedValue.COMPLEX_UNIT_DIP,
+                WidgetSchedule.bigNameSizeDp(heightDp).toFloat(),
+            )
 
             rv.setTextColor(R.id.header, colors.text)
             rv.setTextColor(R.id.bubble, colors.accent)

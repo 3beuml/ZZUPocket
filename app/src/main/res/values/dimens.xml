@@ -38,13 +38,13 @@
     <dimen name="widget_col_header">12dp</dimen>    <!-- 列头「今天 9.29 周二」 -->
     <dimen name="widget_side_title">12dp</dimen>    <!-- 左右分栏标题（宿舍电量 / 校园卡） -->
     <dimen name="widget_footer">9.5dp</dimen>       <!-- 「剩余 2 节」这种小字 -->
-    <dimen name="widget_row_name">15dp</dimen>      <!-- 课程块里的课名（主角） -->
+    <dimen name="widget_row_name">13dp</dimen>      <!-- 课程块里的课名（issue #6：略缩、可两行） -->
     <dimen name="widget_row_sub">12dp</dimen>       <!-- 课程块里的地点/时间段（小字） -->
     <dimen name="widget_status_title">15dp</dimen>  <!-- 假期/无课这类状态大字 -->
     <dimen name="widget_status_msg">11dp</dimen>    <!-- 状态下面那行小字 -->
 
     <!-- ── 2×2「下一节课」：一节课大字 + 圆气泡 + 一行预告 ──────────── -->
-    <dimen name="widget_name_lg">20dp</dimen>       <!-- 那节课的课名（这个组件的主角） -->
+    <dimen name="widget_name_lg">17dp</dimen>       <!-- 那节课的课名（issue #6：略缩、可两行） -->
     <dimen name="widget_time_lg">12.5dp</dimen>     <!-- 完整时间段 / 地点 -->
     <dimen name="widget_preview_line">11.5dp</dimen> <!-- 「→ 14:00 程序设计基础」 -->
     <dimen name="widget_bubble">24dp</dimen>        <!-- 右上角圆气泡直径 -->

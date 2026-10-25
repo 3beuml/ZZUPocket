@@ -104,11 +104,17 @@ object Widgets {
         dark: Boolean,
         detail: WidgetSchedule.RowDetail,
         rowHeightDp: Int,
+        nameSizeDp: Int,
+        subSizeDp: Int,
     ): RemoteViews {
         val rv = RemoteViews(context.packageName, R.layout.widget_course_row)
         rv.setTextViewText(R.id.row_name, row.course.name)
         rv.setTextViewText(R.id.row_place, row.place)
         rv.setTextViewText(R.id.row_time, row.timeRange)
+        // 字号按画布分档动态设（XML 里是标准档基线；矮盒子用紧凑档防裁字）
+        rv.setTextViewTextSize(R.id.row_name, android.util.TypedValue.COMPLEX_UNIT_DIP, nameSizeDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, subSizeDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, subSizeDp.toFloat())
 
         rv.setTextColor(R.id.row_name, colors.text)
         rv.setTextColor(R.id.row_place, colors.hint)

@@ -122,21 +122,34 @@ object ScheduleText {
     }
 
     /**
+     * 课名太长时建议的字号缩减量（sp）。
+     *
+     * 课表格子窄（列宽 ~5 个汉字），研究生课名常是班级名（如「专业英语人工智能班」），
+     * 固定行数放不下就省略成"…"（issue #6）。与其放开行数把格子撑爆，不如**长名自动小一号**：
+     * 行数不变、每行能放的字符更多。中文按 1 字符计、其它按 0.5 计（英文名天然更窄）。
+     */
+    fun fontAdjust(text: String): Int {
+        var w = 0f
+        for (ch in text) w += if (ch.code > 0x2E7F) 1f else 0.5f
+        return when {
+            w >= 18f -> -2
+            w >= 13f -> -1
+            else -> 0
+        }
+    }
+
+    /**
      * 规整上课地点文本。
      *
-     * 学校返回的教室名**自带楼栋前缀**（`南2_206`），而教务给的楼栋名又是 `南2`，
-     * 两段拼起来就成了 `南2 南2_206`——看着像重复了两遍。这里统一收拾成 `南2 206`：
+     * 学校返回的教室名**自带楼栋前缀**（`南2_206`、`中3302`、`物理馆X101`），
+     * 而教务给的楼栋名又是 `南2`、`中3`、`物理馆`，两段拼起来就重复了一遍。这里统一收拾：
      *
      *  - 下划线换成空格（`南2_206` → `南2 206`）
      *  - **合并相邻重复的片段**（`南2 南2 206` → `南2 206`）
-     *  - **剥掉被带进教室名的楼名前缀**（`物理馆 物理馆X101` → `物理馆 X101`）——
-     *    馆名楼的教室号不带分隔符（issue #6）。只对**不以数字结尾**的楼名做：
-     *    `南2`/`东区1` 这类数字结尾的楼栋不剥，否则 `南2 南209` 会把房号剥坏成 `南2 09`
-     *  - 压缩多余空格、去掉首尾空白
-     *
-     * 幂等：`南2 206` 再规整一次还是 `南2 206`。所以入库时与显示时都能放心调用
-     * ——库里已有的旧串（`南2 南2_206`、`物理馆 物理馆X101`）会在下次显示时当场被修好，
-     * 不用重新同步课表。
+     *  - **剥掉被带进教室名的楼名前缀**（`中3 中3302` → `中3 3302`、
+     *    `物理馆 物理馆X101` → `物理馆 X101`；楼名数字结尾也剥，靠「教室号无前导零」
+     *    区分真前缀与房间号，见函数内注释）
+     *  - 压缩多余空格、去掉首尾空白；幂等，入库与显示时可重复调用
      */
     fun tidyPlace(raw: String?): String? {
         val t = raw?.trim().orEmpty()
@@ -153,13 +166,45 @@ object ScheduleText {
                 // 只合并「相邻」重复：`南2 南2 206` 里第二个「南2」要去掉，
                 // 而正常的 `南2 206`（楼栋 + 房号）不受影响
                 last == token -> Unit
-                // 前缀剥离：教室名 = 楼名 + 房号黏在一起。楼名以数字结尾时不剥（见上）
-                last != null && token.length > last.length &&
-                    token.startsWith(last) && !last.last().isDigit() ->
-                    out += token.substring(last.length)
+                // 前缀剥离：教室名 = 楼名 + 房号黏在一起（`中3 中3302`、`物理馆 物理馆X101`）。
+                // 楼名以数字结尾也剥（中1/中3/南2 这类）——真实教室号没有前导零，
+                // 剥出来以 0 开头的纯数字（`南2 南209` 剥出 `09`）说明是房间号本身，保留原词。
+                last != null && token.length > last.length && token.startsWith(last) -> {
+                    val rest = token.substring(last.length)
+                    out += if (rest.first() == '0' && rest.all(Char::isDigit)) token else rest
+                }
                 else -> out += token
             }
         }
         return out.joinToString(" ").ifBlank { null }
+    }
+
+    /**
+     * 超长地点的「保头保尾」缩写：楼名/单位在前、房号在后，中间用省略号。
+     * 例：`信息工程学院网络实验室302` → `信息工程学院…302`。
+     *
+     * 普通截断从尾部切，恰好把最重要的房号切掉（issue #6 的「信息工程学院 …」）；
+     * 这里优先保留开头的楼名/单位与结尾的房号（尾部连续的数字/字母段，最多 [tailKeep] 个），
+     * 中间按预算截断。不超预算则原样返回。
+     */
+    fun abbreviatePlace(text: String?, maxWeighted: Int = 14, tailKeep: Int = 5): String? {
+        val t = text?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        var weight = 0f
+        for (ch in t) weight += if (ch.code > 0x2E7F) 1f else 0.5f
+        if (weight <= maxWeighted) return t
+        // 尾部房号段：连续的数字/字母（X101、302、4-206 中的字母数字部分）
+        val tail = Regex("[0-9A-Za-z-]{1,${tailKeep}}$").find(t)?.value.orEmpty()
+        val tailW = tail.sumOf { if (it.code > 0x2E7F) 1.0 else 0.5 }.toFloat()
+        val headBudget = ((maxWeighted - tailW - 1f).coerceAtLeast(2f)) // 1f 留给省略号
+        val head = StringBuilder()
+        var used = 0f
+        for (ch in t) {
+            val w = if (ch.code > 0x2E7F) 1f else 0.5f
+            if (used + w > headBudget) break
+            head.append(ch)
+            used += w
+        }
+        return head.toString().trim() + "…" + tail
     }
 }

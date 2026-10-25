@@ -3,6 +3,7 @@ package com.zzupocket.app.core
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScheduleTextTest {
@@ -144,19 +145,48 @@ class ScheduleTextTest {
         // 真实案例（issue #6）：馆名楼的教室号不带分隔符（"物理馆X101"），拼楼栋名后显示两遍
         assertEquals("物理馆 X101", ScheduleText.tidyPlace("物理馆 物理馆X101"))
         assertEquals("材料馆 203", ScheduleText.tidyPlace("材料馆 材料馆203"))
+        // 数字结尾的楼名也剥（issue #6 复测：周二课表"中3 中3302"重复）；
+        // 房号 302（"中3"楼里的 302，不是 3302）
+        assertEquals("中3 302", ScheduleText.tidyPlace("中3 中3302"))
     }
 
     @Test
-    fun `数字结尾的楼栋不做前缀剥离`() {
-        // `南2 南209` 一旦剥前缀会把房号剥坏成 "南2 09" —— 宁可保持原样
+    fun `前导零的剩余不是前缀不剥`() {
+        // `南2 南209` 剥前缀会把房号剥坏成 "南2 09" —— 以 0 开头的纯数字剩余保持原词
         assertEquals("南2 南209", ScheduleText.tidyPlace("南2 南209"))
         // 正常的楼栋+房号不受影响
         assertEquals("南2 206", ScheduleText.tidyPlace("南2 206"))
     }
 
     @Test
+    fun `超长地点保头保尾缩写`() {
+        // 真实案例（issue #6）：编译原理实验的地点是学院自由文本，
+        // 普通截断把房号切掉；要保住头部单位 + 尾部房号
+        val out = ScheduleText.abbreviatePlace("信息工程学院网络实验室302", maxWeighted = 10)
+        assertTrue("应保留房号: $out", out!!.endsWith("302"))
+        assertTrue("应保留头部: $out", out.startsWith("信息工程"))
+        assertTrue("中间应有省略号: $out", out.contains("…"))
+        // 不超预算原样返回
+        assertEquals("中3 3302", ScheduleText.abbreviatePlace("中3 3302"))
+        assertNull(ScheduleText.abbreviatePlace(null))
+    }
+
+    @Test
     fun `地点规整是幂等的`() {
         assertEquals("物理馆 X101", ScheduleText.tidyPlace("物理馆 X101"))
         assertEquals("南2 206", ScheduleText.tidyPlace("南2 206"))
+    }
+
+    @Test
+    fun `长课名建议字号缩减`() {
+        // 研究生班级名课（issue #6）：加权宽度（汉字 1、其它 0.5）13 起缩 1 号，18 起缩 2 号
+        assertEquals(0, ScheduleText.fontAdjust("大学物理"))
+        // 9 字的班级名两行放得下，不需要缩
+        assertEquals(0, ScheduleText.fontAdjust("专业英语人工智能班"))
+        assertEquals(-1, ScheduleText.fontAdjust("新时代中国特色社会主义理论"))
+        assertEquals(-2, ScheduleText.fontAdjust("数据科学与大数据技术专业实验班课程设计"))
+        // 英文按半宽计：长串才缩
+        assertEquals(0, ScheduleText.fontAdjust("HUSSAIN"))
+        assertEquals(-1, ScheduleText.fontAdjust("Computer Networks and Security"))
     }
 }
