@@ -11,6 +11,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [接口现状核查](interfaces/接口现状核查.md) | CAS / 教务 EAS / 一卡通 / 图书馆 / 电费各系统的接口清单与实测响应；**接口契约的主要来源**，最大的一份 |
+| [本科课表接口](interfaces/eas-schedule-api.md) | 教务 course-table 的数据形状、lessonType 枚举、「含实验」开关（issue #7 根因）、教学周权威接口、学校客户端数据面；与 [gms-schedule-api](../gms-schedule-api.md)（研究生）并列 |
 | [鉴权与登录契约](interfaces/鉴权与登录契约.md) | 每个系统怎么登录、令牌是什么形态、会话怎么保存 |
 | [接口实测坑](interfaces/接口实测坑.md) | 实测踩到的坑：金额单位、必填字段、看起来存在其实不存在的接口…… |
 | [图书馆 WebView 灰屏](interfaces/图书馆WebView灰屏.md) | 内嵌学校网页"整片灰底"的成因、排查过程与有效修法 |
