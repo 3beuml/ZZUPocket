@@ -7,6 +7,25 @@ package com.zzupocket.app.domain
  * 网格、今天、翻周这些现成的逻辑不用改就能混着显示，
  * 而且教务刷新时只删 `source = "eas"` 的行，**不会把自定义日程冲掉**。
  */
+/**
+ * 条目类型：「日程」是自习/社团这类安排；「课程」是**手动补录的课**
+ * （学校接口漏给时用户自己补，issue #7 医学生缺课的兜底）。
+ * 两者存储完全同构（source 都是 "custom"），类型只影响编辑器的字段
+ * （课程多一个教师输入框）和列表里的标注；类型记在 code 前缀上（C/P），零迁移。
+ */
+enum class PlanKind(val label: String) {
+    EVENT("日程"),
+    COURSE("课程"),
+    ;
+
+    companion object {
+        /** 新建时生成 code 的前缀；老数据全是 P，自然归为日程 */
+        fun codePrefix(kind: PlanKind): String = if (kind == COURSE) "C" else "P"
+
+        fun ofCode(code: String?): PlanKind = if (code?.startsWith("C") == true) COURSE else EVENT
+    }
+}
+
 data class Plan(
     /** 日程自己的标识（存在 courseCode 里），改周次时用它定位旧记录 */
     val code: String,
@@ -20,8 +39,11 @@ data class Plan(
     val roomText: String?,
     /** [PlanColor] 的 name；为空用默认色 */
     val colorKey: String?,
+    /** 手动补录课程的主讲老师（可空）；日程恒为 null */
+    val teacherName: String? = null,
 ) {
     val weekCount: Int get() = weeks.size
+    val kind: PlanKind get() = PlanKind.ofCode(code)
 }
 
 /** 新建或编辑时提交的内容（[code] 为空 = 新建） */
@@ -35,6 +57,8 @@ data class PlanSpec(
     val weeks: List<Int>,
     val roomText: String? = null,
     val colorKey: String? = null,
+    val teacherName: String? = null,
+    val kind: PlanKind = PlanKind.EVENT,
 )
 
 /**

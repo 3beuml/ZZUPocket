@@ -127,8 +127,9 @@ interface KvCacheDao {
         CardTransactionEntity::class,
         TimetableSyncEntity::class,
         RoomOccupancyEntity::class,
+        DisplayOverrideEntity::class,
     ],
-    version = 8,
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -144,6 +145,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun cardTransactionDao(): CardTransactionDao
     abstract fun timetableSyncDao(): TimetableSyncDao
     abstract fun roomOccupancyDao(): RoomOccupancyDao
+    abstract fun displayOverrideDao(): DisplayOverrideDao
 
     companion object {
         @Volatile
@@ -262,6 +264,41 @@ abstract class AppDatabase : RoomDatabase() {
          * - `room_occupancy`：只缓存当天的教室占用（跨天即失效），见实体注释。
          */
         /**
+         * v9：显示覆盖表（issue #6 保底）——用户对教务课程显示信息的本地自定义。
+         * 全新表，不动旧数据。
+         */
+        /**
+         * v9：显示覆盖表（issue #6 保底）——用户对教务课程显示信息的本地自定义。
+         * 全新表，不动旧数据。
+         *
+         * ⚠️ 建表语句必须保持 v9 发布时的样子（**无 `weeks` 列**）：已经升到 v9 的
+         * 设备不会重跑本迁移，而 v8 直升 v10 的设备要靠 8→9→10 链式执行——
+         * 若这里建出带 `weeks` 的表，[MIGRATION_9_10] 的 ALTER 会因列已存在而炸。
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `display_overrides` (" +
+                        "`id` TEXT NOT NULL, `semesterId` INTEGER NOT NULL, `courseCode` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, `weekday` INTEGER, `startUnit` INTEGER, " +
+                        "`value` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        /**
+         * v10：display_overrides 加 `weeks` 列（issue #6 单双周场景）——
+         * null = 该时段全部周；"1,3,5" = 只作用这些教学周（单双周换教室分周覆盖）。
+         * 纯加列，不动旧数据（旧覆盖全部是 null = 全部周，语义不变）。
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `display_overrides` ADD COLUMN `weeks` TEXT")
+            }
+        }
+
+        /**
          * v8：course_sessions 加 `experiment` 列（issue #7）——print-data 补全的实验/见习排课
          * 要和 micro-server 主数据区分开。全是新列默认 0，不动旧数据。
          */
@@ -298,6 +335,8 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_5_6,
                 MIGRATION_6_7,
                 MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10,
             )
                 .build()
                 .also { instance = it }

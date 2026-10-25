@@ -24,6 +24,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +59,11 @@ fun CourseOverviewScreen(
     }
 
     val courses = state.courses.sortedBy { it.nameZh }
+    // 手动补录的课程也列进来（issue #7 兜底：学校接口漏给的课用户自己补的），
+    // 带「手动」标注与教务课程区分
+    val manual = state.plans
+        .filter { it.kind == com.zzupocket.app.domain.PlanKind.COURSE }
+        .sortedBy { it.name }
 
     Scaffold(
         topBar = {
@@ -71,7 +79,11 @@ fun CourseOverviewScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Text(
-                text = "本学期 ${courses.size} 门课",
+                text = if (manual.isEmpty()) {
+                    "本学期 ${courses.size} 门课"
+                } else {
+                    "本学期 ${courses.size} 门课 · 手动补录 ${manual.size} 门"
+                },
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -88,26 +100,87 @@ fun CourseOverviewScreen(
                 items(courses, key = { it.key }) { course ->
                     CourseCard(course) { vm.openDetail(course) }
                 }
+                items(manual, key = { "custom:${it.code}" }) { plan ->
+                    CourseCard(plan.toManualCourse(), badge = "手动") {
+                        vm.openDetail(plan.toManualCourse())
+                    }
+                }
             }
         }
     }
 
     state.detailCourse?.let { course ->
-        CourseDetailSheet(course = course, onDismiss = vm::closeDetail)
+        CourseDetailSheet(
+            course = course,
+            onDismiss = vm::closeDetail,
+            overrides = state.detailOverrides,
+            onApplyEdits = vm::applyDisplayEdits,
+            onResetOverrides = vm::resetDisplayOverrides,
+        )
     }
 }
 
+/** 手动补录的课程 → [Course]：复用总览卡片与详情页的渲染（教师/时段/周次都能自动算出来） */
+private fun com.zzupocket.app.domain.Plan.toManualCourse(): com.zzupocket.app.domain.Course =
+    com.zzupocket.app.domain.Course(
+        key = "custom:$code",
+        semesterId = semesterId,
+        code = code,
+        nameZh = name,
+        credits = 0.0,
+        openDepartment = null,
+        teachers = teacherName?.let { listOf(it) }.orEmpty(),
+        sessions = weeks.map { w ->
+            com.zzupocket.app.domain.Session(
+                id = "custom:$code:$w",
+                semesterId = semesterId,
+                source = com.zzupocket.app.data.repo.ScheduleRepository.SOURCE_CUSTOM,
+                courseCode = code,
+                courseName = name,
+                weekIndex = w,
+                weekday = weekday,
+                startUnit = startUnit,
+                endUnit = endUnit,
+                date = null,
+                startTime = null,
+                endTime = null,
+                teacherName = teacherName,
+                roomText = roomText,
+                campusText = null,
+                color = colorKey,
+            )
+        },
+    )
+
 @Composable
-private fun CourseCard(course: Course, onClick: () -> Unit) {
+private fun CourseCard(course: Course, badge: String? = null, onClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = course.nameZh,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = course.nameZh,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (badge != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+            }
             if (course.teachers.isNotEmpty()) {
                 Text(
                     text = course.teachers.joinToString("、"),

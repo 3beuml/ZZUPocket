@@ -6,6 +6,7 @@ import com.zzupocket.app.data.auth.AuthRepository
 import com.zzupocket.app.data.db.AppDatabase
 import com.zzupocket.app.data.db.CourseEntity
 import com.zzupocket.app.data.db.CourseSessionEntity
+import com.zzupocket.app.data.db.DisplayOverrideEntity
 import com.zzupocket.app.data.db.PeriodEntity
 import com.zzupocket.app.data.db.SemesterEntity
 import com.zzupocket.app.data.db.RoomOccupancyEntity
@@ -180,7 +181,10 @@ class ScheduleRepository(
         combine(
             db.courseDao().observeBySemester(semesterId),
             db.courseSessionDao().observeBySemester(semesterId),
-        ) { courses, sessions -> buildCourses(courses, sessions.map { it.toDomain() }) }
+        ) { courses, sessions ->
+            buildCourses(courses, sessions.map { it.toDomain() }.withOverrides(semesterId))
+                .withNameOverrides(semesterId)
+        }
 
     fun observePeriods(): Flow<List<Period>> =
         db.periodDao().observeAll().map { list -> list.map { it.toDomain() } }
@@ -203,8 +207,8 @@ class ScheduleRepository(
     private suspend fun loadCourses(semesterId: Int): List<Course> =
         buildCourses(
             db.courseDao().bySemester(semesterId),
-            db.courseSessionDao().bySemester(semesterId).map { it.toDomain() },
-        )
+            db.courseSessionDao().bySemester(semesterId).map { it.toDomain() }.withOverrides(semesterId),
+        ).withNameOverrides(semesterId)
 
     private fun buildCourses(
         courses: List<CourseEntity>,
@@ -265,6 +269,7 @@ class ScheduleRepository(
         currentWeek: Int? = null,
     ): List<Session> {
         val all = db.courseSessionDao().bySemester(semesterId).map { it.toDomain() }
+            .withOverrides(semesterId)
         val iso = date.toString()
         val byDate = all.filter { it.date == iso }
         val wd = date.dayOfWeek.value // ISO: 周一=1 … 周日=7，与教务的 weekday 一致
@@ -287,11 +292,11 @@ class ScheduleRepository(
      * 界面一次性拿全，翻周时在内存里过滤 —— 这样滑周不会闪空白，也不发请求。
      */
     suspend fun sessionsOfSemester(semesterId: Int): List<Session> =
-        db.courseSessionDao().bySemester(semesterId).map { it.toDomain() }
+        db.courseSessionDao().bySemester(semesterId).map { it.toDomain() }.withOverrides(semesterId)
 
     fun observeSessionsOfWeek(semesterId: Int, weekIndex: Int): Flow<List<Session>> =
         db.courseSessionDao().observeBySemester(semesterId).map { list ->
-            list.map { it.toDomain() }.filter { it.weekIndex == weekIndex }
+            list.map { it.toDomain() }.withOverrides(semesterId).filter { it.weekIndex == weekIndex }
         }
 
     suspend fun hasCourseData(semesterId: Int): Boolean =
@@ -352,13 +357,20 @@ class ScheduleRepository(
                     weeks = rows.map { it.weekIndex }.distinct().sorted(),
                     roomText = head.roomText,
                     colorKey = head.color,
+                    teacherName = head.teacherName,
                 )
             }
             .sortedWith(compareBy({ it.weekday }, { it.startUnit }))
 
     /** 新建或改写一个日程；返回它的 code（新建时是刚生成的） */
     suspend fun savePlan(spec: PlanSpec): String {
-        val code = spec.code?.takeIf { it.isNotBlank() } ?: newPlanCode()
+        val wanted = com.zzupocket.app.domain.PlanKind.codePrefix(spec.kind)
+        // 类型记在 code 前缀上：编辑时如果换了类型（日程↔课程），前缀也要跟着换，
+        // 否则读回来的 kind 还是旧的（2026-10-25 真机验证时踩到）
+        val code = spec.code
+            ?.takeIf { it.isNotBlank() }
+            ?.let { if (it.startsWith(wanted)) it else wanted + it.drop(1) }
+            ?: newPlanCode(spec.kind)
         val dao = db.courseSessionDao()
         // 先删旧行：改了周次/时段之后不能留下孤儿记录
         dao.deleteByCourseKey(courseKeyOf(spec.semesterId, code))
@@ -383,7 +395,7 @@ class ScheduleRepository(
                 date = null,
                 startTime = startTime,
                 endTime = endTime,
-                teacherName = null,
+                teacherName = spec.teacherName?.trim()?.takeIf { it.isNotEmpty() },
                 roomText = spec.roomText?.trim()?.takeIf { it.isNotEmpty() },
                 campusText = null,
                 color = spec.colorKey,
@@ -535,7 +547,8 @@ class ScheduleRepository(
 
     /** 读某个来源的缓存（返回领域模型；没有缓存就是空表） */
     suspend fun cachedSessions(source: String, semesterId: Int): List<Session> =
-        db.courseSessionDao().bySemesterAndSource(semesterId, source).map { it.toDomain() }
+        db.courseSessionDao().bySemesterAndSource(semesterId, source)
+            .map { it.toDomain() }.withOverrides(semesterId)
 
     fun observeTimetableSync(source: String, semesterId: Int): Flow<TimetableSyncEntity?> =
         db.timetableSyncDao().observe(source, semesterId)
@@ -550,8 +563,105 @@ class ScheduleRepository(
             db.courseSessionDao().deleteBySemesterAndSource(semesterId, source)
             db.courseDao().deleteBySemester(semesterId)
             db.timetableSyncDao().clearBySource(source)
+            // 显示覆盖跟课表同生命周期：按账号抓的数据退出后不该留在设备上
+            if (source != SOURCE_CUSTOM) db.displayOverrideDao().deleteBySemester(semesterId)
         }
     }
+
+    // ── 显示覆盖（issue #6 保底）：用户自定义教务课程的显示 ──────────────
+
+    /** 某学期全部显示覆盖（详情页编辑用） */
+    suspend fun displayOverrides(semesterId: Int): List<DisplayOverrideEntity> =
+        db.displayOverrideDao().bySemester(semesterId)
+
+    /**
+     * 保存/清除课程名覆盖。[value] 空白 = 清除（恢复教务原名）。
+     * @return 落库后的值（null = 已无覆盖）
+     */
+    suspend fun saveDisplayNameOverride(semesterId: Int, courseCode: String, value: String?): String? {
+        val id = nameOverrideId(semesterId, courseCode)
+        val v = value?.trim().orEmpty()
+        if (v.isEmpty()) {
+            db.displayOverrideDao().deleteById(id)
+        } else {
+            db.displayOverrideDao().upsert(
+                DisplayOverrideEntity(
+                    id = id, semesterId = semesterId, courseCode = courseCode,
+                    kind = KIND_NAME, weekday = null, startUnit = null,
+                    value = v, updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+        return v.ifEmpty { null }
+    }
+
+    /**
+     * 保存/清除某时段的教室覆盖（同一门课不同时段可不同教室）。空白 = 清除。
+     *
+     * [weeks] 为 null = 该时段**全部周**（保存前清场：把该时段既有的分周覆盖一并删掉，
+     * 否则旧值会在没被新保存覆盖的周上阴魂不散）；非 null = 只作用这些教学周
+     * （单双周换教室的场景，编辑框会按教室分组各存一条）。
+     */
+    suspend fun saveDisplayRoomOverride(
+        semesterId: Int,
+        courseCode: String,
+        weekday: Int,
+        startUnit: Int,
+        weeks: List<Int>?,
+        value: String?,
+    ): String? {
+        val v = value?.trim().orEmpty()
+        if (weeks == null) {
+            // 「全部周」是该时段的唯一真相：先清光分周条目再落这一条
+            db.displayOverrideDao().deleteRoomBySlot(semesterId, courseCode, weekday, startUnit)
+        } else {
+            db.displayOverrideDao().deleteById(roomOverrideId(semesterId, courseCode, weekday, startUnit, null))
+        }
+        if (v.isNotEmpty()) {
+            db.displayOverrideDao().upsert(
+                DisplayOverrideEntity(
+                    id = roomOverrideId(semesterId, courseCode, weekday, startUnit, weeks),
+                    semesterId = semesterId, courseCode = courseCode,
+                    kind = KIND_ROOM, weekday = weekday, startUnit = startUnit,
+                    weeks = weeks?.joinToString(","),
+                    value = v, updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+        return v.ifEmpty { null }
+    }
+
+    /** 清掉一门课的全部覆盖（恢复默认） */
+    suspend fun clearDisplayOverrides(semesterId: Int, courseCode: String) =
+        db.displayOverrideDao().deleteByCourse(semesterId, courseCode)
+
+    private suspend fun overridesOrNull(semesterId: Int): List<DisplayOverrideEntity>? =
+        runCatching { db.displayOverrideDao().bySemester(semesterId) }.getOrNull()
+
+    private suspend fun List<Session>.withOverrides(semesterId: Int): List<Session> {
+        val ovs = overridesOrNull(semesterId) ?: return this
+        if (ovs.isEmpty()) return this
+        return applyDisplayOverrides(this, ovs)
+    }
+
+    /** 课程名覆盖作用于 [Course.nameZh]（详情页/总览的标题） */
+    private suspend fun List<Course>.withNameOverrides(semesterId: Int): List<Course> {
+        val ovs = overridesOrNull(semesterId)?.filter { it.kind == KIND_NAME } ?: return this
+        if (ovs.isEmpty()) return this
+        val by = ovs.associate { it.courseCode to it.value }
+        return map { c -> by[c.code]?.let { c.copy(nameZh = it) } ?: c }
+    }
+
+    private fun nameOverrideId(semesterId: Int, courseCode: String) =
+        "$semesterId|$courseCode|$KIND_NAME"
+
+    private fun roomOverrideId(
+        semesterId: Int,
+        courseCode: String,
+        weekday: Int,
+        startUnit: Int,
+        weeks: List<Int>?,
+    ) = "$semesterId|$courseCode|$KIND_ROOM|$weekday|$startUnit|" + (weeks?.joinToString(",") ?: "all")
 
     // ── 空教室快照（只缓存当天；跨天即失效）────────────────────────────
 
@@ -623,6 +733,46 @@ class ScheduleRepository(
         const val SOURCE_EAS = "eas"
         const val SOURCE_CUSTOM = "custom"
 
+        /** 显示覆盖的类型：课程名（整门课）/ 教室（单时段） */
+        const val KIND_NAME = "name"
+        const val KIND_ROOM = "room"
+
+        /**
+         * 把显示覆盖应用到 Session 列表（纯函数，单测见 DisplayOverrideTest）。
+         *
+         * 名称覆盖键 = (semesterId, courseCode)，替换 courseName（网格/今天/组件全生效）；
+         * 教室覆盖键 = (semesterId, courseCode, weekday, startUnit) + 周次——
+         * `weeks == null` 作用该时段全部周；否则只作用 [DisplayOverrideEntity.weeks]
+         * 列的教学周（单双周换教室的课拆成两条互不干扰），**精确周优先于全部周**。
+         */
+        fun applyDisplayOverrides(
+            sessions: List<Session>,
+            overrides: List<DisplayOverrideEntity>,
+        ): List<Session> {
+            if (overrides.isEmpty()) return sessions
+            val nameBy = overrides.filter { it.kind == KIND_NAME }
+                .associate { (it.semesterId to it.courseCode) to it.value }
+            val roomBy = overrides.filter { it.kind == KIND_ROOM && it.weekday != null && it.startUnit != null }
+                .groupBy { Triple(it.semesterId, it.courseCode, it.weekday!! to it.startUnit!!) }
+            return sessions.map { s ->
+                var out = s
+                nameBy[s.semesterId to s.courseCode]?.let { out = out.copy(courseName = it) }
+                roomBy[Triple(s.semesterId, s.courseCode, s.weekday to s.startUnit)]
+                    ?.let { slotOverrides ->
+                        val exact = slotOverrides.firstOrNull { parseWeeks(it.weeks)?.contains(s.weekIndex) == true }
+                        val anyWeek = slotOverrides.firstOrNull { it.weeks == null }
+                        (exact ?: anyWeek)?.let { out = out.copy(roomText = it.value) }
+                    }
+                out
+            }
+        }
+
+        /** "1,3,5" → {1,3,5}；null/空/全非法 → null（= 全部周） */
+        internal fun parseWeeks(csv: String?): Set<Int>? =
+            csv?.takeIf { it.isNotBlank() }
+                ?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+                ?.takeIf { it.isNotEmpty() }?.toSet()
+
         /**
          * 课表缓存结构版本；改字段就 +1，旧缓存会被当作不存在。
          *
@@ -658,7 +808,9 @@ class ScheduleRepository(
             date: String? = null,
         ) = "$semesterId:$courseCode:$weekIndex:$weekday:$startUnit:${date.orEmpty()}"
 
-        fun newPlanCode(): String = "P" + System.currentTimeMillis().toString(36)
+        /** code 前缀记类型：C = 手动补录的课程，P = 普通日程（老数据全是 P） */
+        fun newPlanCode(kind: com.zzupocket.app.domain.PlanKind = com.zzupocket.app.domain.PlanKind.EVENT): String =
+            com.zzupocket.app.domain.PlanKind.codePrefix(kind) + System.currentTimeMillis().toString(36)
     }
 }
 

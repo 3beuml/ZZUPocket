@@ -54,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -117,6 +118,10 @@ class DisplaySettingsViewModel : ViewModel() {
     }
 
     fun setShowWeekend(v: Boolean) = viewModelScope.launch { store.setShowWeekend(v) }
+
+    /** 「课程总览」要打开的学期：优先当前学期，退而求其次第一个 */
+    suspend fun currentSemesterId(): Int? =
+        scheduleRepo.currentSemester()?.id ?: scheduleRepo.semesters().firstOrNull()?.id
     fun setBlockBorder(v: BlockBorder) = viewModelScope.launch { store.setBlockBorder(v) }
     fun setTextMode(v: CourseTextMode) = viewModelScope.launch { store.setCourseTextMode(v) }
     fun setDensity(v: GridDensity) = viewModelScope.launch { store.setDensity(v) }
@@ -304,6 +309,17 @@ fun DisplaySettingsScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Spacer(Modifier.height(4.dp))
+
+            // 「课程总览」入口（2026-10-25 补：之前重构时按钮丢了，页面一度不可达）
+            val scope = rememberCoroutineScope()
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        vm.currentSemesterId()?.let { id -> onOpenOverview(id) }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("课程总览（本学期全部课程）") }
 
             // 教学周放在最上面：周次对不对，比"好不好看"重要得多
             WeekSettingsCard(

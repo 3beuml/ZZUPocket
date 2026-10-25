@@ -33,6 +33,11 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -311,7 +316,13 @@ fun ScheduleScreen(
     }
 
     state.detailCourse?.let { course ->
-        CourseDetailSheet(course = course, onDismiss = vm::closeDetail)
+        CourseDetailSheet(
+            course = course,
+            onDismiss = vm::closeDetail,
+            overrides = state.detailOverrides,
+            onApplyEdits = vm::applyDisplayEdits,
+            onResetOverrides = vm::resetDisplayOverrides,
+        )
     }
 
     if (state.planEditorOpen) {
@@ -711,22 +722,37 @@ private fun CourseBlock(
             .background(bg, corner)
             .then(decoration)
             .clickable { onClick(session) },
-        contentAlignment = Alignment.Center,
     ) {
+        // 实验/见习标记：右上角小角标。以前用文字后缀「（实验）」，窄格里会把课名
+        // 挤到截断（issue #6 的「微机原理及接口技术（实…」），角标不占文字区。
+        if (session.experiment) {
+            Text(
+                text = "实",
+                fontSize = 7.sp,
+                lineHeight = 8.sp,
+                color = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 1.dp, end = 1.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
+                    .padding(horizontal = 2.dp),
+            )
+        }
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(horizontal = 2.dp),
+            modifier = Modifier.padding(horizontal = 2.dp).align(Alignment.Center),
         ) {
+            // 长课名（研究生常是班级名）自动小一号：行数不变、每行装得更多，
+            // 比"放开行数撑爆格子"稳（issue #6）
+            val nameFont = (prefs.courseFontSp + ScheduleText.fontAdjust(session.courseName))
+                .coerceAtLeast(prefs.courseFontSp - 2)
             Text(
-                text = if (session.experiment && !session.courseName.contains("实验")) {
-                    session.courseName + "（实验）"
-                } else {
-                    session.courseName
-                },
-                fontSize = prefs.courseFontSp.sp,
-                lineHeight = (prefs.courseFontSp + 2).sp,
-                // 合并后的块更高，可以多放几行
-                maxLines = if (span >= 2) 4 else if (prefs.density == GridDensity.COMPACT) 2 else 3,
+                text = session.courseName,
+                fontSize = nameFont.sp,
+                lineHeight = (nameFont + 2).sp,
+                // 合并后的块更高可以多放几行；单节块 3 行也放得下
+                // （紧凑 34.5dp + 副行 ≈ 44dp < 48dp；标准 39 + 10.5 < 54）
+                maxLines = if (span >= 2) 4 else 3,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
                 fontWeight = FontWeight.Medium,
@@ -736,24 +762,180 @@ private fun CourseBlock(
                 // 研究生课表用户要求看到主讲老师；单节课的块太矮，只在跨节次（span >= 2）时加，
                 // 避免把课名挤掉。
                 if (session.source == GmsScheduleSource.SOURCE && span >= 2) {
-                    session.teacherName?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    session.teacherName?.takeIf { it.isNotBlank() }
+                        ?.let { add(SlotText.Kind.TEACHER to it) }
                 }
                 if (prefs.courseTextMode != CourseTextMode.NAME) {
-                    ScheduleText.tidyPlace(session.roomText)?.let { add(it) }
+                    add(SlotText.Kind.ROOM to ScheduleText.tidyPlace(session.roomText))
                 }
             }
-            secondary.forEach { line ->
+            secondary.forEachIndexed { index, (kind, line) ->
+                if (line == null) return@forEachIndexed
+                // 地点自适应（issue #6）：超长先缩一号、再「保头保尾」缩写（楼名…房号），
+                // 行数按块高给（跨节 3 行、单节 1 行）；教师名维持单行。
+                val text = if (kind == SlotText.Kind.ROOM) {
+                    ScheduleText.abbreviatePlace(
+                        line,
+                        maxWeighted = if (span >= 2) 26 else 12,
+                    ) ?: line
+                } else {
+                    line
+                }
+                val roomFont = if (kind == SlotText.Kind.ROOM) {
+                    (prefs.roomFontSp + ScheduleText.fontAdjust(text))
+                        .coerceAtLeast(prefs.roomFontSp - 1)
+                } else {
+                    prefs.roomFontSp
+                }
+                val maxLines = when {
+                    kind != SlotText.Kind.ROOM -> 1
+                    span >= 2 -> 3
+                    else -> 1
+                }
                 Text(
-                    text = line,
-                    fontSize = prefs.roomFontSp.sp,
-                    lineHeight = (prefs.roomFontSp + 1.5f).sp,
-                    maxLines = 1,
+                    text = text,
+                    fontSize = roomFont.sp,
+                    lineHeight = (roomFont + 1.5f).sp,
+                    maxLines = maxLines,
                     overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
+}
+
+/** 副行的种类：教师 / 地点（地点才享受换行与缩写待遇） */
+private object SlotText {
+    enum class Kind { TEACHER, ROOM }
+}
+
+/**
+ * 编辑框里的一个教室字段：同一时段里**教室相同**的教学周合成一组；
+ * 单双周换教室（单周 302、双周 405）会拆成多组、各自带周次，
+ * 覆盖键随之带上周次，互不串扰。[wholeSlot] = 该时段只有一种教室 → 一条覆盖管全部周。
+ */
+internal data class RoomEditSlot(
+    val weekday: Int,
+    val startUnit: Int,
+    val endUnit: Int,
+    val room: String?,
+    val weeks: List<Int>,
+    val wholeSlot: Boolean,
+) {
+    /** 与 [DisplayOverridesView.rooms] / [ScheduleViewModel.applyDisplayEdits] 约定的键 */
+    val editKey: String
+        get() = "$weekday|$startUnit" +
+            (if (wholeSlot) "" else "|" + weeks.joinToString(","))
+
+    /** 初始值：精确周的覆盖 → 全部周的覆盖 → 教务原值 */
+    fun initialValue(rooms: Map<String, String>): String =
+        rooms[editKey] ?: rooms["$weekday|$startUnit"] ?: room.orEmpty()
+}
+
+/** 按「时段 → 教室」两级归并出可编辑字段（与详情页分时段明细同一套思路） */
+internal fun roomEditSlots(sessions: List<Session>): List<RoomEditSlot> =
+    sessions.groupBy { it.weekday to it.startUnit }
+        .flatMap { (slot, sameSlot) ->
+            val byRoom = sameSlot.groupBy { it.roomText ?: "" }
+            val groups = (if (byRoom.size == 1) listOf(sameSlot) else byRoom.values.toList())
+                .map { g ->
+                    val head = g.first()
+                    RoomEditSlot(
+                        weekday = slot.first,
+                        startUnit = slot.second,
+                        endUnit = head.endUnit,
+                        room = head.roomText,
+                        weeks = g.map { it.weekIndex }.distinct().sorted(),
+                        wholeSlot = byRoom.size == 1,
+                    )
+                }
+            groups
+        }
+        .sortedWith(compareBy({ it.weekday }, { it.startUnit }, { it.weeks.firstOrNull() ?: 0 }))
+
+/**
+ * 编辑一门课的**本地显示**（issue #6 保底）：课程名 + 各时段教室。
+ * 只改本机显示，教务刷新不会覆盖；留空 = 恢复教务原值。
+ * 同一时段不同周教室不同时按教室拆成多个字段（键带周次），不会互相覆盖。
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditDisplayDialog(
+    course: Course,
+    overrides: DisplayOverridesView?,
+    onDismiss: () -> Unit,
+    onSave: (String, Map<String, String>) -> Unit,
+) {
+    var name by remember(course) { mutableStateOf(overrides?.name ?: course.nameZh) }
+    val slots = remember(course) { roomEditSlots(course.sessions) }
+    val rooms = remember(course) {
+        val initial = slots.associate { it.editKey to it.initialValue(overrides?.rooms ?: emptyMap()) }
+        mutableStateMapOf(*initial.toList().toTypedArray())
+    }
+    // 多教室的时段（单双周换教室这类）要提示一次，用户才知道为什么拆成了几个字段
+    val multiSlots = remember(course) {
+        slots.groupBy { it.weekday to it.startUnit }
+            .filterValues { it.size > 1 }
+            .map { it.key }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑显示（仅本机）") },
+        text = {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "改的是显示，不改教务数据；刷新课表不会被覆盖。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(24) },
+                    label = { Text("课程名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                slots.forEachIndexed { i, s ->
+                    val key = s.editKey
+                    if ((s.weekday to s.startUnit) in multiSlots &&
+                        slots.getOrNull(i - 1)?.let { it.weekday to it.startUnit } != (s.weekday to s.startUnit)
+                    ) {
+                        Text(
+                            text = "该时段不同周教室不同，已按周拆分：",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Text(
+                        text = if (s.wholeSlot) {
+                            "${ScheduleText.weekdayName(s.weekday)} ${s.startUnit}-${s.endUnit} 节"
+                        } else {
+                            "${ScheduleText.weekdayName(s.weekday)} ${s.startUnit}-${s.endUnit} 节 · " +
+                                ScheduleText.compressWeeks(s.weeks)
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    OutlinedTextField(
+                        value = rooms[key].orEmpty(),
+                        onValueChange = { rooms[key] = it.take(20) },
+                        label = { Text("教室（清空恢复默认）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(name.trim(), rooms.toMap()) }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 /** 这节课此刻正在上 —— 供「正在上的课」描边使用。按真实日期判断，调休也正确。 */
@@ -919,13 +1101,66 @@ private fun weekdayZh(d: Int): String = when (d) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun CourseDetailSheet(course: Course, onDismiss: () -> Unit) {
+internal fun CourseDetailSheet(
+    course: Course,
+    onDismiss: () -> Unit,
+    /** 该课的显示覆盖（issue #6 保底）；有则显示「已自定义」与编辑/恢复入口 */
+    overrides: DisplayOverridesView? = null,
+    onApplyEdits: ((Course, String, Map<String, String>) -> Unit)? = null,
+    onResetOverrides: ((Course) -> Unit)? = null,
+) {
+    var editOpen by remember(course) { mutableStateOf(false) }
+    if (editOpen && onApplyEdits != null) {
+        EditDisplayDialog(
+            course = course,
+            overrides = overrides,
+            onDismiss = { editOpen = false },
+            onSave = { name, rooms ->
+                onApplyEdits(course, name, rooms)
+                editOpen = false
+            },
+        )
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(course.nameZh, style = MaterialTheme.typography.headlineSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    course.nameZh,
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (overrides?.any == true) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "已自定义",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    )
+                }
+            }
+            // 显示编辑（issue #6 保底）：楼名重复、地点太长这类显示问题，用户可自己改成顺眼的
+            if (onApplyEdits != null) {
+                Row {
+                    TextButton(onClick = { editOpen = true }) {
+                        Icon(Icons.Filled.Edit, contentDescription = null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (overrides?.any == true) "改显示" else "编辑显示")
+                    }
+                    if (overrides?.any == true && onResetOverrides != null) {
+                        TextButton(onClick = { onResetOverrides(course) }) { Text("恢复默认") }
+                    }
+                }
+            }
             if (course.teachers.isNotEmpty()) {
                 DetailRow("教师", course.teachers.joinToString("、"))
             }

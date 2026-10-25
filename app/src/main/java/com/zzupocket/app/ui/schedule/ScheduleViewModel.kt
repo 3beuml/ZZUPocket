@@ -128,6 +128,8 @@ data class ScheduleUiState(
     val pendingPlan: PlanSpec? = null,
     val pendingConflicts: List<String> = emptyList(),
     val detailCourse: Course? = null,
+    /** detailCourse 的显示覆盖（名称 + 各时段教室）；null = 没查到/没有 */
+    val detailOverrides: DisplayOverridesView? = null,
 ) {
     /** 该学期有哪些教学周（升序） */
     val weeks: List<Int> get() = selectedSemester?.weekIndices.orEmpty()
@@ -140,6 +142,15 @@ data class ScheduleUiState(
     val gmsWeekCount: Int get() = gmsSemester?.weekCount ?: 0
 
     fun gmsSessionsOf(week: Int): List<Session> = gmsSessions.filter { it.weekIndex == week }
+}
+
+/** 详情页看到的显示覆盖（issue #6 保底）：名称覆盖 + 各时段教室覆盖。
+ *  rooms 键 = "weekday|startUnit"（全部周）或 "weekday|startUnit|1,3,5"（分周，单双周换教室时按教室分组）。 */
+data class DisplayOverridesView(
+    val name: String? = null,
+    val rooms: Map<String, String> = emptyMap(),
+) {
+    val any: Boolean get() = name != null || rooms.isNotEmpty()
 }
 
 class ScheduleViewModel : ViewModel() {
@@ -1025,8 +1036,85 @@ cacheNoticeNeedsLogin = expired,
         }
     }
 
-    fun openDetail(course: Course) = _state.update { it.copy(detailCourse = course) }
-    fun closeDetail() = _state.update { it.copy(detailCourse = null) }
+    fun openDetail(course: Course) {
+        viewModelScope.launch {
+            val ovs = runCatching {
+                repo.displayOverrides(course.semesterId).filter { it.courseCode == course.code }
+            }.getOrDefault(emptyList())
+            _state.update {
+                it.copy(
+                    detailCourse = course,
+                    detailOverrides = DisplayOverridesView(
+                        name = ovs.firstOrNull { it.kind == ScheduleRepository.KIND_NAME }?.value,
+                        rooms = ovs
+                            .filter { it.kind == ScheduleRepository.KIND_ROOM && it.weekday != null && it.startUnit != null }
+                            .associate {
+                                "${it.weekday}|${it.startUnit}" +
+                                    (it.weeks?.takeIf { w -> w.isNotBlank() }?.let { w -> "|$w" } ?: "") to it.value
+                            },
+                    ),
+                )
+            }
+        }
+    }
+
+    fun closeDetail() = _state.update { it.copy(detailCourse = null, detailOverrides = null) }
+
+    /**
+     * 保存显示覆盖（issue #6 保底）：名称整门课；教室按时段，键 "weekday|startUnit"
+     * （全部周）或 "weekday|startUnit|1,3,5"（分周——单双周换教室的课按教室分组各一条）。
+     * 空白 = 清除该项。保存后重载学期数据并刷新详情快照，网格/今天/组件随之生效。
+     */
+    fun applyDisplayEdits(course: Course, name: String, roomEdits: Map<String, String>) {
+        viewModelScope.launch {
+            runCatching {
+                repo.saveDisplayNameOverride(course.semesterId, course.code, name)
+                roomEdits.forEach { (key, value) ->
+                    val parts = key.split("|")
+                    val wd = parts.getOrNull(0)?.toIntOrNull() ?: return@forEach
+                    val su = parts.getOrNull(1)?.toIntOrNull() ?: return@forEach
+                    val weeks = parts.getOrNull(2)
+                        ?.takeIf { it.isNotBlank() }
+                        ?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
+                        ?.takeIf { it.isNotEmpty() }
+                    repo.saveDisplayRoomOverride(course.semesterId, course.code, wd, su, weeks, value)
+                }
+            }
+            reloadAfterDisplayEdit(course)
+        }
+    }
+
+    /** 恢复一门课的教务原始显示 */
+    fun resetDisplayOverrides(course: Course) {
+        viewModelScope.launch {
+            runCatching { repo.clearDisplayOverrides(course.semesterId, course.code) }
+            reloadAfterDisplayEdit(course)
+        }
+    }
+
+    private suspend fun reloadAfterDisplayEdit(old: Course) {
+        val semester = _state.value.selectedSemester
+        if (semester != null) {
+            loadSemester(semester, auth.isLoggedIn(), forceSync = false)
+        } else if (_state.value.gradMode) {
+            // 研究生：缓存路径也要重新读一遍覆盖
+            val cached = runCatching {
+                repo.cachedSessions(GmsScheduleSource.SOURCE, GmsScheduleMapper.GRAD_SEMESTER_ID)
+            }.getOrDefault(emptyList())
+            if (cached.isNotEmpty()) {
+                publishGmsFromCache(
+                    cached,
+                    runCatching {
+                        repo.lastFetchedAt(GmsScheduleSource.SOURCE, GmsScheduleMapper.GRAD_SEMESTER_ID)
+                    }.getOrNull(),
+                )
+            }
+        }
+        val fresh = _state.value.courses.firstOrNull { it.key == old.key }
+            ?: _state.value.gmsCourses.firstOrNull { it.key == old.key }
+            ?: old
+        openDetail(fresh)
+    }
 
     /** 课程总览用的排序（按课程名） */
     fun overviewCourses(): List<Course> = _state.value.courses.sortedBy { it.nameZh }
