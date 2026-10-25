@@ -128,7 +128,7 @@ interface KvCacheDao {
         TimetableSyncEntity::class,
         RoomOccupancyEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -261,6 +261,16 @@ abstract class AppDatabase : RoomDatabase() {
          * - `cacheVersion`：结构版本，将来字段改了可直接丢弃旧缓存；
          * - `room_occupancy`：只缓存当天的教室占用（跨天即失效），见实体注释。
          */
+        /**
+         * v8：course_sessions 加 `experiment` 列（issue #7）——print-data 补全的实验/见习排课
+         * 要和 micro-server 主数据区分开。全是新列默认 0，不动旧数据。
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `course_sessions` ADD COLUMN `experiment` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `timetable_sync` ADD COLUMN `contentHash` TEXT")
@@ -287,6 +297,7 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_4_5,
                 MIGRATION_5_6,
                 MIGRATION_6_7,
+                MIGRATION_7_8,
             )
                 .build()
                 .also { instance = it }

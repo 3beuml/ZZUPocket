@@ -155,6 +155,8 @@ data class CourseSessionEntity(
     val roomText: String?,
     val campusText: String?,
     val color: String?,
+    /** 实验/见习类排课（print-data 的 experiment 标志；micro-server 主数据恒为 false） */
+    val experiment: Boolean = false,
     val updatedAt: Long,
 )
 

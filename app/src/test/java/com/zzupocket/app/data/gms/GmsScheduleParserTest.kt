@@ -67,6 +67,62 @@ class GmsScheduleParserTest {
         assertNull(GmsScheduleParser.parseCell("一点方括号都没有的文本"))
     }
 
+    // ── 一格多条：<br/> 分隔（issue #5「字母片段 / 后期缺课」的根因） ────
+
+    /** 2026-10-25 实测：同一时段不同周次的多条排课被压进一格，`<br/>` 分隔 */
+    private val multiEntryCell =
+        "专业英语人工智能班[5-9周]HUSSAIN SHABIR[南2506]<br/>" +
+            "专业英语人工智能班[2-3周]HUSSAIN SHABIR[南2506]<br/>" +
+            "专业英语人工智能班[10-10周]HUSSAIN SHABIR[北1303]"
+
+    @Test
+    fun `一格多条逐条拆出_周次独立_教师教室不串段`() {
+        val entries = GmsScheduleParser.parseCellEntries(multiEntryCell)
+        assertEquals(3, entries.size)
+        assertEquals(listOf("5-9周", "2-3周", "10-10周"), entries.map { it.weekText })
+        // 该课在研究生系统选课页显示为 2-9 周连续：三条合起来 2,3,5,6,7,8,9,10 才是完整周次
+        assertEquals(listOf("南2506", "南2506", "北1303"), entries.map { it.room })
+        // 以前这三条只解析出第一条，<br/> 与后续课名全部灌进教师字段
+        entries.forEach { e ->
+            assertEquals("专业英语人工智能班", e.courseName)
+            assertTrue("教师里不该再有 HTML 片段: ${e.teacher}", !e.teacher.orEmpty().contains("<br"))
+            assertTrue("教师里不该再有未解析的段: ${e.teacher}", !e.teacher.orEmpty().contains("["))
+        }
+    }
+
+    @Test
+    fun `一格多条落到周网格时每一段都展开`() {
+        val client = GmsClient(OkHttpStub.CLIENT, json)
+        val rows = listOf(RowDto(jcid = "7", mc = "第7节", z4 = multiEntryCell))
+        val lessons = client.rowsToSession(rows)
+        assertEquals(3, lessons.size)
+        val entries = client.expandWeeks(lessons)
+        // 5..9(5周) + 2..3(2周) + 10(1周) = 8 个周条目，全部在周四第 7 节
+        assertEquals(8, entries.size)
+        assertEquals(setOf(4), entries.map { it.weekday }.toSet())
+        assertEquals(listOf(2, 3, 5, 6, 7, 8, 9, 10), entries.map { it.weekIndex }.sorted())
+    }
+
+    @Test
+    fun `br标签变体与裸换行都能拆`() {
+        assertEquals(
+            2,
+            GmsScheduleParser.parseCellEntries("课程甲[1-3周]某甲[北1]<br>课程乙[5-7周]某乙[北2]").size,
+        )
+        assertEquals(
+            2,
+            GmsScheduleParser.parseCellEntries("课程甲[1-3周]某甲[北1]\n课程乙[5-7周]某乙[北2]").size,
+        )
+    }
+
+    @Test
+    fun `单条解析的旧入口与新入口等价`() {
+        assertEquals(
+            GmsScheduleParser.parseCellEntries("数值分析主校区数值分析4班[2-17周]某戊[北1204]"),
+            listOfNotNull(GmsScheduleParser.parseCell("数值分析主校区数值分析4班[2-17周]某戊[北1204]")),
+        )
+    }
+
     // ── parseWeeks ─────────────────────────────────────────────────────
 
     @Test

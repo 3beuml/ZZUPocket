@@ -156,7 +156,7 @@ class GmsClient(
     suspend fun fetchWeekTable(): WeekTableDto =
         getData(WeekTableDto.serializer(), route("pygl/xskbcx/bzkb_load"), emptyMap(), "本周课表")
 
-    /** RowDto 的 z1..z7 网格 → 一格一课的 [Session]。 */
+    /** RowDto 的 z1..z7 网格 → 一格一课的 [Session]。一格多条（`<br/>` 分隔）逐条解析。 */
     fun rowsToSession(rows: List<RowDto>): List<Session> {
         val out = ArrayList<Session>(rows.size)
         for (row in rows) {
@@ -164,19 +164,20 @@ class GmsClient(
             if (period <= 0 || period >= PERIOD_MAX) continue // jcid=99 是「无节次」占位行
             val cells = listOf(row.z1, row.z2, row.z3, row.z4, row.z5, row.z6, row.z7)
             cells.forEachIndexed { index, cell ->
-                val entry = GmsScheduleParser.parseCell(cell) ?: return@forEachIndexed
-                out += Session(
-                    period = period,
-                    periodName = row.mc,
-                    weekday = index + 1,
-                    weeks = GmsScheduleParser.parseWeeks(entry.weekText),
-                    courseName = entry.courseName,
-                    courseCode = entry.courseCode,
-                    className = entry.className,
-                    teacher = entry.teacher,
-                    room = entry.room,
-                    selective = entry.selective,
-                )
+                for (entry in GmsScheduleParser.parseCellEntries(cell)) {
+                    out += Session(
+                        period = period,
+                        periodName = row.mc,
+                        weekday = index + 1,
+                        weeks = GmsScheduleParser.parseWeeks(entry.weekText),
+                        courseName = entry.courseName,
+                        courseCode = entry.courseCode,
+                        className = entry.className,
+                        teacher = entry.teacher,
+                        room = entry.room,
+                        selective = entry.selective,
+                    )
+                }
             }
         }
         return out

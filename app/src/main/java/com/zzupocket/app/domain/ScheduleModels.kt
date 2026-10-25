@@ -65,6 +65,8 @@ data class Session(
     val roomText: String?,
     val campusText: String?,
     val color: String?,
+    /** 实验/见习类排课（print-data 的 experiment 标志；issue #7 补全的那批课） */
+    val experiment: Boolean = false,
 )
 
 /** 一门课（把同一门课的多个上课时段聚在一起） */
