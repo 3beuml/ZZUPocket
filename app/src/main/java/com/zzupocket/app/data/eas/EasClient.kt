@@ -262,8 +262,13 @@ class EasClient(
         }
     }
 
-    /** 优先取"楼栋+房间"，其次只有房间名，最后才用自定义地点 */
-    private fun roomTextOf(s: ScheduleDto): String? {
+    /** 优先取"楼栋+房间"，其次只有房间名，最后才用自定义地点。
+     *
+     * 楼栋与教室名**无条件拼接**（`物理馆` + `物理馆X101`）——重复部分统一交给
+     * [ScheduleText.tidyPlace] 规整（去重/剥前缀，issue #6）：显示层的规则对入库
+     * 与历史缓存同样生效，出问题也只需改一处。
+     */
+    internal fun roomTextOf(s: ScheduleDto): String? {
         val room = s.room
         val building = room?.building?.nameZh
         val name = room?.nameZh
@@ -273,8 +278,6 @@ class EasClient(
             !s.customPlace.isNullOrBlank() -> s.customPlace
             else -> null
         }
-        // ⚠️ 学校给的教室名**自带楼栋前缀**（nameZh = "南2_206"），而楼栋名又是"南2"，
-        // 直接拼会得到"南2 南2_206"。统一交给 ScheduleText 规整成"南2 206"。
         return ScheduleText.tidyPlace(raw)
     }
 

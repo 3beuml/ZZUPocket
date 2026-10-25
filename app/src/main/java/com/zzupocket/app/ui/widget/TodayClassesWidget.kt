@@ -187,8 +187,9 @@ class TodayClassesWidget : AppWidgetProvider() {
                 // 行高按**这一列实际有几行**算：只有 2 节课时行高就按 2 算，
                 // 否则底部会空出一整行的位置（实测踩过）
                 val rowHeightDp = WidgetSchedule.courseRowHeightDp(heightDp, column.rows.size)
+                val (nameDp, subDp) = WidgetSchedule.rowFontSizes(heightDp)
                 column.rows.forEachIndexed { index, row ->
-                    rv.addView(rowsId, Widgets.courseRow(context, row, colors, dark, detail, rowHeightDp))
+                    rv.addView(rowsId, Widgets.courseRow(context, row, colors, dark, detail, rowHeightDp, nameDp, subDp))
                     // 行与行之间插一条 1dp 分隔线（与拾光一致）
                     if (index < column.rows.lastIndex) {
                         rv.addView(rowsId, RemoteViews(context.packageName, R.layout.widget_row_divider))

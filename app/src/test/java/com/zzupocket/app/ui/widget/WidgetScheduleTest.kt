@@ -441,14 +441,25 @@ class WidgetScheduleTest {
 
     @Test
     fun `行高按可用高度撑_但只温和撑且留余量`() {
-        // 195dp、2 行：可用 = 195-66-1-10(余量) = 118 → 每行 59dp（自然 44 + 撑 15 → 封顶 56）
-        assertEquals(58, WidgetSchedule.courseRowHeightDp(195, 2))
-        // 只有 1 行时也封顶（不然是一个巨大的空框里飘一行字）
-        assertEquals(58, WidgetSchedule.courseRowHeightDp(195, 1))
+        // 195dp、2 行：可用 = 195-66-1-10(余量) = 118 → 每行 59dp（自然 56，撑 3）
+        assertEquals(59, WidgetSchedule.courseRowHeightDp(195, 2))
+        // 只有 1 行时封顶 +12（不然是一个巨大的空框里飘一行字）
+        assertEquals(68, WidgetSchedule.courseRowHeightDp(195, 1))
         // 盒子很小：不低于内容高度
         assertEquals(WidgetSchedule.COURSE_ROW_HEIGHT_DP, WidgetSchedule.courseRowHeightDp(110, 1))
         // 不知道盒子多大时不撑
         assertEquals(0, WidgetSchedule.courseRowHeightDp(0, 2))
+    }
+
+    @Test
+    fun `字号按画布高度分档`() {
+        // 标准档（实测 4×2 高 195dp；读不到尺寸按标准）
+        assertEquals(13 to 12, WidgetSchedule.rowFontSizes(195))
+        assertEquals(13 to 12, WidgetSchedule.rowFontSizes(0))
+        // 矮盒子（别的启动器 4×2 槽位更矮）用紧凑档防裁字
+        assertEquals(12 to 11, WidgetSchedule.rowFontSizes(160))
+        assertEquals(17, WidgetSchedule.bigNameSizeDp(195))
+        assertEquals(15, WidgetSchedule.bigNameSizeDp(160))
     }
 
     @Test
