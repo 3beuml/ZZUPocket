@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.zzupocket.app.core.ScheduleText
 import com.zzupocket.app.domain.Plan
 import com.zzupocket.app.domain.PlanColor
+import com.zzupocket.app.domain.PlanKind
 import com.zzupocket.app.domain.PlanSpec
 import com.zzupocket.app.domain.WeekMode
 
@@ -80,6 +81,8 @@ fun PlanEditDialog(
     val lastWeek = weeks.lastOrNull() ?: 18
 
     var name by remember(initial) { mutableStateOf(initial?.name.orEmpty()) }
+    var kind by remember(initial) { mutableStateOf(initial?.kind ?: PlanKind.EVENT) }
+    var teacher by remember(initial) { mutableStateOf(initial?.teacherName.orEmpty()) }
     var weekday by remember(initial) { mutableStateOf(initial?.weekday ?: 1) }
     var startUnit by remember(initial) { mutableStateOf(initial?.startUnit ?: 1) }
     var endUnit by remember(initial) { mutableStateOf(initial?.endUnit ?: 2) }
@@ -106,29 +109,63 @@ fun PlanEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "添加日程" else "编辑日程") },
+        title = {
+            val what = if (initial == null) "添加" else "编辑"
+            Text(if (kind == PlanKind.COURSE) "${what}课程" else "${what}日程")
+        },
         text = {
             Column(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // 类型：课程 = 手动补录一门课（学校接口漏给的兜底）；日程 = 自习/社团这类安排。
+                // 类型记在 code 前缀上，对存储零影响。
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PlanKind.entries.forEach { k ->
+                        FilterChip(
+                            selected = kind == k,
+                            onClick = { kind = k },
+                            label = { Text(k.label) },
+                        )
+                    }
+                }
+                if (kind == PlanKind.COURSE) {
+                    Text(
+                        text = "课表里缺的课可以自己补上：格子、今天、组件都会显示，教务刷新不会冲掉。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it.take(24) },
-                    label = { Text("名称") },
-                    placeholder = { Text("自习 / 实验 / 家教…") },
+                    label = { Text(if (kind == PlanKind.COURSE) "课程名" else "名称") },
+                    placeholder = {
+                        Text(if (kind == PlanKind.COURSE) "如：人体寄生虫学" else "自习 / 实验 / 家教…")
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 // 常用名字点一下就填好，省得每次敲字（尤其是期末周天天加日程的时候）
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    QUICK_NAMES.forEach { quick ->
-                        FilterChip(
-                            selected = name == quick,
-                            onClick = { name = quick },
-                            label = { Text(quick) },
-                        )
+                if (kind == PlanKind.EVENT) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        QUICK_NAMES.forEach { quick ->
+                            FilterChip(
+                                selected = name == quick,
+                                onClick = { name = quick },
+                                label = { Text(quick) },
+                            )
+                        }
                     }
+                }
+                if (kind == PlanKind.COURSE) {
+                    OutlinedTextField(
+                        value = teacher,
+                        onValueChange = { teacher = it.take(16) },
+                        label = { Text("教师（可留空）") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
 
                 FieldLabel("星期")
@@ -275,6 +312,8 @@ fun PlanEditDialog(
                             weeks = selectedWeeks,
                             roomText = room.trim().ifEmpty { null },
                             colorKey = color.name,
+                            teacherName = if (kind == PlanKind.COURSE) teacher.trim().ifEmpty { null } else null,
+                            kind = kind,
                         ),
                     )
                 },
