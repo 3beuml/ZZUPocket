@@ -38,6 +38,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zzupocket.app.core.AppGraph
+import com.zzupocket.app.ui.components.GlassCard
 import com.zzupocket.app.core.ScheduleText
 import com.zzupocket.app.data.repo.ScheduleRepository
 import com.zzupocket.app.domain.FocusStats
@@ -69,6 +70,10 @@ data class TodayTimelineUi(
     val focusCount: Int = 0,
     /** "下一节 14:00《…》· 40 分钟后" 这类提示 */
     val nextHint: String? = null,
+    /** 今天一节课也没有时："明天 08:00《…》" —— 空态也能回答"那我下节课是啥" */
+    val tomorrowHint: String? = null,
+    /** 有课日子的脚注："明天 3 节 · 第一节 08:00《…》" */
+    val tomorrowSummary: String? = null,
     /** 今天**自己加的**日程（课表里的自定义日程），单独列一张卡，不和教务课程混在一起 */
     val customEntries: List<TimelineEntry> = emptyList(),
 )
@@ -124,6 +129,27 @@ class TodayTimelineViewModel : ViewModel() {
             .filter { it.endMin > it.startMin }
             .sortedBy { it.startMin }
 
+        // 明天的课概览：没课的空态给"明天第一节"，有课的日子给"明天 N 节"脚注
+        val tomorrowEntries = runCatching {
+            com.zzupocket.app.data.repo.TodayTimetable
+                .sessionsOn(scheduleRepo, AppGraph.uiPrefsStore, today.plusDays(1))
+                .mapNotNull { courseEntry(it, periods, null, emptyMap()) }
+                .sortedBy { it.startMin }
+        }.getOrDefault(emptyList())
+        val tomorrowHint = if (courseEntries.isEmpty()) {
+            tomorrowEntries.firstOrNull()
+                ?.let { "明天 ${TodayTimeline.clock(it.startMin)}《${it.title}》" }
+        } else {
+            null
+        }
+        val tomorrowSummary = if (courseEntries.isNotEmpty()) {
+            tomorrowEntries.takeIf { it.isNotEmpty() }?.let { list ->
+                "明天 ${list.size} 节 · 第一节 ${TodayTimeline.clock(list.first().startMin)}《${list.first().title}》"
+            }
+        } else {
+            null
+        }
+
         _state.value = TodayTimelineUi(
             loaded = true,
             week = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(scheduleRepo, AppGraph.uiPrefsStore, today),
@@ -140,6 +166,8 @@ class TodayTimelineViewModel : ViewModel() {
             focusSeconds = records.sumOf { it.actualSeconds },
             focusCount = records.count { it.completed },
             nextHint = nextHint(courseEntries, nowMin),
+            tomorrowHint = tomorrowHint,
+            tomorrowSummary = tomorrowSummary,
             customEntries = customEntries,
         )
     }
@@ -217,7 +245,7 @@ fun TodayTimelineCard(
     onOpenSchedule: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
+    GlassCard(
         modifier = modifier.fillMaxWidth().clickable(onClick = onOpenSchedule),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -284,9 +312,24 @@ fun TodayTimelineCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                state.tomorrowHint?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             } else {
                 HorizontalDivider(Modifier.padding(top = 2.dp))
                 TimelineList(state)
+                // 脚注：明天概览（空态的"明天第一节"已经给过了，这里只给有课的日子）
+                state.tomorrowSummary?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

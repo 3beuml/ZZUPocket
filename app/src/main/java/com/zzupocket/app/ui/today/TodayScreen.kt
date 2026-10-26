@@ -1,10 +1,13 @@
 package com.zzupocket.app.ui.today
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,16 +15,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.LocalLibrary
 import androidx.compose.material.icons.filled.Login
+import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -37,14 +45,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.zzupocket.app.data.room.isSingleMeterRoom
 import com.zzupocket.app.domain.EnergyStats
+import com.zzupocket.app.ui.nav.DOCK_CLEARANCE
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,6 +75,8 @@ fun TodayScreen(
     onOpenSchedule: () -> Unit,
     onOpenElectricity: () -> Unit,
     onOpenCard: () -> Unit,
+    onOpenLibrary: () -> Unit = {},
+    onOpenRooms: () -> Unit = {},
     vm: TodayViewModel = viewModel(),
     timelineVm: TodayTimelineViewModel = viewModel(),
     cardVm: TodayCardViewModel = viewModel(),
@@ -100,7 +111,10 @@ fun TodayScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                // 悬浮 dock 是覆盖层：内容从胶囊底下穿过，这里垫出尾部余量，
+                // 让"校园卡"那最后一个卡能完整滚出胶囊（见 DOCK_CLEARANCE）。
+                .padding(bottom = DOCK_CLEARANCE),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Spacer(Modifier.height(4.dp))
@@ -118,7 +132,21 @@ fun TodayScreen(
                 onOpenSchedule = onOpenSchedule,
             )
 
-            // ③ 宿舍电量
+            // ②.5 快速入口（和非学习页同款的一行式）：
+            LibraryEntryCard(
+                icon = Icons.Filled.LocalLibrary,
+                title = "图书馆 · 座位预约",
+                subtitle = "学校原版网页",
+                onOpen = onOpenLibrary,
+            )
+            LibraryEntryCard(
+                icon = Icons.Filled.MeetingRoom,
+                title = "空教室查询",
+                subtitle = "按楼看每间教室哪节有课",
+                onOpen = onOpenRooms,
+            )
+
+            // ③ 宿舍电量（底部带"近 7 天"摘要行，完整的趋势图在电费页）
             ElectricityCard(
                 state = state,
                 onRefresh = vm::refresh,
@@ -126,18 +154,7 @@ fun TodayScreen(
                 onOpen = onOpenElectricity,
             )
 
-            // ④ 近 7 天用电趋势（本机采样推算，断网也能看）
-            //    单表计的楼（亿达）图例写「用电量」，不能拿"照明"顶替
-            TodayEnergyTrendCard(
-                bars = state.trend,
-                totalKwh = state.trendTotalKwh,
-                cost = state.trendCost,
-                avgKwh = state.trendAvgKwh,
-                onOpen = onOpenElectricity,
-                singleMeter = isSingleMeterRoom(state.light.roomId) || isSingleMeterRoom(state.ac.roomId),
-            )
-
-            // ⑤ 校园卡：余额 + 今日消费
+            // ④ 校园卡：余额 + 今日消费
             TodayCardBalanceCard(state = card, onOpen = onOpenCard)
 
             Spacer(Modifier.height(4.dp))
@@ -254,6 +271,27 @@ private fun ElectricityCard(
                 }
             }
 
+            // 近 7 天迷你趋势 + 摘要行：数字给在门口，完整柱状图去电费页看（整卡可点）
+            if (state.trendTotalKwh > 0.0) {
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                MiniTrend(state.trend)
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "近 7 天合计 ${formatKwh(state.trendTotalKwh)} 度 · 约 ¥${formatKwh(state.trendCost)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
             listOfNotNull(state.light.error, state.ac.error).distinct().forEach {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
@@ -304,3 +342,85 @@ private fun MeterRow(icon: ImageVector, label: String, meter: MeterUi) {
 
 private fun formatKwh(v: Double): String =
     if (v == v.toLong().toDouble()) v.toLong().toString() else String.format(Locale.US, "%.2f", v)
+
+/**
+ * 快速入口卡（今天页）：一行紧凑卡，「更多」页 Entry 的首页变体。不做多余装饰。
+ */
+@Composable
+private fun LibraryEntryCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onOpen: () -> Unit,
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
+
+/**
+ * 7 天用电迷你柱：照明（主色）在上、空调（第三色）在下，双色堆叠、无轴无标签。
+ * 高度按 7 天里"照明+空调"最大的那天归一化 —— 只求一眼看出哪天用得多。
+ */
+@Composable
+private fun MiniTrend(bars: List<UsageTrendBar>) {
+    val maxTotal = bars.maxOf { it.light + it.ac }.coerceAtLeast(0.1)
+    Row(
+        modifier = Modifier.fillMaxWidth().height(32.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        bars.forEach { bar ->
+            Column(
+                modifier = Modifier.weight(1f).fillMaxHeight(),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val totalDp = 32.0 * (bar.light + bar.ac) / maxTotal
+                if (totalDp > 0.5) {
+                    val lightDp = 32.0 * bar.light / maxTotal
+                    if (lightDp >= 1.0) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(0.55f)
+                                .height(lightDp.dp)
+                                .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
+                                .background(MaterialTheme.colorScheme.primary),
+                        )
+                    }
+                    Box(
+                        Modifier
+                            .fillMaxWidth(0.55f)
+                            .height((32.0 * bar.ac / maxTotal).dp)
+                            .background(MaterialTheme.colorScheme.tertiary),
+                    )
+                } else {
+                    Spacer(Modifier.height(2.dp))
+                }
+            }
+        }
+    }
+}

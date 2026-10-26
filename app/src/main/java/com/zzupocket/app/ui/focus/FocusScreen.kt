@@ -76,6 +76,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.data.db.FocusTagEntity
 import com.zzupocket.app.data.prefs.TimerPreset
 import com.zzupocket.app.domain.FocusRecord
+import com.zzupocket.app.ui.nav.DOCK_CLEARANCE
 import com.zzupocket.app.domain.FocusStats
 import com.zzupocket.app.domain.Phase
 import com.zzupocket.app.domain.PomodoroClock
@@ -131,7 +132,9 @@ fun FocusScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
+                .padding(horizontal = 20.dp)
+                // 悬浮 dock 是覆盖层：垫出尾部余量，「今天」统计卡能完整滚出胶囊
+                .padding(bottom = DOCK_CLEARANCE),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Spacer(Modifier.height(2.dp))
