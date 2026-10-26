@@ -131,7 +131,13 @@ fun PlanEditDialog(
                 }
                 if (kind == PlanKind.COURSE) {
                     Text(
-                        text = "课表里缺的课可以自己补上：格子、今天、组件都会显示，教务刷新不会冲掉。",
+                        text = "课表里缺的课可以自己补上：格子、今天、桌面小组件都会显示，教务刷新不会冲掉。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        text = "自己的安排（自习/社团/实验）也会同步到「今天」页和桌面小组件，一并显示。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

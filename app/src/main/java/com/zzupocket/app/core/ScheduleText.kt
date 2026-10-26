@@ -149,6 +149,8 @@ object ScheduleText {
      *  - **剥掉被带进教室名的楼名前缀**（`中3 中3302` → `中3 3302`、
      *    `物理馆 物理馆X101` → `物理馆 X101`；楼名数字结尾也剥，靠「教室号无前导零」
      *    区分真前缀与房间号，见函数内注释）
+     *  - **剥掉房号自带的楼名首字缩写**（`物理馆 物505` → `物理馆 505`、`材料馆 材317`
+     *    → `材料馆 317`——教务的房间号有时写成「楼名首字 + 纯数字」，拼接后像重复了半个楼名）
      *  - 压缩多余空格、去掉首尾空白；幂等，入库与显示时可重复调用
      */
     fun tidyPlace(raw: String?): String? {
@@ -160,18 +162,31 @@ object ScheduleText {
             .filter { it.isNotEmpty() }
         if (tokens.isEmpty()) return null
         val out = mutableListOf<String>()
-        tokens.forEach { token ->
+        tokens.forEachIndexed { idx, token ->
             val last = out.lastOrNull()
             when {
                 // 只合并「相邻」重复：`南2 南2 206` 里第二个「南2」要去掉，
                 // 而正常的 `南2 206`（楼栋 + 房号）不受影响
                 last == token -> Unit
+                // 房号自带楼名首字缩写、且和房号之间有空格：`物理馆 物 505` 的中间那只「物」
+                // （教务给它自己写了「楼名简写 + 空格 + 房号」）。后面紧跟纯数字房号，直接丢弃这只字
+                last != null && last.length >= 2 && token.length == 1 &&
+                    token == last.first().toString() &&
+                    tokens.getOrNull(idx + 1)?.all(Char::isDigit) == true -> Unit
                 // 前缀剥离：教室名 = 楼名 + 房号黏在一起（`中3 中3302`、`物理馆 物理馆X101`）。
                 // 楼名以数字结尾也剥（中1/中3/南2 这类）——真实教室号没有前导零，
                 // 剥出来以 0 开头的纯数字（`南2 南209` 剥出 `09`）说明是房间号本身，保留原词。
                 last != null && token.length > last.length && token.startsWith(last) -> {
                     val rest = token.substring(last.length)
                     out += if (rest.first() == '0' && rest.all(Char::isDigit)) token else rest
+                }
+                // 房号自带楼名首字缩写、黏成一个词：`物理馆 物505`、`材料馆 材317`。
+                // 整体前缀（上一条）不成立时才走到这里，所以不会把 `中3302` 这类正常前缀剥坏；
+                // 余部必须是「不以 0 开头的纯数字」（`南2 南209` 是被整体前缀规则拦截的，轮不到这里）。
+                last != null && last.length >= 2 && !token.startsWith(last) && token.length > 1 &&
+                    token.first() == last.first() &&
+                    token.drop(1).all(Char::isDigit) && !token.drop(1).startsWith("0") -> {
+                    out += token.drop(1)
                 }
                 else -> out += token
             }

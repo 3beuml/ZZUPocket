@@ -159,6 +159,29 @@ class ScheduleTextTest {
     }
 
     @Test
+    fun `房号自带楼名首字缩写的剥除`() {
+        // 真实案例（issue #6 复测 2026-10-26）：教务房间号写成「楼名首字 + 纯数字」，
+        // 拼楼栋名后像重复了半个楼名；小组件放大态还会把这些半重复截断得更难看
+        assertEquals("物理馆 505", ScheduleText.tidyPlace("物理馆 物505"))
+        assertEquals("材料馆 317", ScheduleText.tidyPlace("材料馆 材317"))
+        assertEquals("物理馆 505", ScheduleText.tidyPlace("物理馆 物_505"))
+        // 幂等：剥过一次再过不变
+        assertEquals("物理馆 505", ScheduleText.tidyPlace("物理馆 505"))
+
+        // 防误伤边界
+        // 余部不是纯数字：不剥（带字母的房号不属于「首字缩写+纯数字」形态）
+        assertEquals("物理馆 物A", ScheduleText.tidyPlace("物理馆 物A"))
+        // 余部以 0 开头 = 房号本身（与 `南2 南209` 前导零守卫同一口径）
+        assertEquals("南2 南209", ScheduleText.tidyPlace("南2 南209"))
+        // 首字与房号之间有空格的缩写（教务写「简写 + 空格 + 房号」）：中间的「物」丢掉
+        assertEquals("物理馆 505", ScheduleText.tidyPlace("物理馆 物 505"))
+        // 不相干楼栋不触碰
+        assertEquals("河南省 文3", ScheduleText.tidyPlace("河南省 文3"))
+        // 房号不以楼名首字开头（首字是数字）
+        assertEquals("北3 412", ScheduleText.tidyPlace("北3 412"))
+    }
+
+    @Test
     fun `超长地点保头保尾缩写`() {
         // 真实案例（issue #6）：编译原理实验的地点是学院自由文本，
         // 普通截断把房号切掉；要保住头部单位 + 尾部房号

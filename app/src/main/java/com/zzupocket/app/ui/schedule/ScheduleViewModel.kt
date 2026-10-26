@@ -129,6 +129,8 @@ data class ScheduleUiState(
     /** 撞课确认：待保存的内容 + 撞到的课名 */
     val pendingPlan: PlanSpec? = null,
     val pendingConflicts: List<String> = emptyList(),
+    /** 补录保存/删除成功后的一次性确认（桌面小组件刷新已同步发生，无感失败也有开屏兜底） */
+    val planNotice: String? = null,
     val detailCourse: Course? = null,
     /** detailCourse 的显示覆盖（名称 + 各时段教室）；null = 没查到/没有 */
     val detailOverrides: DisplayOverridesView? = null,
@@ -792,21 +794,49 @@ cacheNoticeNeedsLogin = expired,
 
     private suspend fun writePlan(spec: PlanSpec) {
         val semester = _state.value.selectedSemester ?: return
+        var saved = false
         runCatching { repo.savePlan(spec) }
+            .onSuccess { saved = true }
             .onFailure { e -> _state.update { it.copy(error = e.toUserMessage()) } }
         closePlanEditor()
+        if (saved) {
+            // 桌面小组件读的就是这套 Session 数据（custom 源一并提供），
+            // 但它的重画只在「打开 App / 课程边界」发生——补录后立刻去看桌面会停在旧画面，
+            // 所以在保存点主动推一遍（无感，失败无声，开屏兜底仍在）。
+            AppGraph.appContextOrNull()?.let { ctx ->
+                runCatching { Widgets.refreshAll(ctx) }
+                    .onFailure { Log.w("ScheduleViewModel", "补录后刷新小组件失败", it) }
+            }
+            _state.update {
+                it.copy(planNotice = "已保存到课表 · 「今天」页与桌面小组件已同步")
+            }
+        }
         loadSemester(semester, auth.isLoggedIn(), forceSync = false)
     }
 
     fun deletePlan(code: String) {
         val semester = _state.value.selectedSemester ?: return
         viewModelScope.launch {
+            var removed = false
             runCatching { repo.deletePlan(semester.id, code) }
+                .onSuccess { removed = true }
                 .onFailure { e -> _state.update { it.copy(error = e.toUserMessage()) } }
             closePlanEditor()
+            if (removed) {
+                AppGraph.appContextOrNull()?.let { ctx ->
+                    runCatching { Widgets.refreshAll(ctx) }
+                        .onFailure { Log.w("ScheduleViewModel", "删除补录后刷新小组件失败", it) }
+                }
+                _state.update {
+                    it.copy(planNotice = "已从课表移除 · 桌面小组件已同步")
+                }
+            }
             loadSemester(semester, auth.isLoggedIn(), forceSync = false)
         }
     }
+
+    /** 补录确认提示的关闭（展示几秒后由界面收起） */
+    fun clearPlanNotice() = _state.update { it.copy(planNotice = null) }
 
     /** 点课程块：自定义日程开编辑框，教务课程开详情 */
     fun onSessionClick(session: Session) {
