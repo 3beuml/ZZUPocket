@@ -22,6 +22,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -86,7 +87,7 @@ fun FocusStatsScreen(
 
             OverviewCard(summary, streak)
 
-            Card(Modifier.fillMaxWidth()) {
+            GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         text = "打卡热力图",
@@ -119,7 +120,7 @@ fun FocusStatsScreen(
 
 @Composable
 private fun OverviewCard(summary: FocusSummary, streak: Int) {
-    Card(Modifier.fillMaxWidth()) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth()) {
                 BigStat(
@@ -179,7 +180,7 @@ private fun SelectedDayLine(day: LocalDate?, secondsByDay: Map<LocalDate, Int>) 
 
 @Composable
 private fun PeriodCard(summary: FocusSummary) {
-    Card(Modifier.fillMaxWidth()) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = "周 · 月 · 年",
@@ -214,7 +215,7 @@ private fun PeriodRow(label: String, totals: FocusTotals) {
 
 @Composable
 private fun TagCard(perTag: List<TagTotal>) {
-    Card(Modifier.fillMaxWidth()) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 text = "按标签",

@@ -33,6 +33,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -97,7 +98,7 @@ fun CardScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Card(Modifier.fillMaxWidth()) {
+                GlassCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "校园卡余额",
@@ -132,7 +133,7 @@ fun CardScreen(
 
             item { PeriodCard("今天", state.summary.today) }
             item {
-                Card(Modifier.fillMaxWidth()) {
+                GlassCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             text = "周 · 月 · 年",
@@ -149,7 +150,7 @@ fun CardScreen(
 
             if (state.summary.byMerchant.isNotEmpty()) {
                 item {
-                    Card(Modifier.fillMaxWidth()) {
+                    GlassCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(
                                 text = "钱花在哪了",
@@ -186,7 +187,7 @@ fun CardScreen(
             // 充值来源单独一张卡：它们的金额是正的，混在"钱花在哪了"里会显示成 0.00
             if (state.summary.incomeSources.isNotEmpty()) {
                 item {
-                    Card(Modifier.fillMaxWidth()) {
+                    GlassCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
                                 text = "充值来源",
@@ -481,7 +482,7 @@ private fun FilterSheet(
 
 @Composable
 private fun PeriodCard(title: String, totals: CardTotals) {
-    Card(Modifier.fillMaxWidth()) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = title,

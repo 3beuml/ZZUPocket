@@ -25,6 +25,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -390,7 +391,7 @@ fun DiagnosticsScreen(
                 },
             )
 
-            Card(modifier = Modifier.fillMaxWidth()) {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("数据", style = MaterialTheme.typography.titleSmall)
                     Text(
@@ -433,7 +434,7 @@ fun DiagnosticsScreen(
             // 还会把内部接口名摊在界面上，所以 release 包不显示。
             // 结论都已整理进 docs/interfaces/，需要时用 debug 包跑一遍即可。
             // ── 研究生教务：固定的登录位（研究生课表要单独登录一次研究生院系统）──
-            Card(modifier = Modifier.fillMaxWidth()) {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -509,7 +510,7 @@ fun DiagnosticsScreen(
             // ── 自检工具：默认收起，别挡住日常信息（用户反馈：不要太影响使用）──
             // 只有 debug 包（或显式打开开关）才出现整个入口，正式包里连这行都不显示
             if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth().clickable { vm.toggleProbes() }.padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -525,7 +526,7 @@ fun DiagnosticsScreen(
             }
 
             if (state.probesOpen && (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE)) {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("一卡通接口自检", style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -582,7 +583,7 @@ fun DiagnosticsScreen(
                     }
                 }
 
-                Card(modifier = Modifier.fillMaxWidth()) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("教务教室接口自检", style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -641,7 +642,7 @@ fun DiagnosticsScreen(
                     }
                 }
 
-                Card(modifier = Modifier.fillMaxWidth()) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("教务鉴权自检", style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -701,7 +702,7 @@ fun DiagnosticsScreen(
 
                 // 研究生系统探测卡片。放在图书馆自检上面一张。
                 // 背景：研究生课表不在本科教务里，而我们没有研究生账号，只能借一次真实会话摸接口。
-                Card(modifier = Modifier.fillMaxWidth()) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("研究生系统自检（探测）", style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -774,7 +775,7 @@ fun DiagnosticsScreen(
                     }
                 }
 
-                Card(modifier = Modifier.fillMaxWidth()) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("图书馆接口自检（传输层）", style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -846,7 +847,7 @@ fun DiagnosticsScreen(
 
 @Composable
 private fun StatusRow(label: String, ok: Boolean, detail: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
