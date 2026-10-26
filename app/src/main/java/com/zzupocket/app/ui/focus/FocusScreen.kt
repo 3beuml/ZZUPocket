@@ -43,6 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -516,7 +517,7 @@ private fun TagManageDialog(
 
 @Composable
 private fun TodayCard(ui: FocusUiState, onManual: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("今天", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))

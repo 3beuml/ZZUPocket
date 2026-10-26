@@ -26,6 +26,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -143,7 +144,7 @@ fun AppearanceScreen(
 
             Text("配色", style = MaterialTheme.typography.titleSmall)
 
-            Card(Modifier.fillMaxWidth()) {
+            GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 4.dp)) {
                     ThemePreset.entries.forEach { preset ->
                         PresetRow(
@@ -156,12 +157,7 @@ fun AppearanceScreen(
                 }
             }
 
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("说明", style = MaterialTheme.typography.titleSmall)
                     Text(

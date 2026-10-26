@@ -30,6 +30,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -227,7 +228,7 @@ fun ElectricityScreen(
                 )
             }
 
-            Card(Modifier.fillMaxWidth()) {
+            GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth()) {
                         BigStat(
@@ -261,7 +262,7 @@ fun ElectricityScreen(
                 }
             }
 
-            Card(Modifier.fillMaxWidth()) {
+            GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -342,7 +343,7 @@ fun ElectricityScreen(
                 }
             }
 
-            Card(Modifier.fillMaxWidth()) {
+            GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
                         text = "余额趋势",
@@ -382,7 +383,7 @@ fun ElectricityScreen(
             }
 
             if (state.dayRows.isNotEmpty()) {
-                Card(Modifier.fillMaxWidth()) {
+                GlassCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
                             text = "按日明细（点一行可在上图高亮）",
@@ -493,7 +494,7 @@ private fun MeterCard(
     /** 卡上的标题；只有一路表计时传「电量」（那栋楼只有一个表，叫照明/空调都不对） */
     title: String = meter.label,
 ) {
-    Card(modifier) {
+    GlassCard(modifier) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = title,
@@ -542,7 +543,7 @@ private fun MeterCard(
  */
 @Composable
 private fun MeterRoomCard(meter: MeterUi?, modifier: Modifier = Modifier) {
-    Card(modifier) {
+    GlassCard(modifier) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = "房间",
@@ -613,7 +614,7 @@ private fun RoomSetupCard(
     onOpen: () -> Unit,
     onReadFromSchool: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("还没有设置宿舍房间", style = MaterialTheme.typography.titleSmall)
             Text(

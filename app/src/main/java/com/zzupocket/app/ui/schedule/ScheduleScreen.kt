@@ -48,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -1306,7 +1307,7 @@ private fun SemesterSheet(
                     modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
                 )
                 list.forEach { s ->
-                    Card(
+                    GlassCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 3.dp)

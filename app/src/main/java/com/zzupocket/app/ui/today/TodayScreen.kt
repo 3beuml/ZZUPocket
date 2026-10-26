@@ -191,7 +191,7 @@ private fun ElectricityCard(
 ) {
     val allEmpty = state.light.kwh == null && state.ac.kwh == null
 
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+    GlassCard(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Filled.Bolt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
