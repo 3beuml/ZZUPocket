@@ -113,6 +113,8 @@ data class UiPrefs(
      */
     val lightRoomLabel: String? = null,
     val acRoomLabel: String? = null,
+    /** 检测更新里被用户「不再提醒」的版本号（如 "0.33.0"）；null = 没屏蔽过任何版本 */
+    val updateMutedVersion: String? = null,
 ) {
     val dayCount: Int get() = if (showWeekend) 7 else 5
 
@@ -173,8 +175,13 @@ class UiPrefsStore(context: Context) {
                 ?: DarkMode.SYSTEM,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
+            updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
         )
     }
+
+    /** 「不再提醒」该版本的红点；传 null 清掉全部屏蔽（给设置里未来可能的"重新开启提醒"用） */
+    suspend fun setUpdateMutedVersion(v: String?) =
+        store.edit { p -> p[KEY_UPDATE_MUTED] = v.orEmpty() }
 
     suspend fun setShowWeekend(v: Boolean) = store.edit { it[KEY_SHOW_WEEKEND] = v }
     suspend fun setBlockBorder(v: BlockBorder) = store.edit { it[KEY_BLOCK_BORDER] = v.name }
@@ -327,6 +334,7 @@ class UiPrefsStore(context: Context) {
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
         val KEY_AC_ROOM_LABEL = stringPreferencesKey("ac_room_label")
+        val KEY_UPDATE_MUTED = stringPreferencesKey("update_muted_version")
 
         /** 旧版（0.31.6 及以前）研究生周次锚点：只保留键名用于一次性清理 */
         val KEY_GMS_WEEK_ONE = androidx.datastore.preferences.core.longPreferencesKey("gms_week_one_epoch_day")

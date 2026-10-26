@@ -61,6 +61,9 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             runCatching { Widgets.refreshAll(this@MainActivity) }
         }
+        // 开屏顺便问一次 GitHub 有没有新 release（更多页「检测更新」与 dock 角标用）。
+        // 失败无声：红点不误报、不弹打扰；详见 data.update.UpdateCenter。失败也无所谓。
+        runCatching { com.zzupocket.app.data.update.UpdateCenter.checkSilently() }
     }
 
     /**
