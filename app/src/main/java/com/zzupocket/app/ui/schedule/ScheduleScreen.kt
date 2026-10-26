@@ -207,6 +207,19 @@ fun ScheduleScreen(
                 )
             }
 
+            // 补录保存/删除成功的一次性确认：与错误不同色（primary），桌面小组件在中途已无感刷新。
+            state.planNotice?.let { msg ->
+                Text(
+                    text = "$msg（点一下收起）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.clearPlanNotice() }
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                )
+            }
+
             when {
                 // 研究生：整学期数据已经映射成本科的 Session/Course，直接复用同一套周网格。
                 // 没有数据时才退回下面的登录/空态区块。

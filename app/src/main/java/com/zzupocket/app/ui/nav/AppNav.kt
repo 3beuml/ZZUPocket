@@ -213,6 +213,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenElectricity = { navController.navigate(ROUTE_ELECTRICITY) },
                         onOpenCard = { navController.navigate(ROUTE_CARD) },
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
+                        onOpenRooms = { navController.navigate(ROUTE_ROOMS) },
                     )
                 }
                 composable(Destination.SCHEDULE.route) {
