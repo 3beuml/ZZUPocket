@@ -31,6 +31,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import android.util.Log
+import com.zzupocket.app.ui.widget.Widgets
 import java.time.LocalDate
 
 data class ScheduleUiState(
@@ -1114,6 +1116,14 @@ cacheNoticeNeedsLogin = expired,
             ?: _state.value.gmsCourses.firstOrNull { it.key == old.key }
             ?: old
         openDetail(fresh)
+
+        // 小组件此刻还挂着改前的旧画面：它的重画只在「打开 App / 课程边界闹钟」两处
+        // 定时发生，而用户刚编辑完就去桌面是最常见的路径 —— 必须在保存点主动推一遍。
+        // 读的数据链路本身经 sessionsOn → withOverrides 是通的，缺的只是这一步刷新。
+        AppGraph.appContextOrNull()?.let { ctx ->
+            runCatching { Widgets.refreshAll(ctx) }
+                .onFailure { Log.w("ScheduleViewModel", "编辑显示后刷新小组件失败", it) }
+        }
     }
 
     /** 课程总览用的排序（按课程名） */

@@ -422,7 +422,12 @@ object WidgetSchedule {
      * + 上下内边距 12 ≈ 56（issue #6：长班级名换行而不是省略，行高随之抬高；
      * 短课名的行被 minHeight 撑到同一高度，内容竖直居中不受影响）。
      */
-    const val COURSE_ROW_HEIGHT_DP = 56
+    /**
+     * 单行课行的**基准**高度。⚠️ 别随意加这个数：columnRows 是用它去除画布算"能画几行"，
+     * 加大会直接让矮盒子的小组件从两节课变一节（0.32.5 曾把 46 改成 56，用户 4×2 组件
+     * 立刻少了一行课）。字号分档已有 rowFontSizes 管字，行高留给行数才是正解。
+     */
+    const val COURSE_ROW_HEIGHT_DP = 46
 
     /**
      * 撑高的上限（相对不撑时的自然高度）。
@@ -455,7 +460,9 @@ object WidgetSchedule {
         if (heightDp <= 0 || rowCount <= 0) return 0
         val area = heightDp - chromeDp - (rowCount - 1) - SLACK_DP
         val fit = area / rowCount
-        return fit.coerceIn(COURSE_ROW_HEIGHT_DP, COURSE_ROW_HEIGHT_DP + MAX_STRETCH_DP)
+        // 温和撑高；行数画不下时**允许往下压**（最低 34dp，仍够 12/11sp 小字），
+        // 而不是咬牙维持基准高把最后一行顶出画布裁掉。
+        return fit.coerceIn(34, COURSE_ROW_HEIGHT_DP + MAX_STRETCH_DP)
     }
 
     /** 一列最多放几行课（4×2 实测 342×195 → 2 行） */

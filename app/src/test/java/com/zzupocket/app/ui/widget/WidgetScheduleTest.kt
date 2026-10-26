@@ -441,14 +441,24 @@ class WidgetScheduleTest {
 
     @Test
     fun `行高按可用高度撑_但只温和撑且留余量`() {
-        // 195dp、2 行：可用 = 195-66-1-10(余量) = 118 → 每行 59dp（自然 56，撑 3）
-        assertEquals(59, WidgetSchedule.courseRowHeightDp(195, 2))
+        // 195dp、2 行：可用 = 195-66-1-10(余量) = 118 → 每行 59dp，封顶 46+12=58
+        assertEquals(58, WidgetSchedule.courseRowHeightDp(195, 2))
         // 只有 1 行时封顶 +12（不然是一个巨大的空框里飘一行字）
-        assertEquals(68, WidgetSchedule.courseRowHeightDp(195, 1))
-        // 盒子很小：不低于内容高度
-        assertEquals(WidgetSchedule.COURSE_ROW_HEIGHT_DP, WidgetSchedule.courseRowHeightDp(110, 1))
+        assertEquals(58, WidgetSchedule.courseRowHeightDp(195, 1))
+        // 盒子很小：**允许压缩到 34dp** 而不是顶着基准高裁掉内容
+        // （0.32.5 的教训：行高不可压时，矮盒子组件直接少画一行课）
+        assertEquals(34, WidgetSchedule.courseRowHeightDp(110, 1))
         // 不知道盒子多大时不撑
         assertEquals(0, WidgetSchedule.courseRowHeightDp(0, 2))
+    }
+
+    @Test
+    fun `矮画布仍能放下两行课`() {
+        // 回归背景：0.32.5 曾把基准行高 46 提到 56，160dp 高的 4×2 槽位
+        // 从两节课变一节课（用户实测）。46 的基准下 160dp 仍是两行。
+        assertEquals(2, WidgetSchedule.columnRows(160))
+        // 行数被 columnRows 允许但单行压不下时，行高要跟着压
+        assertEquals(34, WidgetSchedule.courseRowHeightDp(112, 2))
     }
 
     @Test
