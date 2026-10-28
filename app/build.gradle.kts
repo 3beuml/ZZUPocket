@@ -28,12 +28,12 @@ android {
         applicationId = "com.zzupocket.app"
         minSdk = 31
         targetSdk = 36
-        versionCode = 98
+        versionCode = 99
         // 版本号不带 -P6 那种阶段后缀（阶段划分是 docs 的事）；预发行用标准 rc 标记（如 0.33.0-rc1），
         // AppUpdate.compareVersions 对它有专门规则：rc < 同号正式版，正式版发布后已装 rc 的用户能看到红点。
         // ⚠️ 升级判断只认 versionCode（Android 的规则），versionName 是给人看的；
         // 所以改名号（哪怕是"变小"的数字）都不会影响覆盖安装，每次发版 versionCode 必须 +1。
-        versionName = "0.33.2-rc1"
+        versionName = "0.33.2"
     }
 
     signingConfigs {
