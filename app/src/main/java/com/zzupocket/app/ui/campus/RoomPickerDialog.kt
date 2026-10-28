@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -400,6 +402,16 @@ private fun RoomStep(
     }
 }
 
+/**
+ * 确认页。
+ *
+ * ⚠️ 空调户芯片**必须用 FlowRow**，不能用单行 Row：荷园那种一间 3–4 个空调户，
+ * 「3013（第 3 户）」这类标签在一行里装不下 —— 单行 Row 会把放不下的那颗芯片
+ * 压成零宽：肉眼看不见，却仍留着“最小可点目标”，用户在空白处误点一下就选中了
+ * 第 3 户（用户报障：明明写着 3 个空调户却只显示两个，就是这个）。FlowRow 放
+ * 不下会换行，几颗都看得见、点得准。
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ConfirmStep(
     building: RoomBuilding,
@@ -442,7 +454,10 @@ private fun ConfirmStep(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
                     acNumbers.forEachIndexed { i, n ->
                         val selected = acChoice == n
                         FilterChip(
