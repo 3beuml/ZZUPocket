@@ -592,7 +592,7 @@ class WidgetScheduleTest {
     private val wednesday = java.time.LocalDate.of(2026, 11, 4)   // 周三
 
     @Test
-    fun `周课表_列决策_周末有课才加列`() {
+    fun `周课表_恒显七列_今天列高亮`() {
         val plan = WidgetSchedule.weekPlan(
             hasSchedule = true,
             week = 8,
@@ -603,12 +603,16 @@ class WidgetScheduleTest {
             ),
             today = wednesday,
         )
-        // 周一..周五恒显示，周日没课不加，周六有课要加 → 6 列
-        assertEquals(6, plan.columns.size)
-        assertEquals(listOf("一 11.2", "二 11.3", "今 11.4", "四 11.5", "五 11.6", "六 11.7"), plan.columns.map { it.header })
+        // 2026-11-01 用户反馈：周末没课也要"看得见周末" → 恒显 7 列
+        assertEquals(7, plan.columns.size)
+        assertEquals(
+            listOf("一 11.2", "二 11.3", "今 11.4", "四 11.5", "五 11.6", "六 11.7", "日 11.8"),
+            plan.columns.map { it.header },
+        )
         assertTrue(plan.columns[2].isToday)
         assertFalse(plan.columns[0].isToday)
-        // 第 8 周
+        // 周日没课：列在、格子全空
+        assertTrue(plan.columns[6].cells.all { it == null })
         assertEquals("第 8 周", plan.week)
     }
 
@@ -690,17 +694,21 @@ class WidgetScheduleTest {
         assertEquals(120, WidgetSchedule.weekRowHeightDp(900, 2))
         // 不知道尺寸按 0（渲染走自然高）
         assertEquals(0, WidgetSchedule.weekRowHeightDp(0, 5))
-        // 字号：单列 62dp 用 11dp，52 用 10，45 用 9
+        // 字号：单列 62dp 用 11dp，52 用 10，43（7 列）用 9
         assertEquals(11, WidgetSchedule.weekNameSizeDp(62))
         assertEquals(10, WidgetSchedule.weekNameSizeDp(52))
-        assertEquals(9, WidgetSchedule.weekNameSizeDp(45))
-        // 宽列高行：名字+地点+时间全显示；矮行只留时间
+        assertEquals(9, WidgetSchedule.weekNameSizeDp(43))
+        // 宽列（5 列模式）高行：名字+地点+时间全显示
         assertTrue(WidgetSchedule.weekShowPlace(62, 77))
-        assertTrue(WidgetSchedule.weekShowTime(77))
-        assertFalse(WidgetSchedule.weekShowPlace(62, 40))
-        assertTrue(WidgetSchedule.weekShowTime(40))
-        assertFalse(WidgetSchedule.weekShowTime(30))
-        // 名字行数：77dp 高、显示地点+时间后还能 3 行封顶
+        assertTrue(WidgetSchedule.weekShowTime(62, 77))
+        // 7 列窄格（~43dp）：地点/时间都放不下，自动隐藏（课名多行顶上）
+        assertFalse(WidgetSchedule.weekShowPlace(43, 77))
+        assertFalse(WidgetSchedule.weekShowTime(43, 77))
+        // 行高不够时时间先隐
+        assertFalse(WidgetSchedule.weekShowTime(62, 30))
+        assertTrue(WidgetSchedule.weekShowTime(62, 40))
+        // 名字行数：77dp 高、7 列窄格（无地点时间）能放 4 行封顶；5 列宽格扣掉地点时间后 3 行
+        assertEquals(4, WidgetSchedule.weekNameMaxLines(43, 77))
         assertEquals(3, WidgetSchedule.weekNameMaxLines(62, 77))
         assertEquals(1, WidgetSchedule.weekNameMaxLines(62, 30))
     }

@@ -377,8 +377,9 @@ object WidgetSchedule {
      * 「周课表」的内容（纯函数）。
      *
      * 口径：
-     *  - **列**：周一..周五恒显示；周六/日**有课才加列**（列宽 62dp 是可读下限，
-     *    7 列全排会把课名挤成两三个字——用户拍板的取舍：通用适配优先）。
+     *  - **列**：周一..周日**恒显示 7 列**（2026-11-01 用户反馈：周末没课也要"看得见周末"，
+     *    "有课才加列"的旧口径让人以为组件只会五天）。7 列下单列 ~43dp，自动切紧凑渲染
+     *    （课名多行、地点/时间按宽度行高显隐，见 weekShowPlace/weekShowTime）。
      *  - **行**：节次槽 = 本周**实际出现过的起始节次**去重排序（只有 5 个大节有课就 5 行，
      *    不为空节次浪费高度；调休之类的乱序自动正确）。
      *  - 跨节次的课占 [WidgetWeekCell.slotSpan] 个槽，被它盖住的槽在列里是 null。
@@ -400,7 +401,7 @@ object WidgetSchedule {
             )
         }
 
-        val weekdays = (1..7).filter { it <= 5 || !coursesByDay[it].isNullOrEmpty() }
+        val weekdays = (1..7).toList()
         val slots = coursesByDay.values.flatten().map { it.startUnit }.distinct().sorted()
         val slotIndex = slots.withIndex().associate { (i, u) -> u to i }
         val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
@@ -452,7 +453,7 @@ object WidgetSchedule {
         return ((heightDp - WEEK_CHROME_DP) / slotCount).coerceIn(30, 120)
     }
 
-    /** 课名字号按列宽分档：≥62dp 用 11dp，52~61 用 10dp，更窄 9dp（4×2 实测单列 62dp 起） */
+    /** 课名字号按列宽分档：≥62dp 用 11dp，52~61 用 10dp，42~51 用 9dp，更窄也是 9dp（7 列下限） */
     fun weekNameSizeDp(columnWidthDp: Int): Int = when {
         columnWidthDp <= 0 -> 11
         columnWidthDp >= 62 -> 11
@@ -460,21 +461,22 @@ object WidgetSchedule {
         else -> 9
     }
 
-    /** 地点行：列宽和行高都够才显示（格子是寸土寸金的地方） */
+    /** 地点行：列宽和行高都够才显示（7 列 ~43dp 放不下，自动隐藏） */
     fun weekShowPlace(columnWidthDp: Int, rowHeightDp: Int): Boolean =
-        columnWidthDp >= 56 && rowHeightDp >= 56
+        columnWidthDp >= 54 && rowHeightDp >= 56
 
-    /** 时间行：行高够一行小字就显示（时间比地点重要——知道现在该在几教） */
-    fun weekShowTime(rowHeightDp: Int): Boolean = rowHeightDp >= 38
+    /** 时间行：行高够一行小字、且列宽装得下 "10:10-11:50"（≥52dp），否则隐藏 */
+    fun weekShowTime(columnWidthDp: Int, rowHeightDp: Int): Boolean =
+        rowHeightDp >= 38 && columnWidthDp >= 52
 
-    /** 课名最多几行：行高在扣掉地点/时间后还能放几行 11dp 字（至少 1，至多 3） */
+    /** 课名最多几行：行高在扣掉地点/时间后还能放几行（至少 1，至多 4——7 列窄格靠行数补） */
     fun weekNameMaxLines(columnWidthDp: Int, rowHeightDp: Int): Int {
-        if (rowHeightDp <= 0) return 2
+        if (rowHeightDp <= 0) return 3
         var budget = rowHeightDp - 8   // 上下内边距
-        if (weekShowTime(rowHeightDp)) budget -= 13
+        if (weekShowTime(columnWidthDp, rowHeightDp)) budget -= 13
         if (weekShowPlace(columnWidthDp, rowHeightDp)) budget -= 13
         val lineH = weekNameSizeDp(columnWidthDp) + 3
-        return (budget / lineH).coerceIn(1, 3)
+        return (budget / lineH).coerceIn(1, 4)
     }
 
     // ── 2×2：一节课大字 + 圆气泡 + 一行预告 ──────────────────────────────

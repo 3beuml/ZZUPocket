@@ -138,7 +138,7 @@ class WeekClassesWidget : AppWidgetProvider() {
             val nameDp = WidgetSchedule.weekNameSizeDp(columnWidthDp)
             val nameLines = WidgetSchedule.weekNameMaxLines(columnWidthDp, rowHeightDp)
             val showPlace = WidgetSchedule.weekShowPlace(columnWidthDp, rowHeightDp)
-            val showTime = WidgetSchedule.weekShowTime(rowHeightDp)
+            val showTime = WidgetSchedule.weekShowTime(columnWidthDp, rowHeightDp)
 
             rv.removeAllViews(R.id.week_columns)
             plan.columns.forEach { column ->

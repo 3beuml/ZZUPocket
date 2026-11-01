@@ -10,7 +10,7 @@
     <string name="widget_today_classes">今明课表</string>
     <string name="widget_today_classes_desc">左边今天、右边明天，各列出两节课：课名、地点、时间段</string>
     <string name="widget_week_classes">一周课表</string>
-    <string name="widget_week_classes_desc">按节次对齐的一周课表：周一到周五每天一列（周末有课才加列），跨节的课一格占多行</string>
+    <string name="widget_week_classes_desc">按节次对齐的一周课表：周一到周日 7 列（周末没课也显示），跨节的课一格占多行</string>
     <string name="widget_energy_card">电量与校园卡</string>
     <string name="widget_energy_card_desc">左边宿舍照明/空调余额与可用天数，右边校园卡余额与本周消费</string>
 
