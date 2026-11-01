@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「一周课表」组件布局（目标 4×5，实测画布 342×~443dp；被拉到 4×6 也照常自适应）。
+
+  结构：卡片 [ 右上角周次 | 一天一列（列 = 列头 + 节次行） ]，列和格子全部
+  由 App 在渲染时 addView 进来（节次槽数、列数都按当周数据与实测画布算）。
+
+  ┌───────────────────────────────────────────────────────┐
+  │                                              第 8 周    │
+  │  一 11.2    二 11.3    三 11.4    四 11.5    五 11.6     │
+  │ ▌高数      ▌大物       （空）     ▌编译      ▌线代       │
+  │  南2 206    南3 101              南4 103    南1 302     │
+  │  8:00-9:40  10:00-…              10:10-…    14:00-…    │
+  │ ▌体育      （空）     ▌英语      （空）     ▌大物实验   │
+  │  ……（按节次槽对齐，跨节的课一格占多行）                   │
+  └───────────────────────────────────────────────────────┘
+
+  · 周六/日**有课才加列**（7 列全排课名只剩两三个字）；列头「今」= 今天那列。
+  · 假期 / 还没同步课表 → container_overlay 整块盖住（与 4×2 同款）。
+  · ⚠️ RemoteViews 硬限制见 widget_today_classes.xml 注释；可见性每次渲染显式写全。
+-->
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_pad">
+
+        <!-- 右上角「第 N 周」 -->
+        <TextView
+            android:id="@+id/week"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_week"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="@dimen/widget_week" />
+
+        <!-- 一天一列，运行时 addView(widget_week_column) -->
+        <LinearLayout
+            android:id="@+id/week_columns"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_marginTop="@dimen/widget_gap_xs"
+            android:baselineAligned="false"
+            android:orientation="horizontal" />
+    </LinearLayout>
+
+    <!-- 假期 / 未同步：整块盖住内容 -->
+    <LinearLayout
+        android:id="@+id/container_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bg"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="@dimen/widget_pad"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/overlay_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:includeFontPadding="false"
+            android:text="@string/widget_preview_vacation"
+            android:textColor="@color/widget_text"
+            android:textSize="18dp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/overlay_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_gap"
+            android:includeFontPadding="false"
+            android:text="@string/widget_preview_vacation_msg"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="13dp" />
+    </LinearLayout>
+</RelativeLayout>

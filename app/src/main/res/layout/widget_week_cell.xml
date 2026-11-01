@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「一周课表」的一个节次格（有课）/ 空槽占位（隐藏文字、仅占高）。
+
+      ▌高等数学A      ← 课名，可 2~3 行（行高与列宽决定，见 WidgetSchedule.weekNameMaxLines）
+        南2 206        ← 地点（列宽/行高不够就隐藏）
+        8:00-9:40      ← 时间段（行高不够就隐藏；比地点优先级高）
+
+  · 格子高度由 App 渲染时用 setViewLayoutHeight 精确设置（rowH × slotSpan），
+    空槽占位同款设高 —— 各列的节次行线才能对齐。
+  · 跨节次的课：同一格放高，不加第二个格子。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/week_cell_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="2dp"
+    android:paddingTop="3dp"
+    android:paddingEnd="2dp"
+    android:paddingBottom="3dp">
+
+    <TextView
+        android:id="@+id/week_cell_bar"
+        android:layout_width="2dp"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_bar" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/week_cell_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="2"
+            android:text="@string/widget_preview_class1_name"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_row_name"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/week_cell_place"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_place"
+            android:textColor="@color/widget_text_hint"
+            android:textSize="@dimen/widget_row_sub" />
+
+        <TextView
+            android:id="@+id/week_cell_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_range"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="9.5dp" />
+    </LinearLayout>
+</LinearLayout>

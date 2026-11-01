@@ -69,6 +69,20 @@
                 android:resource="@xml/today_classes_widget_info" />
         </receiver>
 
+        <!-- 一周课表 4×5：按节次对齐、一天一列；列决策/行高/字号全按实测画布自适应
+             （4×2 与它同读一仹本地课表，口径在 WidgetSchedule 纯函数里对齐） -->
+        <receiver
+            android:name=".ui.widget.WeekClassesWidget"
+            android:exported="false"
+            android:label="@string/widget_week_classes">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/week_classes_widget_info" />
+        </receiver>
+
         <!-- 电量 + 校园卡余额合成一个 4×2：数字右对齐独占整行，只读本地
              （校园卡余额读的是 App 查完存下的缓存 —— 组件不许联网） -->
         <receiver

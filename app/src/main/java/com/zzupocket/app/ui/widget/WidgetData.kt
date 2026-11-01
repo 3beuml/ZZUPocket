@@ -152,6 +152,55 @@ object WidgetData {
         )
     }
 
+    /** 「周课表」组件要用的数据：本周每天一列（周一..周日），只读本地 */
+    data class WidgetWeekBundle(
+        /** 库里到底有没有课表数据（区分"假期"和"还没同步过课表"） */
+        val hasSchedule: Boolean,
+        /** 本周是第几教学周；假期/学期外为 null */
+        val week: Int?,
+        /** 周一..周日（1..7）各自的课（已按节次排序） */
+        val coursesByDay: Map<Int, List<WidgetCourse>>,
+        /** 今天（决定"今"列头与高亮） */
+        val today: LocalDate,
+    ) {
+        fun weekPlan(): WidgetSchedule.WidgetWeekPlan = WidgetSchedule.weekPlan(
+            hasSchedule = hasSchedule,
+            week = week,
+            coursesByDay = coursesByDay,
+            today = today,
+        )
+    }
+
+    /**
+     * 「周课表」组件要用的数据。
+     *
+     * ⚠️ 七天各查一次库——**只读本地**（组件铁律不变），courseSessionDao 有内存外的主键索引，
+     * 7 次 bySemester 全量扫描的代价在桌面刷新场景可以忽略（几十毫秒级）。
+     * 周一取自今天的 ISO 周（`previousOrSame(MONDAY)`，与教务 weekday 1..7 口径一致）。
+     */
+    suspend fun loadWeekSchedule(): WidgetWeekBundle {
+        val repo = AppGraph.scheduleRepository
+        val prefsStore = AppGraph.uiPrefsStore
+        val today = LocalDate.now()
+        val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
+        val hasSchedule = com.zzupocket.app.data.repo.TodayTimetable
+            .hasAnySchedule(repo, prefsStore)
+        val periods = repo.periods()
+        val coursesByDay = (1..7).associateWith { day ->
+            val date = monday.plusDays((day - 1).toLong())
+            com.zzupocket.app.data.repo.TodayTimetable
+                .sessionsOn(repo, prefsStore, date)
+                .mapNotNull { WidgetSchedule.toCourse(it, periods) }
+                .sortedBy { it.startUnit }
+        }
+        return WidgetWeekBundle(
+            hasSchedule = hasSchedule,
+            week = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(repo, prefsStore, today),
+            coursesByDay = coursesByDay,
+            today = today,
+        )
+    }
+
     /**
      * 电量、可用天数与校园卡余额/消费。
      *

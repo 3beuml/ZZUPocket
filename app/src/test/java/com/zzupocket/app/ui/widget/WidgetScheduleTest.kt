@@ -3,6 +3,7 @@ package com.zzupocket.app.ui.widget
 import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.Session
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -572,5 +573,135 @@ class WidgetScheduleTest {
     fun `异常作息不会定出很远的闹钟`() {
         val at = WidgetSchedule.nextBoundaryMillis(listOf(course(23 * 60, 23 * 60 + 45)), 60, 0L)
         assertEquals(6 * 60 * 60_000L, at)
+    }
+
+    // ── 4×5 周课表 ──────────────────────────────────────────────────────
+
+    /** 带节次的课（周课表按 startUnit 对齐） */
+    private fun unitCourse(
+        startUnit: Int,
+        endUnit: Int,
+        name: String = "课",
+        code: String = "C1",
+    ) = WidgetCourse(
+        code = code, name = name, place = "南2 206",
+        startMin = 480 + startUnit * 60, endMin = 480 + endUnit * 60,
+        startUnit = startUnit, endUnit = endUnit,
+    )
+
+    private val wednesday = java.time.LocalDate.of(2026, 11, 4)   // 周三
+
+    @Test
+    fun `周课表_列决策_周末有课才加列`() {
+        val plan = WidgetSchedule.weekPlan(
+            hasSchedule = true,
+            week = 8,
+            coursesByDay = mapOf(
+                1 to listOf(unitCourse(1, 2)),
+                3 to listOf(unitCourse(3, 4)),
+                6 to listOf(unitCourse(5, 6, "周六课")),
+            ),
+            today = wednesday,
+        )
+        // 周一..周五恒显示，周日没课不加，周六有课要加 → 6 列
+        assertEquals(6, plan.columns.size)
+        assertEquals(listOf("一 11.2", "二 11.3", "今 11.4", "四 11.5", "五 11.6", "六 11.7"), plan.columns.map { it.header })
+        assertTrue(plan.columns[2].isToday)
+        assertFalse(plan.columns[0].isToday)
+        // 第 8 周
+        assertEquals("第 8 周", plan.week)
+    }
+
+    @Test
+    fun `周课表_节次槽按本周实际出现的起始节次收敛`() {
+        val plan = WidgetSchedule.weekPlan(
+            hasSchedule = true,
+            week = 8,
+            // 1-2 和 3-4 两个大节 → 全周只有 2 个槽（5/6/7…节没课不浪费行高）
+            coursesByDay = mapOf(
+                1 to listOf(unitCourse(1, 2, "上午课")),
+                2 to listOf(unitCourse(3, 4, "下午课")),
+            ),
+            today = wednesday,
+        )
+        assertEquals(2, plan.slotCount)
+        val monday = plan.columns[0].cells
+        assertEquals("上午课", monday[0]?.name)
+        assertEquals(1, monday[0]?.slotSpan)     // 1-2 只覆盖槽 1
+        assertNull(monday[1])                     // 周一第 2 槽（3 节）没课
+        val tuesday = plan.columns[1].cells
+        assertNull(tuesday[0])                    // 周二第 1 槽（1 节）没课
+        assertEquals("下午课", tuesday[1]?.name)
+        assertEquals(1, tuesday[1]?.slotSpan)     // 3-4 只覆盖槽 3
+    }
+
+    @Test
+    fun `周课表_跨节的课占多行_被盖住的槽留空`() {
+        val plan = WidgetSchedule.weekPlan(
+            hasSchedule = true,
+            week = 8,
+            coursesByDay = mapOf(
+                // 1-4 连上；另一天 3-4 和 5-6
+                1 to listOf(unitCourse(1, 4, "连堂课")),
+                2 to listOf(unitCourse(3, 4), unitCourse(5, 6)),
+            ),
+            today = wednesday,
+        )
+        // 槽 = [1, 3, 5]
+        assertEquals(3, plan.slotCount)
+        val monday = plan.columns[0].cells
+        assertEquals("连堂课", monday[0]?.name)
+        assertEquals(2, monday[0]?.slotSpan)   // 1-4 覆盖槽 1、3（5 节不在范围内）
+        assertNull(monday[1])                   // 被连堂格覆盖
+        assertNull(monday[2])                   // 5 节的槽，连堂课没到、周一也没别的课
+        val tuesday = plan.columns[1].cells
+        assertNull(tuesday[0])
+        assertEquals(1, tuesday[1]?.slotSpan)   // 3-4 占槽 3 一格
+        assertEquals(1, tuesday[2]?.slotSpan)   // 5-6 占槽 5 一格
+    }
+
+    @Test
+    fun `周课表_同列同槽撞车先到先得`() {
+        val plan = WidgetSchedule.weekPlan(
+            hasSchedule = true,
+            week = 8,
+            coursesByDay = mapOf(
+                1 to listOf(unitCourse(1, 2, "先到的课", "A"), unitCourse(1, 2, "后到的课", "B")),
+            ),
+            today = wednesday,
+        )
+        assertEquals("先到的课", plan.columns[0].cells[0]?.name)
+    }
+
+    @Test
+    fun `周课表_未同步与假期走整块状态`() {
+        val p1 = WidgetSchedule.weekPlan(hasSchedule = false, week = 8, coursesByDay = emptyMap(), today = wednesday)
+        assertEquals("还没有课表数据", p1.overlayTitle)
+        val p2 = WidgetSchedule.weekPlan(hasSchedule = true, week = null, coursesByDay = emptyMap(), today = wednesday)
+        assertEquals("假期中", p2.overlayTitle)
+        assertTrue(p2.hasOverlay)
+    }
+
+    @Test
+    fun `周课表_行高与可见性分档`() {
+        // 4×5 实测 ~443dp、5 槽：可用 (443-54)/5 ≈ 77dp
+        assertEquals(77, WidgetSchedule.weekRowHeightDp(443, 5))
+        // 上限 120
+        assertEquals(120, WidgetSchedule.weekRowHeightDp(900, 2))
+        // 不知道尺寸按 0（渲染走自然高）
+        assertEquals(0, WidgetSchedule.weekRowHeightDp(0, 5))
+        // 字号：单列 62dp 用 11dp，52 用 10，45 用 9
+        assertEquals(11, WidgetSchedule.weekNameSizeDp(62))
+        assertEquals(10, WidgetSchedule.weekNameSizeDp(52))
+        assertEquals(9, WidgetSchedule.weekNameSizeDp(45))
+        // 宽列高行：名字+地点+时间全显示；矮行只留时间
+        assertTrue(WidgetSchedule.weekShowPlace(62, 77))
+        assertTrue(WidgetSchedule.weekShowTime(77))
+        assertFalse(WidgetSchedule.weekShowPlace(62, 40))
+        assertTrue(WidgetSchedule.weekShowTime(40))
+        assertFalse(WidgetSchedule.weekShowTime(30))
+        // 名字行数：77dp 高、显示地点+时间后还能 3 行封顶
+        assertEquals(3, WidgetSchedule.weekNameMaxLines(62, 77))
+        assertEquals(1, WidgetSchedule.weekNameMaxLines(62, 30))
     }
 }

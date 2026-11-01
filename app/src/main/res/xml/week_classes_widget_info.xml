@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「一周课表」组件声明（目标 4×5）。
+
+  ## 尺寸为什么写 340×440dp（同 4×2 的"目标机实测优先"取舍，见 today_classes_widget_info.xml）
+  目标真机（MEIZU 21 Note）启动器：每格 68×71.4dp、缝 21.5dp →
+  4 列 = 336.6dp；5 行 = 71.4×5 + 缝×4 ≈ 443dp。按官方老公式（70×5−30=320dp）
+  在这台机器上只会给 4 行 —— 一周 5 个大节装不下。所以 minWidth/minHeight 按实测声明。
+
+  4 列宽在 4 列网格的启动器（如本机）与 5 列网格的启动器上都放得下 —— 通用性最好；
+  5 列宽的声明直接排除（本机加不上）。
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_week_classes_desc"
+    android:initialLayout="@layout/widget_loading"
+    android:maxResizeHeight="590dp"
+    android:maxResizeWidth="340dp"
+    android:minHeight="440dp"
+    android:minResizeHeight="350dp"
+    android:minResizeWidth="250dp"
+    android:minWidth="340dp"
+    android:previewLayout="@layout/widget_week_classes"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="5"
+    android:targetCellWidth="4"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen" />

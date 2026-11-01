@@ -18,6 +18,10 @@ data class WidgetCourse(
     val place: String,
     val startMin: Int,
     val endMin: Int,
+    /** 起始大节（1..10）——周课表组件按它对齐节次行；0 = 未知（旧调用点） */
+    val startUnit: Int = 0,
+    /** 结束大节；0 = 未知 */
+    val endUnit: Int = 0,
 ) {
     /** "10:00" */
     val startText: String get() = WidgetSchedule.clock(startMin)
@@ -190,6 +194,8 @@ object WidgetSchedule {
             place = ScheduleText.tidyPlace(session.roomText ?: session.campusText).orEmpty(),
             startMin = start,
             endMin = end,
+            startUnit = session.startUnit,
+            endUnit = session.endUnit,
         )
     }
 
@@ -330,6 +336,145 @@ object WidgetSchedule {
                 emptyText = if (tomorrow.isEmpty()) "无课程" else "",
             ),
         )
+    }
+
+    // ── 4×5（周课表）：按节次对齐的一周网格 ─────────────────────────────
+
+    /** 周课表的一个格子（跨节次的课占 [slotSpan] 个槽） */
+    data class WidgetWeekCell(
+        /** 行槽索引（0 起，对应 [WidgetWeekPlan] 的节次槽） */
+        val slot: Int,
+        val slotSpan: Int,
+        val name: String,
+        val place: String,
+        val code: String,
+        val timeRange: String,
+    )
+
+    /** 周课表的一列（一天）。[cells] 与节次槽一一对应；null = 空槽（画占位对齐用） */
+    data class WidgetWeekColumn(
+        /** 「一 11.2」/「今 11.1」 */
+        val header: String,
+        val isToday: Boolean,
+        val cells: List<WidgetWeekCell?>,
+    )
+
+    /** 「周课表」的全部内容：右上角周次 + 一天一列 */
+    data class WidgetWeekPlan(
+        /** 「第 8 周」；空串 = 不显示 */
+        val week: String,
+        val columns: List<WidgetWeekColumn>,
+        val overlayTitle: String = "",
+        val overlayMessage: String = "",
+    ) {
+        val hasOverlay: Boolean get() = overlayTitle.isNotBlank()
+
+        /** 出现过的节次槽总数（渲染时算行高用） */
+        val slotCount: Int get() = columns.maxOfOrNull { it.cells.size } ?: 0
+    }
+
+    /**
+     * 「周课表」的内容（纯函数）。
+     *
+     * 口径：
+     *  - **列**：周一..周五恒显示；周六/日**有课才加列**（列宽 62dp 是可读下限，
+     *    7 列全排会把课名挤成两三个字——用户拍板的取舍：通用适配优先）。
+     *  - **行**：节次槽 = 本周**实际出现过的起始节次**去重排序（只有 5 个大节有课就 5 行，
+     *    不为空节次浪费高度；调休之类的乱序自动正确）。
+     *  - 跨节次的课占 [WidgetWeekCell.slotSpan] 个槽，被它盖住的槽在列里是 null。
+     *  - 同列同槽撞车（自定义日程叠加）：**先到的赢**，后来的丢弃 —— 网格放不下两门。
+     */
+    fun weekPlan(
+        hasSchedule: Boolean,
+        week: Int?,
+        coursesByDay: Map<Int, List<WidgetCourse>>,
+        today: LocalDate,
+    ): WidgetWeekPlan {
+        if (!hasSchedule || week == null) {
+            val st = if (!hasSchedule) WidgetCourseState.NOT_SYNCED else WidgetCourseState.VACATION
+            return WidgetWeekPlan(
+                week = "",
+                columns = emptyList(),
+                overlayTitle = statusTitle(st),
+                overlayMessage = statusMessage(st),
+            )
+        }
+
+        val weekdays = (1..7).filter { it <= 5 || !coursesByDay[it].isNullOrEmpty() }
+        val slots = coursesByDay.values.flatten().map { it.startUnit }.distinct().sorted()
+        val slotIndex = slots.withIndex().associate { (i, u) -> u to i }
+        val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
+
+        val columns = weekdays.map { day ->
+            val courses = coursesByDay[day].orEmpty().sortedBy { it.startUnit }
+            val cells = arrayOfNulls<WidgetWeekCell>(slots.size)
+            courses.forEach { c ->
+                val idx = slotIndex[c.startUnit] ?: return@forEach
+                if (cells[idx] != null) return@forEach   // 撞车：先到先得
+                val span = slots.count { it >= c.startUnit && it <= c.endUnit }
+                    .coerceIn(1, slots.size - idx)
+                cells[idx] = WidgetWeekCell(
+                    slot = idx,
+                    slotSpan = span,
+                    name = c.name,
+                    place = c.place,
+                    code = c.code,
+                    timeRange = c.rangeText,
+                )
+            }
+            val date = monday.plusDays((day - 1).toLong())
+            val prefix = if (day == today.dayOfWeek.value) "今" else WEEKDAY_SHORT.getOrElse(day - 1) { "?" }
+            WidgetWeekColumn(
+                header = "$prefix ${date.monthValue}.${date.dayOfMonth}",
+                isToday = day == today.dayOfWeek.value,
+                cells = cells.toList(),
+            )
+        }
+
+        return WidgetWeekPlan(week = weekLabel(week), columns = columns)
+    }
+
+    /** 「一」「二」…「日」（周课表列头用单字，列宽寸土寸金） */
+    private val WEEKDAY_SHORT = listOf("一", "二", "三", "四", "五", "六", "日")
+
+    /**
+     * 周课表固定开销：卡片内边距 20（10×2，与 4×2 同款 RemoteViews 覆盖）+ 周次 13 +
+     * 间距 2 + 列头 15 + 列头下 4。**宁可多记**。
+     */
+    private const val WEEK_CHROME_DP = 54
+
+    /**
+     * 节次行高：可用高度 ÷ 槽数。上限 120dp（盒子特别高时别让一行字飘在巨大空框里）。
+     * @return 0 = 不知道盒子多大，渲染时按自然高走
+     */
+    fun weekRowHeightDp(heightDp: Int, slotCount: Int): Int {
+        if (heightDp <= 0 || slotCount <= 0) return 0
+        return ((heightDp - WEEK_CHROME_DP) / slotCount).coerceIn(30, 120)
+    }
+
+    /** 课名字号按列宽分档：≥62dp 用 11dp，52~61 用 10dp，更窄 9dp（4×2 实测单列 62dp 起） */
+    fun weekNameSizeDp(columnWidthDp: Int): Int = when {
+        columnWidthDp <= 0 -> 11
+        columnWidthDp >= 62 -> 11
+        columnWidthDp >= 52 -> 10
+        else -> 9
+    }
+
+    /** 地点行：列宽和行高都够才显示（格子是寸土寸金的地方） */
+    fun weekShowPlace(columnWidthDp: Int, rowHeightDp: Int): Boolean =
+        columnWidthDp >= 56 && rowHeightDp >= 56
+
+    /** 时间行：行高够一行小字就显示（时间比地点重要——知道现在该在几教） */
+    fun weekShowTime(rowHeightDp: Int): Boolean = rowHeightDp >= 38
+
+    /** 课名最多几行：行高在扣掉地点/时间后还能放几行 11dp 字（至少 1，至多 3） */
+    fun weekNameMaxLines(columnWidthDp: Int, rowHeightDp: Int): Int {
+        if (rowHeightDp <= 0) return 2
+        var budget = rowHeightDp - 8   // 上下内边距
+        if (weekShowTime(rowHeightDp)) budget -= 13
+        if (weekShowPlace(columnWidthDp, rowHeightDp)) budget -= 13
+        val lineH = weekNameSizeDp(columnWidthDp) + 3
+        return (budget / lineH).coerceIn(1, 3)
     }
 
     // ── 2×2：一节课大字 + 圆气泡 + 一行预告 ──────────────────────────────

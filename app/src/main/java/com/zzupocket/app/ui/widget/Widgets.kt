@@ -47,8 +47,9 @@ object Widgets {
         val mgr = AppWidgetManager.getInstance(appContext) ?: return
         val nextIds = idsOf(appContext, mgr, NextClassWidget::class.java)
         val todayIds = idsOf(appContext, mgr, TodayClassesWidget::class.java)
+        val weekIds = idsOf(appContext, mgr, WeekClassesWidget::class.java)
         val balanceIds = idsOf(appContext, mgr, EnergyCardWidget::class.java)
-        if (nextIds.isEmpty() && todayIds.isEmpty() && balanceIds.isEmpty()) return
+        if (nextIds.isEmpty() && todayIds.isEmpty() && weekIds.isEmpty() && balanceIds.isEmpty()) return
 
         withContext(Dispatchers.Default) {
             val prefs = WidgetData.prefs()
@@ -67,6 +68,12 @@ object Widgets {
                     }
                     scheduleNextBoundary(appContext, schedule.nextBoundaryMillis)
                 }
+            }
+
+            if (weekIds.isNotEmpty()) {
+                runCatching { WidgetData.loadWeekSchedule() }
+                    .onSuccess { WeekClassesWidget.render(appContext, mgr, weekIds, it, prefs) }
+                    .onFailure { Log.w(TAG, "读取周课表失败，本轮不刷新该组件", it) }
             }
 
             if (balanceIds.isNotEmpty()) {
