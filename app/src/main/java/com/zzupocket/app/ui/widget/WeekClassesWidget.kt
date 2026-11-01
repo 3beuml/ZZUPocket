@@ -131,7 +131,10 @@ class WeekClassesWidget : AppWidgetProvider() {
             rv.setViewVisibility(R.id.week, if (plan.week.isBlank()) View.GONE else View.VISIBLE)
 
             val rowCount = plan.slotCount
-            val rowHeightDp = WidgetSchedule.weekRowHeightDp(heightDp, rowCount)
+            // 周末明细条出现时行高预算里要给它让位（一行 ~16dp + 容器 4dp）
+            val chromeDp = WidgetSchedule.WEEK_CHROME_DP_FOR_RENDER +
+                (if (plan.weekendLines.isEmpty()) 0 else WidgetSchedule.WEEKEND_STRIP_EXTRA_DP)
+            val rowHeightDp = WidgetSchedule.weekRowHeightDp(heightDp, rowCount, chromeDp)
             val columnWidthDp = if (plan.columns.isEmpty()) 0 else {
                 ((widthDp - 20 - (plan.columns.size - 1) * 4) / plan.columns.size).coerceAtLeast(0)
             }
@@ -145,9 +148,15 @@ class WeekClassesWidget : AppWidgetProvider() {
             rv.removeAllViews(R.id.week_columns)
             plan.columns.forEach { column ->
                 val columnRv = RemoteViews(context.packageName, R.layout.widget_week_column)
-                columnRv.setTextViewText(R.id.week_day_header, column.header)
+                // 列头两行式：大字星期（今天=主题色）+ 小字日期，横向不再挤
+                columnRv.setTextViewText(R.id.week_day_char, column.dayChar)
+                columnRv.setTextViewText(R.id.week_day_date, column.dateText)
                 columnRv.setTextColor(
-                    R.id.week_day_header,
+                    R.id.week_day_char,
+                    if (column.isToday) colors.accent else colors.text,
+                )
+                columnRv.setTextColor(
+                    R.id.week_day_date,
                     if (column.isToday) colors.accent else colors.dim,
                 )
                 columnRv.removeAllViews(R.id.week_cells)
@@ -219,18 +228,14 @@ class WeekClassesWidget : AppWidgetProvider() {
                 rv.addView(R.id.week_columns, columnRv)
             }
 
-            // 周末条（恒显示）：今天那行用主题色、有课用正文色、没课用弱色
+            // 周末明细条：只在周六/日有课（含调休）时出现——补全网格窄格放不下的完整时间段
             rv.removeAllViews(R.id.weekend_strip)
             plan.weekendLines.forEach { line ->
                 val lineRv = RemoteViews(context.packageName, R.layout.widget_week_line)
                 lineRv.setTextViewText(R.id.week_line, line.text)
                 lineRv.setTextColor(
                     R.id.week_line,
-                    when {
-                        line.isToday -> colors.accent
-                        line.hasCourse -> colors.text
-                        else -> colors.dim
-                    },
+                    if (line.isToday) colors.accent else colors.text,
                 )
                 rv.addView(R.id.weekend_strip, lineRv)
             }

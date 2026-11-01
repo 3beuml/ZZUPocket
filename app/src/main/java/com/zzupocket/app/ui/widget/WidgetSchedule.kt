@@ -355,25 +355,31 @@ object WidgetSchedule {
 
     /** 周课表的一列（一天）。[cells] 与节次槽一一对应；null = 空槽（画占位对齐用） */
     data class WidgetWeekColumn(
-        /** 「一 11.2」/「今 11.1」 */
-        val header: String,
+        /** 列头大字：「一」…「日」；今天的列是「今」 */
+        val dayChar: String,
+        /** 列头小字：「11.2」 */
+        val dateText: String,
         val isToday: Boolean,
         val cells: List<WidgetWeekCell?>,
     )
 
-    /** 周末条的一行（一天一行；两天都空时只有一行"六 · 日 无课"） */
+    /** 周末明细条的一行（一天一行，只在该天有课时出现） */
     data class WidgetWeekendLine(
         val text: String,
         val isToday: Boolean,
         val hasCourse: Boolean,
     )
 
-    /** 「周课表」的全部内容：右上角周次 + 周一~周五网格 + 底部周末条 */
+    /** 「周课表」的全部内容：右上角周次 + 周一~周日 7 列 + （有课时的）周末明细条 */
     data class WidgetWeekPlan(
         /** 「第 8 周」；空串 = 不显示 */
         val week: String,
         val columns: List<WidgetWeekColumn>,
-        /** 周末条（恒非空：没课也是一行"六 · 日 无课"——周末要"看得见"） */
+        /**
+         * 周末明细行：**只在周六/日有课（含调休）时出现**——一行
+         * "六 11.7 课名 地点 10:10-11:50"（完整时间段，网格窄格里放不下的部分在这补全）。
+         * 周末没课时为空——7 列空格子本身就是"周末没课"的答案。
+         */
         val weekendLines: List<WidgetWeekendLine>,
         val overlayTitle: String = "",
         val overlayMessage: String = "",
@@ -387,12 +393,12 @@ object WidgetSchedule {
     /**
      * 「周课表」的内容（纯函数）。
      *
-     * 口径（2026-11-01 三轮真机反馈收敛出的最终形态）：
-     *  - **列**：周一..周五恒 5 列（单列 60dp，课名/地点/时间齐全）；
-     *    **周六/日有课（含调休补课）时自动升格为网格列**——6 列（一格 50dp）或 7 列（43dp，
-     *    两天都有课的罕见情形），格子自动切紧凑渲染；周末没课保持 5 列 + 底部条。
-     *  - **周末条**：恒显示。两天都空 → 一行"六 M.d · 日 M.d 无课"；
-     *    有课 → 一天一行"六 M.d 课名 地点 10:10-11:50"（完整时间段在这里，窄格不丢信息）。
+     * 口径（2026-11-01 四轮反馈的最终形态，用户明确要"7 列 + 相关信息"）：
+     *  - **列**：周一..周日**恒 7 列**。单列 ~43dp，紧凑但信息齐全：
+     *    课名（9dp、≤3 行）+ 教室（7.5dp、1 行，超宽省略）+ 开始时刻（7.5dp、1 行）。
+     *    列头两行式（大字星期 + 小字日期），横向不再挤。
+     *  - **周末**：永远在网格里（空格子 = 没课）；有课时底部补一行完整明细
+     *    （完整时间段网格里放不下，不丢信息）。
      *  - **行**：节次槽 = 本周**实际出现过的起始节次**去重排序（空节次不占行高；
      *    调休之类的乱序自动正确）。
      *  - 跨节次的课占 [WidgetWeekCell.slotSpan] 个槽，被它盖住的槽在列里是 null。
@@ -415,9 +421,7 @@ object WidgetSchedule {
             )
         }
 
-        // 周六/日有课才进网格（用户拍板：调休补课要像工作日一样显示；没课不白占宽度）
-        val weekdays = (1..5).toList() +
-            (6..7).filter { !coursesByDay[it].isNullOrEmpty() }
+        val weekdays = (1..7).toList()
         val slots = coursesByDay.values.flatten().map { it.startUnit }.distinct().sorted()
         val slotIndex = slots.withIndex().associate { (i, u) -> u to i }
         val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
@@ -441,46 +445,34 @@ object WidgetSchedule {
                 )
             }
             val date = monday.plusDays((day - 1).toLong())
-            val prefix = if (day == today.dayOfWeek.value) "今" else WEEKDAY_SHORT.getOrElse(day - 1) { "?" }
             WidgetWeekColumn(
-                header = "$prefix ${date.monthValue}.${date.dayOfMonth}",
+                dayChar = if (day == today.dayOfWeek.value) "今" else WEEKDAY_SHORT.getOrElse(day - 1) { "?" },
+                dateText = "${date.monthValue}.${date.dayOfMonth}",
                 isToday = day == today.dayOfWeek.value,
                 cells = cells.toList(),
             )
         }
 
-        // 周末条：两天都空 → 一行合并"六 · 日 无课"；任一天有课 → 一天一行
-        val weekendLines = buildList {
-            val todayIso = today.dayOfWeek.value
-            val sat = coursesByDay[6].orEmpty()
-            val sun = coursesByDay[7].orEmpty()
-            fun dayLine(day: Int, courses: List<WidgetCourse>) {
+        // 周末明细条：只在该天有课时出一行（完整时间段在这补全；没课时条不出现）
+        val weekendLines = (6..7).flatMap { day ->
+            val courses = coursesByDay[day].orEmpty()
+            if (courses.isEmpty()) {
+                emptyList()
+            } else {
                 val date = monday.plusDays((day - 1).toLong())
                 val head = "${WEEKDAY_SHORT[day - 1]} ${date.monthValue}.${date.dayOfMonth}"
-                if (courses.isEmpty()) {
-                    add(WidgetWeekendLine("$head 无课", day == todayIso, false))
-                } else {
-                    val body = courses.joinToString("；") {
-                        listOf(it.name, it.place, it.rangeText)
-                            .filter { s -> s.isNotBlank() }
-                            .joinToString(" ")
-                    }
-                    add(WidgetWeekendLine("$head $body", day == todayIso, true))
+                val body = courses.joinToString("；") {
+                    listOf(it.name, it.place, it.rangeText)
+                        .filter { s -> s.isNotBlank() }
+                        .joinToString(" ")
                 }
-            }
-            if (sat.isEmpty() && sun.isEmpty()) {
-                val s = monday.plusDays(5)
-                val u = monday.plusDays(6)
-                add(
+                listOf(
                     WidgetWeekendLine(
-                        "六 ${s.monthValue}.${s.dayOfMonth} · 日 ${u.monthValue}.${u.dayOfMonth} 无课",
-                        todayIso >= 6,
-                        false,
+                        "$head $body",
+                        day == today.dayOfWeek.value,
+                        true,
                     ),
                 )
-            } else {
-                dayLine(6, sat)
-                dayLine(7, sun)
             }
         }
 
@@ -491,22 +483,26 @@ object WidgetSchedule {
     private val WEEKDAY_SHORT = listOf("一", "二", "三", "四", "五", "六", "日")
 
     /**
-     * 周课表固定开销：卡片内边距 20（10×2，与 4×2 同款 RemoteViews 覆盖）+ 周次 13 +
-     * 间距 2 + 列头 15 + 列头下 4 + **周末条 32**（两行小字 + 间距，恒显示）。
-     * **宁可多记**。
+     * 周课表固定开销（渲染器算行高预算用）：卡片内边距 20（10×2）+ 周次 13 + 间距 2 +
+     * **两行列头 22**（大字星期 13 + 小字日期 9）+ 列头下 4 = 61，记 62。**宁可多记**。
+     * 周末明细条出现时另加 [WEEKEND_STRIP_EXTRA_DP]。
      */
-    private const val WEEK_CHROME_DP = 86
+    const val WEEK_CHROME_DP_FOR_RENDER = 62
+
+    /** 周末明细条一行的高度开销（10.5dp 字 + 间距），外加容器 4dp 上边距一并计入 */
+    const val WEEKEND_STRIP_EXTRA_DP = 36
 
     /**
      * 节次行高：可用高度 ÷ 槽数。上限 120dp（盒子特别高时别让一行字飘在巨大空框里）。
+     * @param chromeDp 固定开销（默认 [WEEK_CHROME_DP_FOR_RENDER]；周末明细条出现时传更大的值）
      * @return 0 = 不知道盒子多大，渲染时按自然高走
      */
-    fun weekRowHeightDp(heightDp: Int, slotCount: Int): Int {
+    fun weekRowHeightDp(heightDp: Int, slotCount: Int, chromeDp: Int = WEEK_CHROME_DP_FOR_RENDER): Int {
         if (heightDp <= 0 || slotCount <= 0) return 0
-        return ((heightDp - WEEK_CHROME_DP) / slotCount).coerceIn(30, 120)
+        return ((heightDp - chromeDp) / slotCount).coerceIn(30, 120)
     }
 
-    /** 课名字号按列宽分档：≥58dp 用 11dp（5 列的 60dp 在这档），48~57 用 10dp，更窄 9dp */
+    /** 课名字号按列宽分档：≥58dp 用 11dp，48~57 用 10dp，7 列的 43dp 用 9dp */
     fun weekNameSizeDp(columnWidthDp: Int): Int = when {
         columnWidthDp <= 0 -> 11
         columnWidthDp >= 58 -> 11
@@ -514,25 +510,25 @@ object WidgetSchedule {
         else -> 9
     }
 
-    /** 地点行：列宽和行高都够才显示（6 列的 50dp 仍显示，字号压到 8.5dp） */
+    /** 地点行：列宽 ≥40（7 列的 43dp 也在内）、行高扣掉课后还有富余才显示（7.5dp 一行，超宽省略） */
     fun weekShowPlace(columnWidthDp: Int, rowHeightDp: Int): Boolean =
-        columnWidthDp >= 48 && rowHeightDp >= 56
+        columnWidthDp >= 40 && rowHeightDp >= 64
 
-    /** 时间行：行高 ≥38 且列宽 ≥46；列宽 <52 时渲染用 [WidgetWeekCell.timeStart]（只显开始时刻） */
+    /** 时间行（开始时刻）：列宽 ≥40、行高 ≥54 才显示 */
     fun weekShowTime(columnWidthDp: Int, rowHeightDp: Int): Boolean =
-        rowHeightDp >= 38 && columnWidthDp >= 46
+        rowHeightDp >= 54 && columnWidthDp >= 40
 
-    /** 列宽放不下完整时间段（<52dp）时，时间行只显示开始时刻 */
+    /** 列宽放不下完整时间段（<52dp）时，时间行只显示开始时刻（7 列的 43dp 命中） */
     fun weekTimeIsShort(columnWidthDp: Int): Boolean = columnWidthDp in 1..51
 
-    /** 课名最多几行：行高在扣掉地点/时间后还能放几行（至少 1，至多 4——7 列窄格靠行数补） */
+    /** 课名最多几行：行高在扣掉地点/时间后还能放几行（至少 1，至多 3） */
     fun weekNameMaxLines(columnWidthDp: Int, rowHeightDp: Int): Int {
         if (rowHeightDp <= 0) return 3
         var budget = rowHeightDp - 8   // 上下内边距
         if (weekShowTime(columnWidthDp, rowHeightDp)) budget -= 13
         if (weekShowPlace(columnWidthDp, rowHeightDp)) budget -= 13
         val lineH = weekNameSizeDp(columnWidthDp) + 3
-        return (budget / lineH).coerceIn(1, 4)
+        return (budget / lineH).coerceIn(1, 3)
     }
 
     // ── 2×2：一节课大字 + 圆气泡 + 一行预告 ──────────────────────────────
