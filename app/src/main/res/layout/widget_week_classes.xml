@@ -45,14 +45,24 @@
             android:textColor="@color/widget_text_dim"
             android:textSize="@dimen/widget_week" />
 
-        <!-- 一天一列，运行时 addView(widget_week_column) -->
+        <!-- 一天一列（周一..周五），运行时 addView(widget_week_column)；weight=1 给周末条让位 -->
         <LinearLayout
             android:id="@+id/week_columns"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="0dp"
             android:layout_marginTop="@dimen/widget_gap_xs"
+            android:layout_weight="1"
             android:baselineAligned="false"
             android:orientation="horizontal" />
+
+        <!-- 周末条（恒显示）：周六/日一行一条，没课也是一行"六 · 日 无课"。
+             行由 App 渲染时 addView(widget_week_line)，行数 1~2。 -->
+        <LinearLayout
+            android:id="@+id/weekend_strip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="vertical" />
     </LinearLayout>
 
     <!-- 假期 / 未同步：整块盖住内容 -->

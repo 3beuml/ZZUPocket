@@ -359,11 +359,20 @@ object WidgetSchedule {
         val cells: List<WidgetWeekCell?>,
     )
 
-    /** 「周课表」的全部内容：右上角周次 + 一天一列 */
+    /** 周末条的一行（一天一行；两天都空时只有一行"六 · 日 无课"） */
+    data class WidgetWeekendLine(
+        val text: String,
+        val isToday: Boolean,
+        val hasCourse: Boolean,
+    )
+
+    /** 「周课表」的全部内容：右上角周次 + 周一~周五网格 + 底部周末条 */
     data class WidgetWeekPlan(
         /** 「第 8 周」；空串 = 不显示 */
         val week: String,
         val columns: List<WidgetWeekColumn>,
+        /** 周末条（恒非空：没课也是一行"六 · 日 无课"——周末要"看得见"） */
+        val weekendLines: List<WidgetWeekendLine>,
         val overlayTitle: String = "",
         val overlayMessage: String = "",
     ) {
@@ -376,12 +385,13 @@ object WidgetSchedule {
     /**
      * 「周课表」的内容（纯函数）。
      *
-     * 口径：
-     *  - **列**：周一..周日**恒显示 7 列**（2026-11-01 用户反馈：周末没课也要"看得见周末"，
-     *    "有课才加列"的旧口径让人以为组件只会五天）。7 列下单列 ~43dp，自动切紧凑渲染
-     *    （课名多行、地点/时间按宽度行高显隐，见 weekShowPlace/weekShowTime）。
-     *  - **行**：节次槽 = 本周**实际出现过的起始节次**去重排序（只有 5 个大节有课就 5 行，
-     *    不为空节次浪费高度；调休之类的乱序自动正确）。
+     * 口径（2026-11-01 两轮真机反馈收敛出的最终形态）：
+     *  - **列**：周一..周五 5 列网格——单列 ~60dp，课名/地点/时间三行都放得下。
+     *    7 列方案被否（列头挤废、地点时间全藏）；周末改为底部**常驻条**。
+     *  - **周末条**：恒显示。两天都空 → 一行"六 M.d · 日 M.d 无课"；
+     *    有课 → 一天一行"六 M.d 课名 地点 10:10-11:50"（多节用「；」连，超宽省略）。
+     *  - **行**：节次槽 = 本周**实际出现过的起始节次**去重排序（空节次不占行高；
+     *    调休之类的乱序自动正确）。
      *  - 跨节次的课占 [WidgetWeekCell.slotSpan] 个槽，被它盖住的槽在列里是 null。
      *  - 同列同槽撞车（自定义日程叠加）：**先到的赢**，后来的丢弃 —— 网格放不下两门。
      */
@@ -396,12 +406,13 @@ object WidgetSchedule {
             return WidgetWeekPlan(
                 week = "",
                 columns = emptyList(),
+                weekendLines = emptyList(),
                 overlayTitle = statusTitle(st),
                 overlayMessage = statusMessage(st),
             )
         }
 
-        val weekdays = (1..7).toList()
+        val weekdays = (1..5).toList()
         val slots = coursesByDay.values.flatten().map { it.startUnit }.distinct().sorted()
         val slotIndex = slots.withIndex().associate { (i, u) -> u to i }
         val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
@@ -432,7 +443,42 @@ object WidgetSchedule {
             )
         }
 
-        return WidgetWeekPlan(week = weekLabel(week), columns = columns)
+        // 周末条：两天都空 → 一行合并"六 · 日 无课"；任一天有课 → 一天一行
+        val weekendLines = buildList {
+            val todayIso = today.dayOfWeek.value
+            val sat = coursesByDay[6].orEmpty()
+            val sun = coursesByDay[7].orEmpty()
+            fun dayLine(day: Int, courses: List<WidgetCourse>) {
+                val date = monday.plusDays((day - 1).toLong())
+                val head = "${WEEKDAY_SHORT[day - 1]} ${date.monthValue}.${date.dayOfMonth}"
+                if (courses.isEmpty()) {
+                    add(WidgetWeekendLine("$head 无课", day == todayIso, false))
+                } else {
+                    val body = courses.joinToString("；") {
+                        listOf(it.name, it.place, it.rangeText)
+                            .filter { s -> s.isNotBlank() }
+                            .joinToString(" ")
+                    }
+                    add(WidgetWeekendLine("$head $body", day == todayIso, true))
+                }
+            }
+            if (sat.isEmpty() && sun.isEmpty()) {
+                val s = monday.plusDays(5)
+                val u = monday.plusDays(6)
+                add(
+                    WidgetWeekendLine(
+                        "六 ${s.monthValue}.${s.dayOfMonth} · 日 ${u.monthValue}.${u.dayOfMonth} 无课",
+                        todayIso >= 6,
+                        false,
+                    ),
+                )
+            } else {
+                dayLine(6, sat)
+                dayLine(7, sun)
+            }
+        }
+
+        return WidgetWeekPlan(week = weekLabel(week), columns = columns, weekendLines = weekendLines)
     }
 
     /** 「一」「二」…「日」（周课表列头用单字，列宽寸土寸金） */
@@ -440,9 +486,10 @@ object WidgetSchedule {
 
     /**
      * 周课表固定开销：卡片内边距 20（10×2，与 4×2 同款 RemoteViews 覆盖）+ 周次 13 +
-     * 间距 2 + 列头 15 + 列头下 4。**宁可多记**。
+     * 间距 2 + 列头 15 + 列头下 4 + **周末条 32**（两行小字 + 间距，恒显示）。
+     * **宁可多记**。
      */
-    private const val WEEK_CHROME_DP = 54
+    private const val WEEK_CHROME_DP = 86
 
     /**
      * 节次行高：可用高度 ÷ 槽数。上限 120dp（盒子特别高时别让一行字飘在巨大空框里）。
@@ -453,11 +500,11 @@ object WidgetSchedule {
         return ((heightDp - WEEK_CHROME_DP) / slotCount).coerceIn(30, 120)
     }
 
-    /** 课名字号按列宽分档：≥62dp 用 11dp，52~61 用 10dp，42~51 用 9dp，更窄也是 9dp（7 列下限） */
+    /** 课名字号按列宽分档：≥58dp 用 11dp（5 列的 60dp 在这档），48~57 用 10dp，更窄 9dp */
     fun weekNameSizeDp(columnWidthDp: Int): Int = when {
         columnWidthDp <= 0 -> 11
-        columnWidthDp >= 62 -> 11
-        columnWidthDp >= 52 -> 10
+        columnWidthDp >= 58 -> 11
+        columnWidthDp >= 48 -> 10
         else -> 9
     }
 

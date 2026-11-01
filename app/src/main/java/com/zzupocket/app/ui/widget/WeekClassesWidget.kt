@@ -212,6 +212,22 @@ class WeekClassesWidget : AppWidgetProvider() {
                 }
                 rv.addView(R.id.week_columns, columnRv)
             }
+
+            // 周末条（恒显示）：今天那行用主题色、有课用正文色、没课用弱色
+            rv.removeAllViews(R.id.weekend_strip)
+            plan.weekendLines.forEach { line ->
+                val lineRv = RemoteViews(context.packageName, R.layout.widget_week_line)
+                lineRv.setTextViewText(R.id.week_line, line.text)
+                lineRv.setTextColor(
+                    R.id.week_line,
+                    when {
+                        line.isToday -> colors.accent
+                        line.hasCourse -> colors.text
+                        else -> colors.dim
+                    },
+                )
+                rv.addView(R.id.weekend_strip, lineRv)
+            }
             return rv
         }
     }

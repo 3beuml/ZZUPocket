@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  「一周课表」周末条的一行：文本由渲染时填（"六 11.7 大物实验 南4 103 10:10-11:50"
+  / "六 11.7 无课" / "六 · 日 无课"），颜色按"今天/有课/没课"三档给。
+-->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/week_line"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="2dp"
+    android:ellipsize="end"
+    android:includeFontPadding="false"
+    android:maxLines="1"
+    android:text="@string/widget_preview_week"
+    android:textColor="@color/widget_text_hint"
+    android:textSize="10.5dp" />
