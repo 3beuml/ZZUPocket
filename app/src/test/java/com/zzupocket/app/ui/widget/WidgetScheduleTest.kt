@@ -592,6 +592,42 @@ class WidgetScheduleTest {
     private val wednesday = java.time.LocalDate.of(2026, 11, 4)   // 周三
 
     @Test
+    fun `周课表_周末有课自动进网格_没课保持5列`() {
+        val saturday = java.time.LocalDate.of(2026, 11, 7)
+        // 周六有调休课、周日没课 → 6 列（周一..五 + 六），日不占列
+        val withMakeUp = WidgetSchedule.weekPlan(
+            hasSchedule = true,
+            week = 9,
+            coursesByDay = mapOf(
+                1 to listOf(unitCourse(1, 2)),
+                6 to listOf(unitCourse(3, 4, "调休课")),
+            ),
+            today = saturday,
+        )
+        assertEquals(6, withMakeUp.columns.size)
+        assertEquals(
+            listOf("一 11.2", "二 11.3", "三 11.4", "四 11.5", "五 11.6", "今 11.7"),
+            withMakeUp.columns.map { it.header },
+        )
+        assertTrue(withMakeUp.columns[5].isToday)   // 今天的周六列高亮
+        assertEquals("调休课", withMakeUp.columns[5].cells[1]?.name)
+        // 周末条仍有完整信息（时间段在这里不缩水）
+        assertTrue(withMakeUp.weekendLines[0].text.startsWith("六 11.7 调休课"))
+        assertTrue(withMakeUp.weekendLines[0].hasCourse)
+        // 周末全空 → 回 5 列 + 合并无课行
+        val noWeekend = WidgetSchedule.weekPlan(
+            hasSchedule = true,
+            week = 9,
+            coursesByDay = mapOf(1 to listOf(unitCourse(1, 2))),
+            today = saturday,
+        )
+        assertEquals(5, noWeekend.columns.size)
+        assertEquals(1, noWeekend.weekendLines.size)
+        assertEquals("六 11.7 · 日 11.8 无课", noWeekend.weekendLines[0].text)
+        assertTrue(noWeekend.weekendLines[0].isToday)
+    }
+
+    @Test
     fun `周课表_5列网格加周末条_今天列高亮`() {
         val plan = WidgetSchedule.weekPlan(
             hasSchedule = true,
@@ -603,10 +639,10 @@ class WidgetScheduleTest {
             ),
             today = wednesday,
         )
-        // 网格恒 5 列（60dp 单列装得下课名+地点+时间）；周末走底部条
-        assertEquals(5, plan.columns.size)
+        // 周六有课 → 进网格成第 6 列
+        assertEquals(6, plan.columns.size)
         assertEquals(
-            listOf("一 11.2", "二 11.3", "今 11.4", "四 11.5", "五 11.6"),
+            listOf("一 11.2", "二 11.3", "今 11.4", "四 11.5", "五 11.6", "六 11.7"),
             plan.columns.map { it.header },
         )
         assertTrue(plan.columns[2].isToday)
@@ -714,13 +750,21 @@ class WidgetScheduleTest {
         assertEquals(120, WidgetSchedule.weekRowHeightDp(900, 2))
         // 不知道尺寸按 0（渲染走自然高）
         assertEquals(0, WidgetSchedule.weekRowHeightDp(0, 5))
-        // 字号：单列 60dp 用 11dp
+        // 字号：单列 60dp 用 11dp；6 列的 50dp 用 10dp
         assertEquals(11, WidgetSchedule.weekNameSizeDp(60))
+        assertEquals(10, WidgetSchedule.weekNameSizeDp(50))
         // 5 列宽格：地点、时间都显示
         assertTrue(WidgetSchedule.weekShowPlace(60, 71))
         assertTrue(WidgetSchedule.weekShowTime(60, 71))
-        // 行高不够时先隐地点再隐时间
-        assertFalse(WidgetSchedule.weekShowPlace(60, 50))
+        // 6 列 50dp：地点仍在（字号压到 8.5）、时间退化为只显开始时刻
+        assertTrue(WidgetSchedule.weekShowPlace(50, 71))
+        assertTrue(WidgetSchedule.weekShowTime(50, 71))
+        assertTrue(WidgetSchedule.weekTimeIsShort(50))
+        assertFalse(WidgetSchedule.weekTimeIsShort(60))
+        // 7 列 43dp：地点放不下（时间也放不下，细节由周末条兜底）
+        assertFalse(WidgetSchedule.weekShowPlace(43, 71))
+        assertFalse(WidgetSchedule.weekShowTime(43, 71))
+        // 行高不够时时间先隐
         assertFalse(WidgetSchedule.weekShowTime(60, 30))
         assertTrue(WidgetSchedule.weekShowTime(60, 40))
         // 名字行数：71dp 高、扣掉地点时间后是 2 行（2×14+13+13+8=62 ≤ 71）；矮行 1 行

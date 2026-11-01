@@ -349,6 +349,8 @@ object WidgetSchedule {
         val place: String,
         val code: String,
         val timeRange: String,
+        /** 开始时刻（"8:00"）—— 6/7 列窄格放不下完整区间时只显示它 */
+        val timeStart: String,
     )
 
     /** 周课表的一列（一天）。[cells] 与节次槽一一对应；null = 空槽（画占位对齐用） */
@@ -385,11 +387,12 @@ object WidgetSchedule {
     /**
      * 「周课表」的内容（纯函数）。
      *
-     * 口径（2026-11-01 两轮真机反馈收敛出的最终形态）：
-     *  - **列**：周一..周五 5 列网格——单列 ~60dp，课名/地点/时间三行都放得下。
-     *    7 列方案被否（列头挤废、地点时间全藏）；周末改为底部**常驻条**。
+     * 口径（2026-11-01 三轮真机反馈收敛出的最终形态）：
+     *  - **列**：周一..周五恒 5 列（单列 60dp，课名/地点/时间齐全）；
+     *    **周六/日有课（含调休补课）时自动升格为网格列**——6 列（一格 50dp）或 7 列（43dp，
+     *    两天都有课的罕见情形），格子自动切紧凑渲染；周末没课保持 5 列 + 底部条。
      *  - **周末条**：恒显示。两天都空 → 一行"六 M.d · 日 M.d 无课"；
-     *    有课 → 一天一行"六 M.d 课名 地点 10:10-11:50"（多节用「；」连，超宽省略）。
+     *    有课 → 一天一行"六 M.d 课名 地点 10:10-11:50"（完整时间段在这里，窄格不丢信息）。
      *  - **行**：节次槽 = 本周**实际出现过的起始节次**去重排序（空节次不占行高；
      *    调休之类的乱序自动正确）。
      *  - 跨节次的课占 [WidgetWeekCell.slotSpan] 个槽，被它盖住的槽在列里是 null。
@@ -412,7 +415,9 @@ object WidgetSchedule {
             )
         }
 
-        val weekdays = (1..5).toList()
+        // 周六/日有课才进网格（用户拍板：调休补课要像工作日一样显示；没课不白占宽度）
+        val weekdays = (1..5).toList() +
+            (6..7).filter { !coursesByDay[it].isNullOrEmpty() }
         val slots = coursesByDay.values.flatten().map { it.startUnit }.distinct().sorted()
         val slotIndex = slots.withIndex().associate { (i, u) -> u to i }
         val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
@@ -432,6 +437,7 @@ object WidgetSchedule {
                     place = c.place,
                     code = c.code,
                     timeRange = c.rangeText,
+                    timeStart = c.startText,
                 )
             }
             val date = monday.plusDays((day - 1).toLong())
@@ -508,13 +514,16 @@ object WidgetSchedule {
         else -> 9
     }
 
-    /** 地点行：列宽和行高都够才显示（7 列 ~43dp 放不下，自动隐藏） */
+    /** 地点行：列宽和行高都够才显示（6 列的 50dp 仍显示，字号压到 8.5dp） */
     fun weekShowPlace(columnWidthDp: Int, rowHeightDp: Int): Boolean =
-        columnWidthDp >= 54 && rowHeightDp >= 56
+        columnWidthDp >= 48 && rowHeightDp >= 56
 
-    /** 时间行：行高够一行小字、且列宽装得下 "10:10-11:50"（≥52dp），否则隐藏 */
+    /** 时间行：行高 ≥38 且列宽 ≥46；列宽 <52 时渲染用 [WidgetWeekCell.timeStart]（只显开始时刻） */
     fun weekShowTime(columnWidthDp: Int, rowHeightDp: Int): Boolean =
-        rowHeightDp >= 38 && columnWidthDp >= 52
+        rowHeightDp >= 38 && columnWidthDp >= 46
+
+    /** 列宽放不下完整时间段（<52dp）时，时间行只显示开始时刻 */
+    fun weekTimeIsShort(columnWidthDp: Int): Boolean = columnWidthDp in 1..51
 
     /** 课名最多几行：行高在扣掉地点/时间后还能放几行（至少 1，至多 4——7 列窄格靠行数补） */
     fun weekNameMaxLines(columnWidthDp: Int, rowHeightDp: Int): Int {

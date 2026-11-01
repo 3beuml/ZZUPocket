@@ -139,6 +139,8 @@ class WeekClassesWidget : AppWidgetProvider() {
             val nameLines = WidgetSchedule.weekNameMaxLines(columnWidthDp, rowHeightDp)
             val showPlace = WidgetSchedule.weekShowPlace(columnWidthDp, rowHeightDp)
             val showTime = WidgetSchedule.weekShowTime(columnWidthDp, rowHeightDp)
+            // 6/7 列窄格：时间段放不下，只显开始时刻（完整区间在底部周末条里）
+            val shortTime = WidgetSchedule.weekTimeIsShort(columnWidthDp)
 
             rv.removeAllViews(R.id.week_columns)
             plan.columns.forEach { column ->
@@ -171,7 +173,11 @@ class WeekClassesWidget : AppWidgetProvider() {
                             val cellRv = RemoteViews(context.packageName, R.layout.widget_week_cell)
                             cellRv.setTextViewText(R.id.week_cell_name, cell.name)
                             cellRv.setTextViewText(R.id.week_cell_place, cell.place)
-                            cellRv.setTextViewText(R.id.week_cell_time, cell.timeRange)
+                            // 窄格只显开始时刻；宽格显完整区间
+                            cellRv.setTextViewText(
+                                R.id.week_cell_time,
+                                if (shortTime) cell.timeStart else cell.timeRange,
+                            )
                             cellRv.setTextViewTextSize(
                                 R.id.week_cell_name, TypedValue.COMPLEX_UNIT_DIP, nameDp.toFloat(),
                             )
