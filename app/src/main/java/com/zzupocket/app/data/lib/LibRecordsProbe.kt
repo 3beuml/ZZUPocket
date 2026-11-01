@@ -119,7 +119,8 @@ class LibRecordsProbe(
         sb.appendLine("HTTP $status，响应 ${text.length} 字符")
         if (text.isBlank()) return ""
         structure(sb, text)
-        sb.appendLine("原文片段：${text.take(700)}")
+        // ⚠️ 故意**不**打响应原文：记录接口的条目里有学号（booker）、姓名等个人信息，
+        // 这份报告是要能直接复制发出去的（与 GmsProbe 同标准：只有路径与字段名/类型，无值）。
         return text
     }
 
@@ -138,7 +139,13 @@ class LibRecordsProbe(
         sb.appendLine("第 1 条字段（字段名 = 值形态）：")
         first.forEach { (k, v) ->
             val shape = when (v) {
-                is JsonPrimitive -> "「${v.contentOrNull?.take(40)}」"
+                // ⚠️ 只报类型不报值：条目里有学号（booker）、姓名等个人信息，报告要能直接外发
+                is JsonPrimitive -> when {
+                    v.contentOrNull == null -> "非基本量"
+                    v.content.toLongOrNull() != null -> "整数"
+                    v.content.toDoubleOrNull() != null -> "数字"
+                    else -> "文本(${v.content.length}字符)"
+                }
                 is JsonArray -> "数组[${v.size}]"
                 is JsonObject -> "对象{${v.keys.sorted().joinToString(",")}}"
                 else -> v.toString()
@@ -193,7 +200,9 @@ class LibRecordsProbe(
                 element.firstOrNull()?.let { flatten(it, "$path[]", out, depth + 1) }
             }
 
-            else -> out.add("$path = ${element.toString().take(48)}")
+            // ⚠️ 只报类型不报值：响应里有学号/姓名等个人信息（与 GmsProbe 同标准）
+            is JsonPrimitive -> out.add("$path = ${if (element.isString) "文本" else "数值"}")
+            else -> out.add("$path = （复杂）")
         }
     }
 

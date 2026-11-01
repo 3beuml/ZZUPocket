@@ -102,10 +102,13 @@ object HttpClients {
     }
 
     /**
-     * 图书馆空间预约（order.lib.zzu.edu.cn）：校外只能走明文 HTTP:80（已放行白名单），
-     * 允许重定向（`/v4/login/cas` 兑票链是 302；记录接口本身不跳）。
+     * 图书馆空间预约（order.lib.zzu.edu.cn）：校外只能走明文 HTTP:80（已放行白名单）。
+     *
+     * ⚠️ **不跟随重定向**：请求里手动带了 `Cookie`/`Authorization` 头（OkHttp 对自定义
+     * 请求头不做跨域剥离），跟着 302 走到别的域就会把会话凭据带出去。记录接口本身
+     * 不跳转；`/v4/login/cas` 那条兑票链是 WebView 的事，不走这个 client。
      */
     val lib: OkHttpClient by lazy {
-        builder(minIntervalMs = 300).followRedirects(true).build()
+        builder(minIntervalMs = 300).followRedirects(false).build()
     }
 }
