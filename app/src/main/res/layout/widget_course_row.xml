@@ -11,6 +11,9 @@
   · 行高由 App 在渲染时用 `setMinimumHeight` 撑开：可见行数按实测画布高度算，
     撑开后内容竖直居中，所以盒子高时不会"上挤下空"。
   · 色条用空 TextView 顶替 `<View>`（RemoteViews 白名单问题，见 widget_today_classes.xml 注释）。
+  · ⚠️ 上下内边距是**账本的一部分**（NATURAL_COURSE_ROW_HEIGHT_DP / COURSE_ROW_PAD_DP）：
+    2026-11-01 从 6 收到 5 —— 4×2 修正后画布 165dp 要装两行课、其中一节课名占两行，
+    固定开销一分一分省出来才能都放得下。改这里的数必须同步改 Widgets.kt 的账本。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/row_root"
@@ -19,8 +22,8 @@
     android:baselineAligned="false"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
 
     <TextView
         android:id="@+id/row_bar"

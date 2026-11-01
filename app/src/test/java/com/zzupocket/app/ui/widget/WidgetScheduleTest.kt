@@ -433,32 +433,94 @@ class WidgetScheduleTest {
 
     @Test
     fun `4×2 每列两行`() {
-        assertEquals(2, WidgetSchedule.columnRows(195))
+        // 实测修正后画布 165dp → 2 行（195dp 是系统多报的值，见 Widgets.sizeDp）
+        assertEquals(2, WidgetSchedule.columnRows(165))
         assertEquals(1, WidgetSchedule.columnRows(110))   // 老公式那种小盒子只放得下一行
         assertEquals(5, WidgetSchedule.columnRows(400))   // 拉很大也有上限
         assertEquals(2, WidgetSchedule.columnRows(0))     // 读不到尺寸时按实测值
     }
 
     @Test
-    fun `行高按可用高度撑_但只温和撑且留余量`() {
-        // 195dp、2 行：可用 = 195-66-1-10(余量) = 118 → 每行 59dp，封顶 46+12=58
-        assertEquals(58, WidgetSchedule.courseRowHeightDp(195, 2))
-        // 只有 1 行时封顶 +12（不然是一个巨大的空框里飘一行字）
-        assertEquals(58, WidgetSchedule.courseRowHeightDp(195, 1))
-        // 盒子很小：**允许压缩到 34dp** 而不是顶着基准高裁掉内容
-        // （0.32.5 的教训：行高不可压时，矮盒子组件直接少画一行课）
-        assertEquals(34, WidgetSchedule.courseRowHeightDp(110, 1))
-        // 不知道盒子多大时不撑
-        assertEquals(0, WidgetSchedule.courseRowHeightDp(0, 2))
+    fun `课名换行估算_CJK按整字_ASCII按半字`() {
+        // 单列实测约 148dp，可用文字宽 ≈ 137dp；14 个汉字 12dp 字号 ≈ 168dp → 两行
+        assertEquals(2, WidgetSchedule.nameLineCount("大学生职业生涯规划与就业指导", 148))
+        // 4 个汉字 ≈ 48dp → 一行
+        assertEquals(1, WidgetSchedule.nameLineCount("编译原理", 148))
+        // 列宽未知按一行（旧口径兜底）
+        assertEquals(1, WidgetSchedule.nameLineCount("大学生职业生涯规划与就业指导", 0))
+        // 纯 ASCII（实验课英文名）按 0.55em
+        assertEquals(1, WidgetSchedule.nameLineCount("College English", 148))
     }
 
     @Test
-    fun `矮画布仍能放下两行课`() {
-        // 回归背景：0.32.5 曾把基准行高 46 提到 56，160dp 高的 4×2 槽位
-        // 从两节课变一节课（用户实测）。46 的基准下 160dp 仍是两行。
-        assertEquals(2, WidgetSchedule.columnRows(160))
-        // 行数被 columnRows 允许但单行压不下时，行高要跟着压
-        assertEquals(34, WidgetSchedule.courseRowHeightDp(112, 2))
+    fun `行自然高随课名行数抬高`() {
+        assertEquals(44, WidgetSchedule.rowNaturalHeightDp(1))
+        assertEquals(60, WidgetSchedule.rowNaturalHeightDp(2))
+    }
+
+    @Test
+    fun `165dp 画布两行课都装得下_含两行课名`() {
+        // 2026-11-01 的修复目标：一节单行课名(44) + 一节两行课名(60) + 分隔线 1
+        // = 105 ≤ 可用 165-58(账本固定开销，卡片内边距已省到 10dp) = 107 → 两行都显示
+        assertEquals(2, WidgetSchedule.visibleRowCount(165, listOf(44, 60)))
+        // 真装不下的矮盒子才少画：110dp 可用 52，第二行 60 放不下 → 只画第一行
+        assertEquals(1, WidgetSchedule.visibleRowCount(110, listOf(44, 60)))
+        // 至少画一行
+        assertEquals(1, WidgetSchedule.visibleRowCount(60, listOf(44, 44)))
+        // 不知道高度时不裁（旧口径）
+        assertEquals(2, WidgetSchedule.visibleRowCount(0, listOf(44, 44)))
+    }
+
+    @Test
+    fun `剩余空间按行均摊_且永不低于自然高`() {
+        // 165dp 两行单行课名：可用 107，需要 44+44+1=89 → 剩 18 → 每行 +9
+        assertEquals(listOf(53, 53), WidgetSchedule.rowStretchTargetsDp(165, listOf(44, 44)))
+        // 大盒子里只温和撑（+12 封顶）
+        assertEquals(listOf(56, 56), WidgetSchedule.rowStretchTargetsDp(195, listOf(44, 44)))
+        // 有两行课名的行：需要 44+60+1=105，剩 2 → 每行 +1
+        assertEquals(listOf(45, 61), WidgetSchedule.rowStretchTargetsDp(165, listOf(44, 60)))
+        // 不知道高度时不撑
+        assertEquals(listOf(0, 0), WidgetSchedule.rowStretchTargetsDp(0, listOf(44, 44)))
+    }
+
+    @Test
+    fun `4×2 换行感知装柜_两节课都显示且不被裁`() {
+        // 场景复刻 2026-11-01 的截图：明天两节课，第二节课名 14 字（两行）。
+        // 修复后（卡片内边距 10 + 行内边距 5）账本判定两行都装得下 → 都显示。
+        val tomorrow = listOf(
+            course(480, 525, "编译原理", "南4 103"),
+            course(600, 645, "大学生职业生涯规划与就业指导", "北1 103"),
+        )
+        val p = WidgetSchedule.twoDayPlan(
+            hasSchedule = true,
+            week = 8,
+            todayDate = monday,
+            tomorrowDate = tuesday,
+            today = emptyList(),
+            tomorrow = tomorrow,
+            nowMin = 400,
+            maxRows = 2,
+            columnWidthDp = 148,
+            columnHeightDp = 165,
+        )
+        assertEquals(2, p.tomorrow.rows.size)
+        assertEquals(listOf("编译原理", "大学生职业生涯规划与就业指导"), p.tomorrow.rows.map { it.course.name })
+        assertEquals("共有 2 节", p.tomorrow.footer)
+        // 真正装不下（更矮的盒子）才退回少画一行，且 footer 不隐瞒总数
+        val tight = WidgetSchedule.twoDayPlan(
+            hasSchedule = true,
+            week = 8,
+            todayDate = monday,
+            tomorrowDate = tuesday,
+            today = emptyList(),
+            tomorrow = tomorrow,
+            nowMin = 400,
+            maxRows = 2,
+            columnWidthDp = 148,
+            columnHeightDp = 110,
+        )
+        assertEquals(1, tight.tomorrow.rows.size)
+        assertEquals("共有 2 节", tight.tomorrow.footer)
     }
 
     @Test

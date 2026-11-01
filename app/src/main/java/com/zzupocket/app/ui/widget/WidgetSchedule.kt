@@ -267,7 +267,10 @@ object WidgetSchedule {
      * 「4×2 课表」的内容。
      *
      * @param todayDate / [tomorrowDate] 用来拼「今天 9.29 周二」这种列头
-     * @param maxRows 每列最多列几行（按实测画布高度算，见 [columnRows]）
+     * @param maxRows 每列最多列几行（[columnRows] 的粗估，还要过换行感知的精确装柜）
+     * @param columnWidthDp / [columnHeightDp] 单列的实测宽高（dp；0 = 不知道，退回旧口径）。
+     *        **知道尺寸时**：按课名换行估出每行真实自然高，装不下的行直接不画
+     *        （宁可少一行完整的课，也不画上去被裁半截字 —— 2026-11-01 用户截图实证）。
      */
     fun twoDayPlan(
         hasSchedule: Boolean,
@@ -278,11 +281,22 @@ object WidgetSchedule {
         tomorrow: List<WidgetCourse>,
         nowMin: Int,
         maxRows: Int = 2,
+        columnWidthDp: Int = 0,
+        columnHeightDp: Int = 0,
     ): WidgetTwoDayPlan {
         val courses = today.sortedBy { it.startMin }
         val st = state(hasSchedule, week, courses, nowMin)
         val weekText = weekLabel(week)
         val take = maxRows.coerceAtLeast(1)
+        val nameDp = rowFontSizes(columnHeightDp).first
+
+        fun fit(rows: List<WidgetCourseRow>): List<WidgetCourseRow> {
+            if (columnHeightDp <= 0) return rows
+            val naturals = rows.map {
+                rowNaturalHeightDp(nameLineCount(it.course.name, columnWidthDp, nameDp))
+            }
+            return rows.take(visibleRowCount(columnHeightDp, naturals))
+        }
 
         // 整块状态（假期 / 还没同步过课表）：两列都不画，换成居中一句话。
         // 以前只有假期走这条，未同步就退化成两列各写一句「无课程」—— 那是假的，
@@ -297,22 +311,23 @@ object WidgetSchedule {
             )
         }
 
-        val todayRows = remainingToday(courses, nowMin)
-        val tomorrowRows = tomorrow.sortedBy { it.startMin }
+        val todayRows = fit(remainingToday(courses, nowMin).take(take).map(::toRow))
+        val tomorrowRows = fit(tomorrow.sortedBy { it.startMin }.take(take).map(::toRow))
 
         return WidgetTwoDayPlan(
             week = weekText,
             today = WidgetDayPlan(
                 header = dateHeader("今天", todayDate),
-                footer = if (todayRows.isEmpty()) "" else "剩余 ${todayRows.size} 节",
-                rows = todayRows.take(take).map(::toRow),
-                emptyText = if (todayRows.isEmpty()) "无课程" else "",
+                // footer 仍报**总剩节数**（不是显示了几行）—— 少画的行不隐瞒
+                footer = if (remainingToday(courses, nowMin).isEmpty()) "" else "剩余 ${remainingToday(courses, nowMin).size} 节",
+                rows = todayRows,
+                emptyText = if (remainingToday(courses, nowMin).isEmpty()) "无课程" else "",
             ),
             tomorrow = WidgetDayPlan(
                 header = dateHeader("明天", tomorrowDate),
-                footer = if (tomorrowRows.isEmpty()) "" else "共有 ${tomorrowRows.size} 节",
-                rows = tomorrowRows.take(take).map(::toRow),
-                emptyText = if (tomorrowRows.isEmpty()) "无课程" else "",
+                footer = if (tomorrow.isEmpty()) "" else "共有 ${tomorrow.size} 节",
+                rows = tomorrowRows,
+                emptyText = if (tomorrow.isEmpty()) "无课程" else "",
             ),
         )
     }
@@ -414,58 +429,101 @@ object WidgetSchedule {
     // 这几个数全靠手算，和布局 XML 里的内边距/字号严格对应，改布局就得回来改这里。
     // 放在纯逻辑里是为了能单测 —— 它们是"内容装不下被裁掉"这类问题的唯一保险。
     //
-    // ⚠️ 实测（MEIZU 21 Note / Android 16）：4×2 真实画布 **342×195dp**、2×2 是 **163×195dp**。
+    // ⚠️ 实测（MEIZU 21 Note / Android 16）：4×2 真实画布 **342×195dp**（AppWidgetManager
+    // 报的值还要按 sizeDp 的注释修正 ~30dp）、2×2 是 **163×195dp**。
     // 官方老公式算出来的 250×110dp 是错的（那台启动器的格子和公式差三成）。
 
     /**
-     * 一行课的自然内容高：课名**可两行**（13dp × 2 ≈ 32）+ 地点/时间段（12dp ≈ 14）
-     * + 上下内边距 12 ≈ 56（issue #6：长班级名换行而不是省略，行高随之抬高；
-     * 短课名的行被 minHeight 撑到同一高度，内容竖直居中不受影响）。
-     */
-    /**
-     * 单行课行的**基准**高度。⚠️ 别随意加这个数：columnRows 是用它去除画布算"能画几行"，
+     * 单行课行的**基准**高度（课名**一行**时的自然高度）。
+     *
+     * 2026-11-01 从 46 收到 44（行内边距 6→5，配合 4×2 卡片内边距 14→10）：
+     * 修正后画布 165dp 要装两行课、其中一节课名换成两行（自然高 60），
+     * 账本 46+62+1=109 > 可用 108 装不下 → 用户看到"少了一节课"。
+     * 省出 10dp 固定开销后 44+60+1=105 ≤ 107，两节课**都完整显示**。
+     *
+     * ⚠️ 别随意加这个数：columnRows 是用它去除画布算"能画几行"，
      * 加大会直接让矮盒子的小组件从两节课变一节（0.32.5 曾把 46 改成 56，用户 4×2 组件
      * 立刻少了一行课）。字号分档已有 rowFontSizes 管字，行高留给行数才是正解。
      */
-    const val COURSE_ROW_HEIGHT_DP = 46
+    const val COURSE_ROW_HEIGHT_DP = 44
+
+    /** 课名每多占一行，行高多出的部分（13dp 字号 × 行高系数 ≈ 15.6，取整 16） */
+    const val NAME_LINE_EXTRA_DP = 16
+
+    /** 课名最多两行（widget_course_row.xml 里 maxLines=2） */
+    const val NAME_MAX_LINES = 2
 
     /**
-     * 撑高的上限（相对不撑时的自然高度）。
+     * 课名在给定列宽里会占几行。
      *
-     * ⚠️ 实测教训：一开始我按"可用高度 ÷ 行数"狠狠撑（195dp 的盒子里每行撑到 64dp），
-     * 结果**最后一行被压扁**了 —— 列容器本身不会撑满（`match_parent` 在 RemoteViews 的
-     * 加权父容器里没生效），多出来的高度全由最后一个孩子吸收，于是它的文字被裁掉 6dp。
-     * 所以只温和撑（最多 +[MAX_STRETCH_DP]），并且从可用高度里**留出 [SLACK_DP] 的余量**：
-     * 宁可底部留一点点空，也不能裁字。
+     * 2026-11-01 的教训：issue #6 让长课名**换行**（不再省略）之后，行高账本还按
+     * "课名一行"记 —— 两行课名的行实际 ~60dp，账本却记 46，最后一行被顶出画布，
+     * "地点/时间段"被裁掉一半（用户截图实证："大学生职业生涯规划与就业指导"）。
+     * 所以账本必须感知换行：CJK 记 1em、ASCII 记 0.55em，列宽不知道时按 1 行。
      */
-    private const val MAX_STRETCH_DP = 12
-
-    /** 计算可用高度时先扣掉的余量（防裁字） */
-    private const val SLACK_DP = 10
-
-    /** 除课程行以外的固定开销：内边距 28 + 周次 12 + 间距 2 + 列头 16 + 列头下方 8 */
-    private const val LIST_CHROME_DP = 66
-
-    /**
-     * 一行课在给定盒子里应该占多高（dp）。
-     *
-     * 行内容只有约 50dp 高，而 4×2 的实测画布有 195dp —— 不撑的话两行只占 100dp，
-     * 下面近百 dp 全空（用户报的"下部分很空"）。所以按「可用高度 ÷ 行数」撑，
-     * 但只温和地撑（见 [MAX_STRETCH_DP] 的注释），并且留余量防裁字。
-     *
-     * @param rowCount 这一列**实际**有几行（不是"最多能放几行"）
-     * @return 0 表示"不知道盒子多大，别撑"（保持自然高度）
-     */
-    fun courseRowHeightDp(heightDp: Int, rowCount: Int, chromeDp: Int = LIST_CHROME_DP): Int {
-        if (heightDp <= 0 || rowCount <= 0) return 0
-        val area = heightDp - chromeDp - (rowCount - 1) - SLACK_DP
-        val fit = area / rowCount
-        // 温和撑高；行数画不下时**允许往下压**（最低 34dp，仍够 12/11sp 小字），
-        // 而不是咬牙维持基准高把最后一行顶出画布裁掉。
-        return fit.coerceIn(34, COURSE_ROW_HEIGHT_DP + MAX_STRETCH_DP)
+    fun nameLineCount(name: String, columnWidthDp: Int, nameSizeDp: Int = 13): Int {
+        if (columnWidthDp <= 0 || name.isBlank()) return 1
+        val em = name.sumOf { ch -> if (ch.code > 0x2E80) 1.0 else 0.55 }
+        // 列宽里要扣掉色条(3dp)和它与文字的间距(8dp)
+        val usable = (columnWidthDp - 11).coerceAtLeast(nameSizeDp)
+        val lines = kotlin.math.ceil(em * nameSizeDp / usable).toInt()
+        return lines.coerceIn(1, NAME_MAX_LINES)
     }
 
-    /** 一列最多放几行课（4×2 实测 342×195 → 2 行） */
+    /** 一行课的自然高度 = 基准（一行课名）+ 每多一行课名 +[NAME_LINE_EXTRA_DP] */
+    fun rowNaturalHeightDp(nameLines: Int): Int =
+        COURSE_ROW_HEIGHT_DP + (nameLines.coerceIn(1, NAME_MAX_LINES) - 1) * NAME_LINE_EXTRA_DP
+
+    /**
+     * 给定每行的自然高度，这一列**实际画得下几行**。
+     *
+     * 装不下就少画一行 —— 宁可少一行完整的课，也不能画上去被裁掉半截字
+     * （2026-11-01 用户截图实证的教训）。至少画 1 行。
+     */
+    fun visibleRowCount(heightDp: Int, naturals: List<Int>): Int {
+        if (heightDp <= 0) return naturals.size.coerceAtLeast(1)
+        val available = heightDp - LIST_CHROME_DP
+        var used = 0
+        var k = 0
+        for (natural in naturals) {
+            val cost = natural + if (k > 0) 1 else 0   // 行间 1dp 分隔线
+            if (used + cost > available) break
+            used += cost
+            k++
+        }
+        return k.coerceAtLeast(1)
+    }
+
+    /**
+     * 每行的撑高目标：把剩余空间**按行均摊**（各行自然高度可能不同——两行课名的行更高）。
+     *
+     * ⚠️ 旧实现给所有行同一个目标高度，且"允许压到 34dp" —— 那个压缩只存在于账本里，
+     * 视图实际永远 ≥ 自然高，于是账本说"放得下"、实际溢出（就是这次裁字的来源）。
+     * 现在：目标 = 自然高 + 均摊剩余（封顶 +[MAX_STRETCH_DP]），**永不低于自然高**。
+     *
+     * @return 与 [naturals] 等长；元素 0 表示"不知道盒子多大，不撑"
+     */
+    fun rowStretchTargetsDp(heightDp: Int, naturals: List<Int>): List<Int> {
+        if (heightDp <= 0 || naturals.isEmpty()) return naturals.map { 0 }
+        val available = heightDp - LIST_CHROME_DP
+        val needed = naturals.sum() + (naturals.size - 1)
+        val surplus = available - needed
+        if (surplus <= 0) return naturals.toList()
+        val extra = minOf(surplus / naturals.size, MAX_STRETCH_DP)
+        return naturals.map { it + extra }
+    }
+
+    /** 撑高的上限（相对自然高）：只温和撑，防"巨大空框里飘一行字" */
+    private const val MAX_STRETCH_DP = 12
+
+    /**
+     * 除课程行以外的固定开销（2026-11-01 从 66 收到 58，随卡片内边距 14→10 联动）：
+     * 卡片内边距 20（10×2，RemoteViews 覆盖，见 TodayClassesWidget.build）+ 周次 13 +
+     * 间距 2 + 列头 15 + 列头下 8。**宁可多记**（可用高度算小）：记少了会放进实际放不下的行。
+     */
+    private const val LIST_CHROME_DP = 58
+
+    /** 一列最多放几行课（4×2 实测 342×195 → 2 行；画不画得下还要过 [visibleRowCount]） */
     fun columnRows(heightDp: Int): Int {
         if (heightDp <= 0) return 2
         return ((heightDp - LIST_CHROME_DP) / COURSE_ROW_HEIGHT_DP).coerceIn(1, 5)

@@ -33,17 +33,20 @@ data class WidgetScheduleBundle(
     /** 下一个上下课时间点（毫秒时间戳），用来定"该变的时候变一次"的闹钟 */
     val nextBoundaryMillis: Long?,
 ) {
-    /** 4×2 课表：左列今天、右列明天 */
-    fun twoDayPlan(maxRows: Int): WidgetTwoDayPlan = WidgetSchedule.twoDayPlan(
-        hasSchedule = hasSchedule,
-        week = week,
-        todayDate = todayDate,
-        tomorrowDate = tomorrowDate,
-        today = today,
-        tomorrow = tomorrow,
-        nowMin = nowMin,
-        maxRows = maxRows,
-    )
+    /** 4×2 课表：左列今天、右列明天（尺寸知道时按换行感知账本裁行，防最后一行被裁字） */
+    fun twoDayPlan(maxRows: Int, columnWidthDp: Int = 0, columnHeightDp: Int = 0): WidgetTwoDayPlan =
+        WidgetSchedule.twoDayPlan(
+            hasSchedule = hasSchedule,
+            week = week,
+            todayDate = todayDate,
+            tomorrowDate = tomorrowDate,
+            today = today,
+            tomorrow = tomorrow,
+            nowMin = nowMin,
+            maxRows = maxRows,
+            columnWidthDp = columnWidthDp,
+            columnHeightDp = columnHeightDp,
+        )
 
     /** 2×2：一节课大字（今天没了就顶明天的第一节） */
     fun nextClassPlan(previewRows: Int): WidgetNextClassPlan = WidgetSchedule.nextClassPlan(

@@ -96,6 +96,8 @@ object Widgets {
      * @param rowHeightDp 这一行应该占的高度（dp，按实测画布与**实际行数**算）；
      *   行内容只有约 50dp 高，而 4×2 的实测画布有 195dp —— 不撑的话两行只占 100dp，
      *   下面近百 dp 全空（用户报的"下部分很空"）。
+     * @param naturalHeightDp 这一行**不撑时**的自然高 —— 两行课名的行比单行的高 16dp
+     *   （换行感知账本，见 [WidgetSchedule.rowNaturalHeightDp]）；传错就会把内容裁掉。
      */
     fun courseRow(
         context: Context,
@@ -106,6 +108,7 @@ object Widgets {
         rowHeightDp: Int,
         nameSizeDp: Int,
         subSizeDp: Int,
+        naturalHeightDp: Int = NATURAL_COURSE_ROW_HEIGHT_DP,
     ): RemoteViews {
         val rv = RemoteViews(context.packageName, R.layout.widget_course_row)
         rv.setTextViewText(R.id.row_name, row.course.name)
@@ -134,15 +137,15 @@ object Widgets {
             viewId = R.id.row_root,
             context = context,
             targetHeightDp = rowHeightDp,
-            naturalHeightDp = NATURAL_COURSE_ROW_HEIGHT_DP,
+            naturalHeightDp = naturalHeightDp,
             basePadTopDp = COURSE_ROW_PAD_DP,
             basePadBottomDp = COURSE_ROW_PAD_DP,
         )
         return rv
     }
 
-    /** widget_course_row.xml 里原本的上下内边距（撑高时要把它加回去，别把它覆盖没了） */
-    private const val COURSE_ROW_PAD_DP = 6
+    /** widget_course_row.xml 里原本的上下内边距（撑高时要把它加回去，别把它覆盖没了）。2026-11-01 6→5：给两行课名腾高度 */
+    private const val COURSE_ROW_PAD_DP = 5
 
     /**
      * 把一块内容"撑"到指定高度：靠**加内边距**，不是靠 minHeight。
@@ -180,8 +183,10 @@ object Widgets {
         )
     }
 
-    /** 课程行不撑时的自然高度：内容 33.5dp + 布局里的上下内边距 8+8dp（见 widget_course_row.xml） */
-    const val NATURAL_COURSE_ROW_HEIGHT_DP = 46
+    /** 课程行不撑时的自然高度：内容 ~33.5dp + 布局里的上下内边距 5+5dp（见 widget_course_row.xml）。
+     *  2026-11-01 从 46 收到 44（行内边距 6→5）：4×2 修正后画布 165dp 装两行课时，
+     *  其中一节课名换成两行，需要把固定开销省出来给内容（配合卡片内边距 14→10）。 */
+    const val NATURAL_COURSE_ROW_HEIGHT_DP = 44
 
     /** 数据块不撑时的自然高度：块名行 16 + 间距 2 + 数字行 33 ≈ 51dp（见 widget_energy_card.xml） */
     const val NATURAL_BLOCK_HEIGHT_DP = 51

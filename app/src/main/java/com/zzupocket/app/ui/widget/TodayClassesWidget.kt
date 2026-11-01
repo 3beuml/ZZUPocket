@@ -99,10 +99,14 @@ class TodayClassesWidget : AppWidgetProvider() {
             val click = Widgets.openApp(context, AppRoutes.SCHEDULE)
             ids.forEach { id ->
                 val (widthDp, heightDp) = Widgets.sizeDp(mgr, id)
+                // 单列宽：（总宽 − 卡片左右内边距 28 − 竖分隔线及其左右间距 17）÷ 2 列。
+                // ⚠️ 必须是**一半**：换行账本按单列算课名占几行，把整块宽传进去会把
+                // 两行课名误判成一行、装柜不裁行，最后一行照样溢出（2026-11-01 首版踩过）。
+                val columnWidthDp = ((widthDp - 28 - 17) / 2).coerceAtLeast(0)
                 val rows = WidgetSchedule.columnRows(heightDp)
-                val detail = WidgetSchedule.rowDetail((widthDp - 28 - 17) / 2)   // 单列宽
-                val plan = schedule.twoDayPlan(rows)
-                val rv = build(context, plan, colors, dark, click, heightDp, detail)
+                val detail = WidgetSchedule.rowDetail(columnWidthDp)   // 单列里一行内容的可用宽
+                val plan = schedule.twoDayPlan(rows, columnWidthDp, heightDp)
+                val rv = build(context, plan, colors, dark, click, heightDp, detail, columnWidthDp)
                 runCatching { mgr.updateAppWidget(id, rv) }
             }
         }
@@ -115,9 +119,21 @@ class TodayClassesWidget : AppWidgetProvider() {
             click: android.app.PendingIntent,
             heightDp: Int,
             detail: WidgetSchedule.RowDetail,
+            columnWidthDp: Int,
         ): RemoteViews {
             val rv = RemoteViews(context.packageName, R.layout.widget_today_classes)
             WidgetStyle.tint(rv, R.id.card, colors.bg)
+            // ⚠️ 卡片内边距 14→10（XML 是 14）：这 8dp 是**行高账本的固定开销**
+            // （LIST_CHROME_DP=58 按 10dp 记）—— 修正后画布 165dp 要装两行课、
+            // 其中一节课名换成两行，不省这 8dp 就放不下（2026-11-01 用户实测）。
+            // 只动 4×2 这张卡，其它组件维持 14dp 观感。
+            rv.setViewPadding(
+                R.id.card,
+                Widgets.dpToPx(context, 10),
+                Widgets.dpToPx(context, 10),
+                Widgets.dpToPx(context, 10),
+                Widgets.dpToPx(context, 10),
+            )
             rv.setOnClickPendingIntent(R.id.widget_root, click)
 
             // 整块状态（假期 / 还没同步过课表）：两列都不画，换成居中一句话
@@ -136,12 +152,12 @@ class TodayClassesWidget : AppWidgetProvider() {
             rv.setViewVisibility(R.id.week, if (plan.week.isBlank()) View.GONE else View.VISIBLE)
 
             bindColumn(
-                context, rv, plan.today, colors, dark, heightDp, detail,
+                context, rv, plan.today, colors, dark, heightDp, detail, columnWidthDp,
                 headerId = R.id.today_header, footerId = R.id.today_footer,
                 rowsId = R.id.today_rows, emptyId = R.id.today_empty,
             )
             bindColumn(
-                context, rv, plan.tomorrow, colors, dark, heightDp, detail,
+                context, rv, plan.tomorrow, colors, dark, heightDp, detail, columnWidthDp,
                 headerId = R.id.tomorrow_header, footerId = R.id.tomorrow_footer,
                 rowsId = R.id.tomorrow_rows, emptyId = R.id.tomorrow_empty,
             )
@@ -163,6 +179,7 @@ class TodayClassesWidget : AppWidgetProvider() {
             dark: Boolean,
             heightDp: Int,
             detail: WidgetSchedule.RowDetail,
+            columnWidthDp: Int,
             headerId: Int,
             footerId: Int,
             rowsId: Int,
@@ -184,12 +201,27 @@ class TodayClassesWidget : AppWidgetProvider() {
             } else {
                 rv.setViewVisibility(rowsId, View.VISIBLE)
                 rv.setViewVisibility(emptyId, View.GONE)
-                // 行高按**这一列实际有几行**算：只有 2 节课时行高就按 2 算，
-                // 否则底部会空出一整行的位置（实测踩过）
-                val rowHeightDp = WidgetSchedule.courseRowHeightDp(heightDp, column.rows.size)
+                // 换行感知账本：按每行课名占几行算出**各自的**自然高，剩余空间按行均摊。
+                // （旧版给所有行同一目标高且"允许压到 34dp"——那个压缩只是账本游戏，
+                // 两行课名的行实际 ~60dp，最后一行被顶出画布裁字，2026-11-01 实证。）
                 val (nameDp, subDp) = WidgetSchedule.rowFontSizes(heightDp)
+                val naturals = column.rows.map {
+                    WidgetSchedule.rowNaturalHeightDp(
+                        WidgetSchedule.nameLineCount(it.course.name, columnWidthDp, nameDp),
+                    )
+                }
+                val targets = WidgetSchedule.rowStretchTargetsDp(heightDp, naturals)
                 column.rows.forEachIndexed { index, row ->
-                    rv.addView(rowsId, Widgets.courseRow(context, row, colors, dark, detail, rowHeightDp, nameDp, subDp))
+                    rv.addView(
+                        rowsId,
+                        Widgets.courseRow(
+                            context, row, colors, dark, detail,
+                            rowHeightDp = targets[index],
+                            nameSizeDp = nameDp,
+                            subSizeDp = subDp,
+                            naturalHeightDp = naturals[index],
+                        ),
+                    )
                     // 行与行之间插一条 1dp 分隔线（与拾光一致）
                     if (index < column.rows.lastIndex) {
                         rv.addView(rowsId, RemoteViews(context.packageName, R.layout.widget_row_divider))
