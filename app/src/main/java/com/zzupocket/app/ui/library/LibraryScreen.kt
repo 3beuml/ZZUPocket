@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +49,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.zzupocket.app.BuildConfig
+import com.zzupocket.app.core.AppGraph
+import com.zzupocket.app.data.lib.LibClient
 import kotlinx.coroutines.delay
 import java.io.ByteArrayInputStream
 
@@ -239,7 +242,11 @@ private const val DIAG_JS = """
 @OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LibraryScreen(onBack: () -> Unit) {
+fun LibraryScreen(
+    onBack: () -> Unit,
+    /** 非空时顶栏显示「记录」入口（原生预约记录 + 热力图页） */
+    onOpenRecords: (() -> Unit)? = null,
+) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -273,12 +280,17 @@ fun LibraryScreen(onBack: () -> Unit) {
 
     // 加载期高频探测（每 0.25 秒）→ 一出问题立刻自愈；稳定后降为 2 秒一次的看门狗，
     // 这样页面自己重新加载 / 换路由把布局弄坏时还能自动救回来。
+    // 同一条循环里顺路做两件事：①把 SPA 存进 sessionStorage 的会话 token 抓回来落盘（原生
+    // 预约记录接口要用它，见 docs/interfaces/图书馆空间预约系统接口逆向.md）；②等于每次
+    // 打开都在给原生侧续会话。
     LaunchedEffect(webView, probeToken) {
         val view = webView ?: return@LaunchedEffect
         var tries = 0
         var last = ""
         var lastDiag = ""
         var lastVhFix = ""
+        var pendingSessionToken = ""
+        var lastSessionToken = ""
         while (true) {
             delay(if (contentReady) 2000L else 250L)
             if (!contentReady) {
@@ -304,6 +316,28 @@ fun LibraryScreen(onBack: () -> Unit) {
                             -1L
                         }
                         Log.i(TAG, "content ready after ${cost}ms (probes=$tries, $r)")
+                    }
+                }
+            }
+    // 会话捕获：登录成功后 token 静静躺在 sessionStorage，CookieManager 里躺着 PHPSESSID ——
+    // 都是我们能拿、也只需要拿的东西（不碰密码）。连续两次看到同一个非空 token 才落盘，
+    // 避免抓到登录被覆值途中的中间状态。
+            runCatching {
+                view.evaluateJavascript(LibClient.TOKEN_JS) { result ->
+                    val t = result.orEmpty().trim('"')
+                    if (t.length > 8 && t != lastSessionToken) {
+                        if (t == pendingSessionToken && pendingSessionToken.isNotEmpty()) {
+                            val cookie = runCatching {
+                                CookieManager.getInstance().getCookie(LibClient.COOKIE_URL)
+                            }.getOrNull()
+                            val ok = AppGraph.libSessionSource.onWebViewLogin(t, cookie)
+                            Log.i(TAG, "captured lib session token (len=${t.length}, cookie=${cookie != null}, adopted=$ok)")
+                            lastSessionToken = t
+                            pendingSessionToken = ""
+                        } else {
+                            // 两次探测一致 -> 下一轮才真正落盘（上面那个分支）
+                            pendingSessionToken = t
+                        }
                     }
                 }
             }
@@ -347,6 +381,11 @@ fun LibraryScreen(onBack: () -> Unit) {
                     }
                 },
                 actions = {
+                    if (onOpenRecords != null) {
+                        IconButton(onClick = onOpenRecords) {
+                            Icon(Icons.Filled.EventNote, contentDescription = "我的预约记录")
+                        }
+                    }
                     IconButton(onClick = { restart() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "刷新")
                     }

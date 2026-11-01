@@ -107,6 +107,20 @@ object AppGraph {
 
     val easClient: EasClient by lazy { EasClient(HttpClients.eas, json) }
 
+    /** 图书馆（order.lib.zzu.edu.cn）： WebView 抓会话 → 原生查询预约记录 */
+    val libSessionSource: com.zzupocket.app.data.lib.LibSessionSource by lazy {
+        com.zzupocket.app.data.lib.LibSessionSource(tokenStore)
+    }
+
+    val libClient: com.zzupocket.app.data.lib.LibClient by lazy {
+        com.zzupocket.app.data.lib.LibClient(HttpClients.lib, json) { libSessionSource.current() }
+    }
+
+    /** 图书馆预约记录（原生「我的预约记录」页的数据源；带本地缓存，不登录也能看历史） */
+    val libRecordRepository: com.zzupocket.app.data.repo.LibRecordRepository by lazy {
+        com.zzupocket.app.data.repo.LibRecordRepository(libClient, db, json)
+    }
+
     /** 研究生教务（gmsstu）的会话 Cookie 罐：WebView 登录后注入，接口请求自动带上 */
     val gmsCookieJar: com.zzupocket.app.data.gms.GmsCookieJar by lazy {
         com.zzupocket.app.data.gms.GmsCookieJar()
@@ -163,6 +177,11 @@ object AppGraph {
     /** 一卡通接口自检（P4 开发期用，确认新接口的返回字段） */
     val ecardProbe: EcardProbe by lazy {
         EcardProbe(ecardClient, authRepository, db, json)
+    }
+
+    /** 图书馆记录接口自检（带会话，v2） */
+    val libRecordsProbe: com.zzupocket.app.data.lib.LibRecordsProbe by lazy {
+        com.zzupocket.app.data.lib.LibRecordsProbe(libClient, libSessionSource, json)
     }
 
     /** 教务「教室」接口自检（P5 开发期用，定位空教室/教室字典接口） */

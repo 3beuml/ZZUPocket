@@ -100,4 +100,12 @@ object HttpClients {
     val eas: OkHttpClient by lazy {
         builder(minIntervalMs = 300).followRedirects(false).build()
     }
+
+    /**
+     * 图书馆空间预约（order.lib.zzu.edu.cn）：校外只能走明文 HTTP:80（已放行白名单），
+     * 允许重定向（`/v4/login/cas` 兑票链是 302；记录接口本身不跳）。
+     */
+    val lib: OkHttpClient by lazy {
+        builder(minIntervalMs = 300).followRedirects(true).build()
+    }
 }

@@ -89,6 +89,10 @@ data class DiagState(
     /** 图书馆传输层自检结果 */
     val libReport: String = "",
     val libError: String = "",
+    val probingLibRecords: Boolean = false,
+    /** 图书馆记录接口自检（带会话，v2）结果 */
+    val libRecordsReport: String = "",
+    val libRecordsError: String = "",
     val probingEasAuth: Boolean = false,
     /** 教务鉴权自检结果（令牌形态 + 各接口状态码 + 换鉴权形状的对照） */
     val easAuthReport: String = "",
@@ -105,6 +109,8 @@ data class DiagState(
     val gmsLoginAt: Long = 0L,
     /** null = 还没检查；true/false = 「检查会话」的结果 */
     val gmsAlive: Boolean? = null,
+    /** 图书馆会话 token 的捕获时间（0 = 从没捕获，原生记录接口用不了） */
+    val libSessionAt: Long = 0L,
     /** 自检工具是否展开（默认收起，别挡住日常信息） */
     val probesOpen: Boolean = false,
 )
@@ -130,6 +136,7 @@ class DiagnosticsViewModel : ViewModel() {
                 readingCount = repo.readingCount(),
                 gmsLoggedIn = AppGraph.gmsScheduleSource.hasSession(),
                 gmsLoginAt = AppGraph.gmsScheduleSource.loginAt(),
+                libSessionAt = AppGraph.libSessionSource.capturedAt(),
             )
         }
     }
@@ -190,6 +197,27 @@ class DiagnosticsViewModel : ViewModel() {
                     probingLib = false,
                     libReport = result.getOrDefault(""),
                     libError = result.exceptionOrNull()?.let { e -> e.message ?: e.toString() }
+                        .orEmpty(),
+                )
+            }
+        }
+    }
+
+    /**
+     * 图书馆「记录」自检（带会话，v2）：回答会话走路由还是走 cookie、
+     * 记录条目的真实字段名（热力图日期字段）与 limit 探顶。
+     * 前提：先在「图书馆」页登录一次（登录后 App 自动抓 token）。
+     */
+    fun runLibRecordsProbe() {
+        if (_state.value.probingLibRecords) return
+        _state.update { it.copy(probingLibRecords = true, libRecordsReport = "", libRecordsError = "") }
+        viewModelScope.launch {
+            val result = runCatching { AppGraph.libRecordsProbe.run() }
+            _state.update {
+                it.copy(
+                    probingLibRecords = false,
+                    libRecordsReport = result.getOrDefault(""),
+                    libRecordsError = result.exceptionOrNull()?.let { e -> e.message ?: e.toString() }
                         .orEmpty(),
                 )
             }
@@ -388,6 +416,15 @@ fun DiagnosticsScreen(
                     "令牌获取于 ${FULL_FMT.format(Date(status!!.ecardTokenAt))}（每 45 分钟自动刷新）"
                 } else {
                     "尚未获取，首次查询电费时自动换取"
+                },
+            )
+            StatusRow(
+                label = "图书馆预约系统",
+                ok = state.libSessionAt > 0L,
+                detail = if (state.libSessionAt > 0L) {
+                    "会话已捕获（${FULL_FMT.format(Date(state.libSessionAt))}），原生预约记录可用"
+                } else {
+                    "打开「图书馆」页一次后会自动捕获会话（登录走学校统一认证，我们不碰密码）"
                 },
             )
 
@@ -823,6 +860,66 @@ fun DiagnosticsScreen(
                             SelectionContainer {
                                 Text(
                                     text = state.libReport,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("图书馆记录接口自检（带会话）", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "新功能「原生预约记录 + 热力图」要靠会话调记录接口。" +
+                                "这里做三件事：① 同一接口分别只带 Authorization / 只带 Cookie，" +
+                                "确认服务端认哪个会话通道；② 把 seat / renege / my_wait / seminar：" +
+                                "books、reneges 的**真实字段名与值形态** dump 出来（热力图日期字段以它为准）；" +
+                                "③ limit 探顶。前提：先在「图书馆」页登录一次（App 会自动抓会话），" +
+                                "再跑本自检。结果不含任何令牌。tag = LibRecordsProbe。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { vm.runLibRecordsProbe() },
+                                enabled = !state.probingLibRecords,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                if (state.probingLibRecords) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Spacer(Modifier.size(8.dp))
+                                }
+                                Text(if (state.probingLibRecords) "自检中…" else "开始记录自检")
+                            }
+                            if (state.libRecordsReport.isNotEmpty()) {
+                                val clipboard = LocalClipboardManager.current
+                                OutlinedButton(onClick = {
+                                    clipboard.setText(AnnotatedString(state.libRecordsReport))
+                                }) { Text("复制结果") }
+                            }
+                        }
+                        if (state.libRecordsError.isNotEmpty()) {
+                            Text(
+                                text = "自检出错：${state.libRecordsError}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                        if (state.libRecordsReport.isNotEmpty()) {
+                            Text(
+                                "结果（也可以直接说一声，我从 logcat 取）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            SelectionContainer {
+                                Text(
+                                    text = state.libRecordsReport,
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontFamily = FontFamily.Monospace,
                                     ),

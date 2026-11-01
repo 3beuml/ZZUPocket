@@ -32,6 +32,9 @@ import java.time.LocalDate
  *
  * 底色常驻、强度用主题色叠加 —— 没学的那天也留一块底色，
  * 这样才看得出"这个月基本没动"和"这个月天天都有"的差别。
+ *
+ * [tierOf] 决定"数值 → 强度档位"的映射，默认是番茄钟的"秒数分档"；
+ * 图书馆记录页复用本组件时传自己的"次数分档"（见 LibRecordStats）。
  */
 @Composable
 fun FocusHeatmap(
@@ -41,6 +44,7 @@ fun FocusHeatmap(
     weeks: Int = FocusHeatmap.DEFAULT_WEEKS,
     selectedDay: LocalDate? = null,
     onDayClick: ((LocalDate) -> Unit)? = null,
+    tierOf: (Int) -> Int = FocusStats::heatTier,
 ) {
     val labelStyle = MaterialTheme.typography.labelSmall
     val cell = with(LocalDensity.current) { labelStyle.fontSize.toDp() * 1.5f }
@@ -95,7 +99,7 @@ fun FocusHeatmap(
                                 // 未来的日子：同样大的透明占位，不然最后一列会矮一截
                                 Box(Modifier.size(cell))
                             } else {
-                                val tier = FocusStats.heatTier(secondsByDay[day] ?: 0)
+                                val tier = tierOf(secondsByDay[day] ?: 0)
                                 val ring = when {
                                     day == selectedDay -> selectedRing
                                     day == today -> todayRing
@@ -146,9 +150,12 @@ fun FocusHeatmap(
     }
 }
 
-/** 强度图例：少 ▢▢▢▢▢ 多 */
+/** 强度图例：少 ▢▢▢▢▢ 多；[unitText] 说明一格的含义（番茄钟=半小时，图书馆=一次预约） */
 @Composable
-fun HeatmapLegend(modifier: Modifier = Modifier) {
+fun HeatmapLegend(
+    modifier: Modifier = Modifier,
+    unitText: String = "1 格 ≈ 半小时",
+) {
     val labelStyle = MaterialTheme.typography.labelSmall
     val cell = with(LocalDensity.current) { labelStyle.fontSize.toDp() * 1.5f }
     val gap = cell / 6
@@ -182,7 +189,7 @@ fun HeatmapLegend(modifier: Modifier = Modifier) {
         Text("多", style = labelStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.size(cell))
         Text(
-            text = "1 格 ≈ 半小时",
+            text = unitText,
             style = labelStyle,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

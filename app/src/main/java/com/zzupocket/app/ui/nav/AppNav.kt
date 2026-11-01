@@ -62,6 +62,7 @@ import com.zzupocket.app.ui.campus.CampusScreen
 import com.zzupocket.app.ui.campus.CardScreen
 import com.zzupocket.app.ui.campus.ElectricityScreen
 import com.zzupocket.app.ui.campus.RoomScreen
+import com.zzupocket.app.ui.library.LibRecordsScreen
 import com.zzupocket.app.ui.library.LibraryScreen
 import com.zzupocket.app.ui.diag.DiagnosticsScreen
 import com.zzupocket.app.ui.focus.FocusScreen
@@ -103,6 +104,7 @@ private const val ROUTE_ROOMS = "room_occupancy"
 private const val ROUTE_ELECTRICITY = AppRoutes.ELECTRICITY
 private const val ROUTE_CARD = AppRoutes.CARD
 private const val ROUTE_LIBRARY = "library_web"
+private const val ROUTE_LIB_RECORDS = "library_records"
 private const val ROUTE_ABOUT = "about"
 private const val ROUTE_APPEARANCE = "appearance"
 
@@ -301,7 +303,18 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     RoomScreen(onBack = { navController.popBackStack() })
                 }
                 composable(ROUTE_LIBRARY) {
-                    LibraryScreen(onBack = { navController.popBackStack() })
+                    LibraryScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenRecords = { navController.navigate(ROUTE_LIB_RECORDS) },
+                    )
+                }
+                composable(ROUTE_LIB_RECORDS) {
+                    LibRecordsScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenLibrary = {
+                            navController.navigate(ROUTE_LIBRARY) { launchSingleTop = true }
+                        },
+                    )
                 }
                 composable(ROUTE_LOGIN) {
                     LoginScreen(

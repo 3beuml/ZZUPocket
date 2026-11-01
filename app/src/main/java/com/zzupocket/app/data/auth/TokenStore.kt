@@ -65,6 +65,28 @@ class TokenStore(context: Context) {
         get() = prefs.getLong(KEY_GMS_COOKIE_AT, 0L)
         set(value) = prefs.edit().putLong(KEY_GMS_COOKIE_AT, value).apply()
 
+    /**
+     * 图书馆空间预约系统（order.lib.zzu.edu.cn）的会话。
+     *
+     * SPA 的主会话是 **member token**（登录成功从 `data.token` 存入 sessionStorage,
+     * 之后每个请求带 `authorization: bearer<token>`）；另有 `PHPSESSID` cookie（302 兑票链会落）。
+     * 两条都存：请求时双通道带上，谁被服务端认用由真机自检确认（见 docs/interfaces/
+     * 图书馆空间预约系统接口逆向.md 第三节）。
+     */
+    var libToken: String?
+        get() = prefs.getString(KEY_LIB_TOKEN, null)
+        set(value) = prefs.edit().putString(KEY_LIB_TOKEN, value).apply()
+
+    /** [libToken] 捕获时间（毫秒；0 = 从未捕获）。诊断页展示用 */
+    var libTokenAt: Long
+        get() = prefs.getLong(KEY_LIB_TOKEN_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_LIB_TOKEN_AT, value).apply()
+
+    /** 图书馆的 Cookie 头（`k=v; k2=v2` 原样字符串，捕获时与 token 同刻取） */
+    var libCookie: String?
+        get() = prefs.getString(KEY_LIB_COOKIE, null)
+        set(value) = prefs.edit().putString(KEY_LIB_COOKIE, value).apply()
+
     /** 上次登录成功的时间，用于诊断页展示 */
     var lastLoginAt: Long
         get() = prefs.getLong(KEY_LAST_LOGIN, 0L)
@@ -83,6 +105,9 @@ class TokenStore(context: Context) {
         private const val KEY_ECARD_AT = "ecard_token_at"
         private const val KEY_GMS_COOKIE = "gms_cookie"
         private const val KEY_GMS_COOKIE_AT = "gms_cookie_at"
+        private const val KEY_LIB_TOKEN = "lib_token"
+        private const val KEY_LIB_TOKEN_AT = "lib_token_at"
+        private const val KEY_LIB_COOKIE = "lib_cookie"
         private const val KEY_LAST_LOGIN = "last_login_at"
     }
 }
