@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- N2 夜版前景：深色模式下两块各提亮一档、叠提亮为 #1F6A50 保证夜里可读 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#33C387"
+        android:pathData="M55,46 h14 a9,9 0 0 1 9,9 v14 a9,9 0 0 1 -9,9 h-14 a9,9 0 0 1 -9,-9 v-14 a9,9 0 0 1 9,-9 z" />
+    <path
+        android:fillColor="#3F7BF2"
+        android:pathData="M39,30 h14 a9,9 0 0 1 9,9 v14 a9,9 0 0 1 -9,9 h-14 a9,9 0 0 1 -9,-9 v-14 a9,9 0 0 1 9,-9 z" />
+    <path
+        android:fillColor="#1F6A50"
+        android:pathData="M46,46 h16 v16 h-16 z" />
+</vector>

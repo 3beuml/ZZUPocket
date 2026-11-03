@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="window_background">#1C1B1F</color>
+    <!-- 启动器图标桌面背景（深色模式，夜底，配合 drawable-night/ic_launcher_foreground 夜版前景） -->
+    <color name="ic_launcher_background">#12161D</color>
 
     <!-- 小组件配色的深色兜底（口径见 values/colors.xml 里的注释） -->
     <color name="widget_bg">#211F26</color>

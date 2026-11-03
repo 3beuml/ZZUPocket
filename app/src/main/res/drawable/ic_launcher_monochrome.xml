@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主题图标（A13 monochrome）单色层：双圆角方块剪影（交叠关系即剪影） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M55,46 h14 a9,9 0 0 1 9,9 v14 a9,9 0 0 1 -9,9 h-14 a9,9 0 0 1 -9,-9 v-14 a9,9 0 0 1 9,-9 z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M39,30 h14 a9,9 0 0 1 9,9 v14 a9,9 0 0 1 -9,9 h-14 a9,9 0 0 1 -9,-9 v-14 a9,9 0 0 1 9,-9 z" />
+</vector>

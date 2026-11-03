@@ -1,11 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- G1 日版前景：课表蓝块 × 电量绿块 斜向交叠（浅色模式） -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 简化的 "Z" 字标，落在自适应图标 72dp 安全区内 -->
+    <!-- 电量绿块 (46,46,32,32,r9)，落在自适应图标 72dp 安全区内 -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M38,38 L70,38 L70,46 L52,66 L70,66 L70,74 L38,74 L38,66 L56,46 L38,46 Z" />
+        android:fillColor="#2BB673"
+        android:pathData="M55,46 h14 a9,9 0 0 1 9,9 v14 a9,9 0 0 1 -9,9 h-14 a9,9 0 0 1 -9,-9 v-14 a9,9 0 0 1 9,-9 z" />
+    <!-- 课表蓝块 (30,30,32,32,r9)，压在绿块上层 -->
+    <path
+        android:fillColor="#2F6BDF"
+        android:pathData="M39,30 h14 a9,9 0 0 1 9,9 v14 a9,9 0 0 1 -9,9 h-14 a9,9 0 0 1 -9,-9 v-14 a9,9 0 0 1 9,-9 z" />
+    <!-- 交叠区 16×16，压叠青 -->
+    <path
+        android:fillColor="#157A58"
+        android:pathData="M46,46 h16 v16 h-16 z" />
 </vector>
