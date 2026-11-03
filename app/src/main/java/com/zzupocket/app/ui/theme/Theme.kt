@@ -43,10 +43,16 @@ fun ZZUPocketTheme(
     darkMode: DarkMode = DarkMode.SYSTEM,
     preset: ThemePreset = ThemePreset.DYNAMIC,
     darkContrast: DarkContrast = DarkContrast.STANDARD,
+    darkTinted: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val dark = rememberEffectiveDark(darkMode)
-    val colorScheme = rememberAppColorScheme(preset = preset, dark = dark, darkContrast = darkContrast)
+    val colorScheme = rememberAppColorScheme(
+        preset = preset,
+        dark = dark,
+        darkContrast = darkContrast,
+        darkTinted = darkTinted,
+    )
     MaterialTheme(
         colorScheme = colorScheme,
         content = content,
@@ -63,6 +69,10 @@ fun ZZUPocketTheme(
  *  - DYNAMIC 档 → 标准档原样用系统动态方案（原生默认观感分毫不变）；
  *    选中/高档时以系统动态方案的主色改种、按所选对比度重算整套 —— 系统没有暴露
  *    对比度入口，这是保留壁纸上"色相感受"的最短通道。
+ *
+ * darkTinted（"深色保留颜色"：见 [MaterialYouScheme.tintedSurfaces]）开着时，
+ * 深色 scheme 的背景/表面系角色统一染色（往主色靠 14%）并轻微上抬（加白 4.5%）；
+ * DYNAMIC+标准档开着它时也会改种重算（按标准对比度），否则切不出带色底的方案。
  */
 @Composable
 fun rememberAppColorScheme(
@@ -70,26 +80,30 @@ fun rememberAppColorScheme(
     dark: Boolean,
     variant: SchemeVariant = SchemeVariant.TONAL_SPOT,
     darkContrast: DarkContrast = DarkContrast.STANDARD,
+    darkTinted: Boolean = false,
 ): ColorScheme {
     val context = LocalContext.current
-    return remember(preset, dark, variant, darkContrast) {
+    return remember(preset, dark, variant, darkContrast, darkTinted) {
         val contrast = MaterialYouScheme.darkContrastLevel(darkContrast)
-        val seed = preset.seedArgb
-        when {
-            seed != null -> MaterialYouScheme.fromSeed(
-                seedArgb = seed,
+        fun build(seedArgb: Int, level: Double): ColorScheme {
+            val scheme = MaterialYouScheme.fromSeed(
+                seedArgb = seedArgb,
                 dark = dark,
                 variant = variant,
-                contrastLevel = if (dark) contrast else MaterialYouScheme.DEFAULT_CONTRAST,
+                contrastLevel = level,
+            )
+            return if (dark && darkTinted) MaterialYouScheme.tintedSurfaces(scheme) else scheme
+        }
+        val seed = preset.seedArgb
+        when {
+            seed != null -> build(
+                seed,
+                if (dark) contrast else MaterialYouScheme.DEFAULT_CONTRAST,
             )
             !dark -> dynamicLightColorScheme(context)
-            contrast == 0.0 -> dynamicDarkColorScheme(context)
-            else -> MaterialYouScheme.fromSeed(
-                seedArgb = dynamicDarkColorScheme(context).primary.toArgb(),
-                dark = true,
-                variant = variant,
-                contrastLevel = contrast,
-            )
+            dark && darkTinted -> build(dynamicDarkColorScheme(context).primary.toArgb(), contrast)
+            contrast > 0.0 -> build(dynamicDarkColorScheme(context).primary.toArgb(), contrast)
+            else -> dynamicDarkColorScheme(context)
         }
     }
 }

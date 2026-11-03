@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
                 darkMode = prefs.darkMode,
                 preset = prefs.themePreset,
                 darkContrast = prefs.darkContrast,
+                darkTinted = prefs.darkTinted,
             ) {
                 AppNav(initialRoute = widgetRoute, routeToken = routeToken)
             }

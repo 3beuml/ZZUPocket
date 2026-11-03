@@ -28,6 +28,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -49,6 +50,8 @@ import com.zzupocket.app.data.prefs.DarkMode
 import com.zzupocket.app.data.prefs.ThemePreset
 import com.zzupocket.app.data.prefs.UiPrefs
 import com.zzupocket.app.ui.theme.MaterialYouScheme
+import com.zzupocket.app.ui.theme.rememberAppColorScheme
+import com.zzupocket.app.ui.theme.rememberEffectiveDark
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,6 +104,10 @@ class AppearanceViewModel : ViewModel() {
 
     fun setDarkContrast(v: DarkContrast) {
         viewModelScope.launch { store.setDarkContrast(v) }
+    }
+
+    fun setDarkTinted(v: Boolean) {
+        viewModelScope.launch { store.setDarkTinted(v) }
     }
 }
 
@@ -168,15 +175,39 @@ fun AppearanceScreen(
                 }
             }
 
+            Text(
+                text = "深色保留颜色",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "深色底带主色色相、整体不再乌黑",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.weight(1f))
+                Switch(
+                    checked = prefs.darkTinted,
+                    onCheckedChange = { vm.setDarkTinted(it) },
+                )
+            }
+
             Text("配色", style = MaterialTheme.typography.titleSmall)
 
             GlassCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(vertical = 4.dp)) {
+                    // 预览跟随「生效深浅」，对比度/保留颜色也随之联动，所见即所得
+                    val previewDark = rememberEffectiveDark(prefs.darkMode)
                     ThemePreset.entries.forEach { preset ->
                         PresetRow(
                             preset = preset,
                             selected = prefs.themePreset == preset,
-                            dark = prefs.darkMode == DarkMode.DARK,
+                            dark = previewDark,
+                            darkContrast = prefs.darkContrast,
+                            darkTinted = prefs.darkTinted,
                             onClick = { vm.setPreset(preset) },
                         )
                     }
@@ -193,7 +224,9 @@ fun AppearanceScreen(
                             "所以颜色之间的关系跟原生一致，而不是随手挑的色。\n" +
                             "· 深浅色可以单独设，不影响配色选择。\n" +
                             "· 深色对比度对标系统的「对比度」选项，只在深色下生效：中/高档把文字、容器、边线整体" +
-                            "推亮；「跟随壁纸」在标准档保持系统原样，选中/高档会以壁纸主色重算一套高对比配色。",
+                            "推亮；「跟随壁纸」在标准档保持系统原样，选中/高档会以壁纸主色重算一套高对比配色。\n" +
+                            "· 「深色保留颜色」用 Material 3 Expressive 的 2025 规则重写深色表面：底色不再只有" +
+                            "灰色系，会带上配色/壁纸的主色色相并整体比默认深色亮一档；与对比度档可以叠加使用。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -211,9 +244,11 @@ private fun PresetRow(
     preset: ThemePreset,
     selected: Boolean,
     dark: Boolean,
+    darkContrast: DarkContrast,
+    darkTinted: Boolean,
     onClick: () -> Unit,
 ) {
-    val swatches = rememberPresetSwatches(preset, dark)
+    val swatches = rememberPresetSwatches(preset, dark, darkContrast, darkTinted)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -256,14 +291,20 @@ private fun Swatch(color: Color, offsetIndex: Int) {
     )
 }
 
-/** 某个预设（按当前深浅档）的三个代表色 */
+/** 某个预设（按当前生效深浅 + 对比度 + 保留颜色）的三个代表色 */
 @Composable
-private fun rememberPresetSwatches(preset: ThemePreset, dark: Boolean): List<Color> {
-    val context = LocalContext.current
-    return remember(preset, dark) {
-        val scheme = preset.seedArgb?.let { seed ->
-            MaterialYouScheme.fromSeed(seedArgb = seed, dark = dark)
-        } ?: if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        listOf(scheme.primary, scheme.primaryContainer, scheme.tertiary)
-    }
+private fun rememberPresetSwatches(
+    preset: ThemePreset,
+    dark: Boolean,
+    darkContrast: DarkContrast,
+    darkTinted: Boolean,
+): List<Color> {
+    // 与全局主题同一套生成逻辑（rememberAppColorScheme 内部已做 remember）
+    val scheme = rememberAppColorScheme(
+        preset = preset,
+        dark = dark,
+        darkContrast = darkContrast,
+        darkTinted = darkTinted,
+    )
+    return listOf(scheme.primary, scheme.primaryContainer, scheme.tertiary)
 }

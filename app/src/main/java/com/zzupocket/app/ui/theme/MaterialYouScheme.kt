@@ -2,6 +2,7 @@ package com.zzupocket.app.ui.theme
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import com.zzupocket.app.data.prefs.DarkContrast
 import com.materialkolor.dynamiccolor.DynamicColor
 import com.materialkolor.dynamiccolor.MaterialDynamicColors
@@ -40,6 +41,31 @@ object MaterialYouScheme {
         DarkContrast.STANDARD -> 0.0
         DarkContrast.MEDIUM -> 0.5
         DarkContrast.HIGH -> 1.0
+    }
+
+    /**
+     * 「深色保留颜色」的表达：深色列表的表面角色统一染色（往主色靠 14%，
+     * 保住壁纸/种子色的色相）并轻微上抬（加白 4.5%），底不再是深灰近黑。
+     *
+     * 只动背景/表面系角色，onPrimary/toNu 文字或文字角色一概不碰——
+     * 文字与表面的明度差还被加白拉大了一发，对比反而更宽松。
+     */
+    internal fun tintedSurfaces(scheme: ColorScheme): ColorScheme {
+        val accent = scheme.primary
+        fun lift(c: Color): Color = lerp(lerp(c, accent, 0.14f), Color.White, 0.045f)
+        return scheme.copy(
+            background = lift(scheme.background),
+            surface = lift(scheme.surface),
+            surfaceDim = lift(scheme.surfaceDim),
+            surfaceBright = lift(scheme.surfaceBright),
+            surfaceContainerLowest = lift(scheme.surfaceContainerLowest),
+            surfaceContainerLow = lift(scheme.surfaceContainerLow),
+            surfaceContainer = lift(scheme.surfaceContainer),
+            surfaceContainerHigh = lift(scheme.surfaceContainerHigh),
+            surfaceContainerHighest = lift(scheme.surfaceContainerHighest),
+            surfaceVariant = lift(scheme.surfaceVariant),
+            surfaceTint = scheme.primary,
+        )
     }
 
     fun fromSeed(
