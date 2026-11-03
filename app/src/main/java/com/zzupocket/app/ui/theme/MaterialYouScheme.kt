@@ -44,15 +44,15 @@ object MaterialYouScheme {
     }
 
     /**
-     * 「深色保留颜色」的表达：深色列表的表面角色统一染色（往主色靠 14%，
-     * 保住壁纸/种子色的色相）并轻微上抬（加白 4.5%），底不再是深灰近黑。
+     * 「深色保留颜色」的表达：深色列表的表面角色统一染色（往主色靠 20%，
+     * 保住壁纸/种子色的色相）并轻微上抬（加白 7%），底不再是深灰近黑。
      *
-     * 只动背景/表面系角色，onPrimary/toNu 文字或文字角色一概不碰——
-     * 文字与表面的明度差还被加白拉大了一发，对比反而更宽松。
+     * 只动背景/表面系角色，文字角色一概不碰——
+     * 文字与表面的明度差还被加白拉大了一档，对比反而更宽松。
      */
     internal fun tintedSurfaces(scheme: ColorScheme): ColorScheme {
         val accent = scheme.primary
-        fun lift(c: Color): Color = lerp(lerp(c, accent, 0.14f), Color.White, 0.045f)
+        fun lift(c: Color): Color = lerp(lerp(c, accent, 0.20f), Color.White, 0.07f)
         return scheme.copy(
             background = lift(scheme.background),
             surface = lift(scheme.surface),

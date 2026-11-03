@@ -173,17 +173,21 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     // 半透明 + 细描边 + 无阴影，是所有页面同一套配方：胶囊融进页面底色，
     // 不再出现"一圈不是背景色的色带"（surfaceContainerHighest 实底 + 渐变衬底的教训）。
     val dockAlpha = if (transparentBar) 0.35f else 0.5f
-    // dock 同样跟「生效深浅」同口径（rc5：方案 A「同色融合」）：深色非壁纸档
-    // 直接用页面的 surface（与背景 Box 同色同实心，保留颜色/对比度染色后也一致），
-    // 视觉上就是"透明胶囊融进页面"——不再是一块突兀的深色片，也不穿渗；
-    // 壁纸"透明导航栏"档（0.35）保持刻意透到壁纸，浅色档维持原半透配方。
+    // dock 同样跟「生效深浅」同口径：深色非壁纸档直接用页面的 surface（保留颜色/
+    // 对比度染色后也一致），无手工混合。rc6 又拆掉两处深色暗源：
+    // ① 6dp 投影在深底上是一圈"更黑的晕"，深色非壁纸档降到 1dp tonal 微浮起；
+    // ② 壁纸透明档是刻意浮在照片上的，保留 6dp 自由浮起。
     val dockDark = rememberEffectiveDark(prefs.darkMode)
     val dockColor = when {
         transparentBar -> MaterialTheme.colorScheme.surface.copy(alpha = dockAlpha)
         dockDark -> MaterialTheme.colorScheme.surface
         else -> MaterialTheme.colorScheme.surface.copy(alpha = dockAlpha)
     }
-    val dockElevation = 0.dp
+    val dockElevation = when {
+        transparentBar -> 6.dp
+        dockDark -> 1.dp
+        else -> 6.dp
+    }
 
     // 「更多」图标的更新红点：开屏静默查一次（MainActivity），更多页手动查也共享同一份状态。
     // 判定口径在 AppUpdate.shouldShowDot：屏蔽只认具体版本，之后出的新版仍会提醒。
@@ -370,7 +374,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                 .fillMaxWidth()
                                 .height(56.dp)
                                 .shadow(
-                                    elevation = 6.dp,
+                                    elevation = dockElevation,
                                     shape = RoundedCornerShape(28.dp),
                                     clip = false,
                                 ),
@@ -393,10 +397,14 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                                 .size(40.dp)
                                                 .clip(CircleShape)
                                                 .background(
-                                                    if (selected) {
-                                                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
-                                                    } else {
-                                                        Color.Transparent
+                                                    when {
+                                                        !selected -> Color.Transparent
+                                                        // 深色下选中泡用 primaryContainer：比默认的
+                                                        // secondaryContainer（深色调 30）亮一档，且与
+                                                        // 「保留颜色」主色底是同一色相家族，更协调；
+                                                        // 浅色维持 secondaryContainer 原配方
+                                                        dockDark -> MaterialTheme.colorScheme.primaryContainer
+                                                        else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
                                                     },
                                                 ),
                                             contentAlignment = Alignment.Center,
@@ -404,10 +412,10 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                             Icon(
                                                 if (selected) destination.icon else destination.outlinedIcon,
                                                 contentDescription = destination.label,
-                                                tint = if (selected) {
-                                                    MaterialTheme.colorScheme.primary
-                                                } else {
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                tint = when {
+                                                    !selected -> MaterialTheme.colorScheme.onSurfaceVariant
+                                                    dockDark -> MaterialTheme.colorScheme.onPrimaryContainer
+                                                    else -> MaterialTheme.colorScheme.primary
                                                 },
                                                 modifier = Modifier.size(23.dp),
                                             )
