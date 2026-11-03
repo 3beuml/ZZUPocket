@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -549,6 +550,8 @@ fun LibraryScreen(
 /** 打开期间盖住整页：学校服务器在校外本来就慢，得让用户知道"在加载"而不是"卡死了" */
 @Composable
 private fun LoadingVeil(progress: Int, showSkip: Boolean, onSkip: () -> Unit) {
+    // 这层底是强制白（WebView 页面就是浅色），所以文字色必须钉在浅色系上、
+    // 不能跟全局深色主题走 —— 否则深色模式下浅字压白底，页级大面积看不清。
     Box(
         Modifier
             .fillMaxSize()
@@ -560,20 +563,31 @@ private fun LoadingVeil(progress: Int, showSkip: Boolean, onSkip: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            CircularProgressIndicator()
-            Text("正在打开图书馆系统", style = MaterialTheme.typography.titleMedium)
+            CircularProgressIndicator(color = Color(0xFF2F6BDF))
+            Text(
+                "正在打开图书馆系统",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color(0xFF1C1B1F),
+            )
             Text(
                 "校外访问要连学校自己的服务器，第一次打开比较慢（通常 10–20 秒）。\n" +
                     "登录会自动完成，请稍等一下，不用退出。",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color(0xFF49454F),
                 textAlign = TextAlign.Center,
             )
             if (progress in 1..99) {
-                Text("加载中 $progress%", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    "加载中 $progress%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color(0xFF1C1B1F),
+                )
             }
             if (showSkip) {
-                TextButton(onClick = onSkip) { Text("等太久了？点这里直接显示页面") }
+                TextButton(
+                    onClick = onSkip,
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF2F6BDF)),
+                ) { Text("等太久了？点这里直接显示页面") }
             }
         }
     }
@@ -581,6 +595,7 @@ private fun LoadingVeil(progress: Int, showSkip: Boolean, onSkip: () -> Unit) {
 
 @Composable
 private fun ErrorPane(message: String, lastUrl: String?, onRetry: () -> Unit) {
+    // 同 LoadingVeil：底强制白，色全部钉浅色系，不吃全局深色主题。
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -592,17 +607,24 @@ private fun ErrorPane(message: String, lastUrl: String?, onRetry: () -> Unit) {
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
+            color = Color(0xFFB3261E),
             textAlign = TextAlign.Center,
         )
         Text(
             text = "图书馆系统校外只能走明文 HTTP（学校侧限制），建议连校园网再试。" +
                 (lastUrl?.let { "\n刚尝试的地址：$it" } ?: ""),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = Color(0xFF49454F),
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
-        Button(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) { Text("重试") }
+        Button(
+            onClick = onRetry,
+            modifier = Modifier.padding(top = 16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF2F6BDF),
+                contentColor = Color.White,
+            ),
+        ) { Text("重试") }
     }
 }

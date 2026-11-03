@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import com.zzupocket.app.ui.components.GlassCard
+import com.zzupocket.app.ui.theme.rememberEffectiveDark
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -521,7 +521,9 @@ private fun ScheduleGrid(
     val days = 1..prefs.dayCount
     val cellH = prefs.cellHeightDp.dp
     val gap = if (prefs.blockBorder == BlockBorder.NONE) 0.75.dp else 1.dp
-    val dark = isSystemInDarkTheme()
+    // 课程块明度必须跟「生效深浅」同口径（外观页可以强制深/浅，与系统分叉）；
+    // 用系统档会把块底和块上文字带成两套配色，互相不可读。
+    val dark = rememberEffectiveDark(prefs.darkMode)
     val todayIso = LocalDate.now().toString()
     val today = LocalDate.now()
     val now = LocalTime.now()

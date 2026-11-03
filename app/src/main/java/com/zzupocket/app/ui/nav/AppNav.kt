@@ -58,6 +58,7 @@ import com.zzupocket.app.data.prefs.UiPrefs
 import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
 import com.zzupocket.app.ui.about.AboutScreen
+import com.zzupocket.app.ui.theme.rememberEffectiveDark
 import com.zzupocket.app.ui.campus.CampusScreen
 import com.zzupocket.app.ui.campus.CardScreen
 import com.zzupocket.app.ui.campus.ElectricityScreen
@@ -172,6 +173,15 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     // 半透明 + 细描边 + 无阴影，是所有页面同一套配方：胶囊融进页面底色，
     // 不再出现"一圈不是背景色的色带"（surfaceContainerHighest 实底 + 渐变衬底的教训）。
     val dockAlpha = if (transparentBar) 0.35f else 0.5f
+    // dock 同样跟「生效深浅」同口径：深色下 M3 surface 和页底几乎同色，
+    // 半透明胶囊会让滚动内容从四个 tab 图标底下穿渗；改用 surfaceContainer
+    // 并把非壁纸档提到 ≥0.78 才压得住。壁纸"透明导航栏"档（0.35）是刻意透的。
+    val dockColor = when {
+        transparentBar -> MaterialTheme.colorScheme.surface.copy(alpha = dockAlpha)
+        rememberEffectiveDark(prefs.darkMode) ->
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.78f)
+        else -> MaterialTheme.colorScheme.surface.copy(alpha = dockAlpha)
+    }
 
     // 「更多」图标的更新红点：开屏静默查一次（MainActivity），更多页手动查也共享同一份状态。
     // 判定口径在 AppUpdate.shouldShowDot：屏蔽只认具体版本，之后出的新版仍会提醒。
@@ -339,7 +349,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     Box(Modifier.align(Alignment.BottomCenter)) {
                         Surface(
                             shape = RoundedCornerShape(28.dp),
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = dockAlpha),
+                            color = dockColor,
                             tonalElevation = 0.dp,
                             shadowElevation = 0.dp,
                             border = BorderStroke(

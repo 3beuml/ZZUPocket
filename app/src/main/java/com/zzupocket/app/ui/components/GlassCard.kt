@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 
@@ -29,16 +30,25 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    // 0.34.1 的深色修复：M3 dark 里 surface 和页面底几乎同色，卡片只剩一条发丝描边，
+    // 层级塌掉。深色改用 surfaceContainer 这一档（本就为「比页面底高一层的容器」设计的角色）
+    // 做出实底 slab；浅色仍是「surface 近实底 + 受光 bevel」的原配方。
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val cardColor = if (isDark) {
+        MaterialTheme.colorScheme.surfaceContainer
+    } else {
+        MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+    }
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        color = cardColor,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         border = BorderStroke(
             0.5.dp,
             Brush.verticalGradient(
                 listOf(
-                    Color.White.copy(alpha = 0.16f),
+                    Color.White.copy(alpha = if (isDark) 0.10f else 0.16f),
                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                 ),

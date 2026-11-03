@@ -1,6 +1,7 @@
 package com.zzupocket.app
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,9 +9,11 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.zzupocket.app.core.AppGraph
+import com.zzupocket.app.data.prefs.DarkMode
 import com.zzupocket.app.data.prefs.UiPrefs
 import com.zzupocket.app.ui.nav.AppNav
 import com.zzupocket.app.ui.nav.AppRoutes
@@ -35,6 +38,25 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 系统栏图标外观跟「生效深浅」走：enableEdgeToEdge 只在进 App 时按系统档
+        // 定一次，外观页强制深/浅后界面立刻换色，但状态栏/手势区图标还停在系统档
+        // —— 深色界面配深色图标（时间/电量看不见）。持续同步到 prefs 变化。
+        lifecycleScope.launch {
+            AppGraph.uiPrefsStore.flow.collect { prefs ->
+                val systemDark = resources.configuration.uiMode and
+                    Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+                val effectiveDark = when (prefs.darkMode) {
+                    DarkMode.SYSTEM -> systemDark
+                    DarkMode.LIGHT -> false
+                    DarkMode.DARK -> true
+                }
+                WindowCompat.getInsetsController(window, window.decorView).apply {
+                    isAppearanceLightStatusBars = !effectiveDark
+                    isAppearanceLightNavigationBars = !effectiveDark
+                }
+            }
+        }
 
         consumeWidgetRoute(intent)
 

@@ -12,6 +12,21 @@ import com.zzupocket.app.data.prefs.DarkMode
 import com.zzupocket.app.data.prefs.ThemePreset
 
 /**
+ * 全 app 统一的「生效深浅」判定，与 [ZZUPocketTheme] 内部同一口径。
+ *
+ * Compose 屏幕里凡是"按深浅选颜色"的地方（课表块明度、玻璃卡层级这类）
+ * 都必须用它，而不是各自 `isSystemInDarkTheme()`：用户在外观页选了
+ * 「始终深色/浅色」以后，系统深浅和主题档位会分叉 —— 各自为政会让
+ * 块底色与块上文字来自两套配色，互相不可读。
+ */
+@Composable
+fun rememberEffectiveDark(darkMode: DarkMode): Boolean = when (darkMode) {
+    DarkMode.SYSTEM -> isSystemInDarkTheme()
+    DarkMode.LIGHT -> false
+    DarkMode.DARK -> true
+}
+
+/**
  * 全应用主题。
  *
  * 两种配色来源：
@@ -27,11 +42,7 @@ fun ZZUPocketTheme(
     preset: ThemePreset = ThemePreset.DYNAMIC,
     content: @Composable () -> Unit,
 ) {
-    val dark = when (darkMode) {
-        DarkMode.SYSTEM -> isSystemInDarkTheme()
-        DarkMode.LIGHT -> false
-        DarkMode.DARK -> true
-    }
+    val dark = rememberEffectiveDark(darkMode)
     val colorScheme = rememberAppColorScheme(preset = preset, dark = dark)
     MaterialTheme(
         colorScheme = colorScheme,
