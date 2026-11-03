@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
             ZZUPocketTheme(
                 darkMode = prefs.darkMode,
                 preset = prefs.themePreset,
+                darkContrast = prefs.darkContrast,
             ) {
                 AppNav(initialRoute = widgetRoute, routeToken = routeToken)
             }

@@ -7,7 +7,9 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import com.zzupocket.app.data.prefs.DarkContrast
 import com.zzupocket.app.data.prefs.DarkMode
 import com.zzupocket.app.data.prefs.ThemePreset
 
@@ -40,10 +42,11 @@ fun rememberEffectiveDark(darkMode: DarkMode): Boolean = when (darkMode) {
 fun ZZUPocketTheme(
     darkMode: DarkMode = DarkMode.SYSTEM,
     preset: ThemePreset = ThemePreset.DYNAMIC,
+    darkContrast: DarkContrast = DarkContrast.STANDARD,
     content: @Composable () -> Unit,
 ) {
     val dark = rememberEffectiveDark(darkMode)
-    val colorScheme = rememberAppColorScheme(preset = preset, dark = dark)
+    val colorScheme = rememberAppColorScheme(preset = preset, dark = dark, darkContrast = darkContrast)
     MaterialTheme(
         colorScheme = colorScheme,
         content = content,
@@ -54,20 +57,39 @@ fun ZZUPocketTheme(
  * 按预设算出配色。
  *
  * 单独抽出来是给「外观」页做实时预览用的 —— 预览某套配色时，当前主题还不是它。
+ *
+ * 深色对比度只在深色 scheme 上生效：
+ *  - 静态种子档 → 直接把对比度喂给 MCU（0.0/0.5/1.0，对标系统对比度三档）；
+ *  - DYNAMIC 档 → 标准档原样用系统动态方案（原生默认观感分毫不变）；
+ *    选中/高档时以系统动态方案的主色改种、按所选对比度重算整套 —— 系统没有暴露
+ *    对比度入口，这是保留壁纸上"色相感受"的最短通道。
  */
 @Composable
 fun rememberAppColorScheme(
     preset: ThemePreset,
     dark: Boolean,
     variant: SchemeVariant = SchemeVariant.TONAL_SPOT,
+    darkContrast: DarkContrast = DarkContrast.STANDARD,
 ): ColorScheme {
     val context = LocalContext.current
-    return remember(preset, dark, variant) {
+    return remember(preset, dark, variant, darkContrast) {
+        val contrast = MaterialYouScheme.darkContrastLevel(darkContrast)
         val seed = preset.seedArgb
-        if (seed == null) {
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        } else {
-            MaterialYouScheme.fromSeed(seedArgb = seed, dark = dark, variant = variant)
+        when {
+            seed != null -> MaterialYouScheme.fromSeed(
+                seedArgb = seed,
+                dark = dark,
+                variant = variant,
+                contrastLevel = if (dark) contrast else MaterialYouScheme.DEFAULT_CONTRAST,
+            )
+            !dark -> dynamicLightColorScheme(context)
+            contrast == 0.0 -> dynamicDarkColorScheme(context)
+            else -> MaterialYouScheme.fromSeed(
+                seedArgb = dynamicDarkColorScheme(context).primary.toArgb(),
+                dark = true,
+                variant = variant,
+                contrastLevel = contrast,
+            )
         }
     }
 }

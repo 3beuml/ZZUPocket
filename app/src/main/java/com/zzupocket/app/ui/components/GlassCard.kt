@@ -30,19 +30,18 @@ fun GlassCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    // 0.34.1 的深色修复：M3 dark 里 surface 和页面底几乎同色，卡片只剩一条发丝描边，
-    // 层级塌掉。深色改用 surfaceContainer 这一档（本就为「比页面底高一层的容器」设计的角色）
-    // 做出实底 slab；浅色仍是「surface 近实底 + 受光 bevel」的原配方。
+    // 0.34.1-rc3 对齐 M3 规约（参考 Tivi 的做法）：深色不再手调容器色，直接
+    // 给真 tonalElevation —— 组合层会在深色下按 elevation 自动把表面往 surfaceTint
+    // 方向提亮，这正是 Material 里"卡片浮在纸上"的原生机制。浅色保持原配方。
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val cardColor = if (isDark) {
-        MaterialTheme.colorScheme.surfaceContainer
-    } else {
-        MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-    }
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = cardColor,
-        tonalElevation = 0.dp,
+        color = if (isDark) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+        },
+        tonalElevation = if (isDark) 2.dp else 0.dp,
         shadowElevation = 0.dp,
         border = BorderStroke(
             0.5.dp,

@@ -44,6 +44,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.core.AppGraph
+import com.zzupocket.app.data.prefs.DarkContrast
 import com.zzupocket.app.data.prefs.DarkMode
 import com.zzupocket.app.data.prefs.ThemePreset
 import com.zzupocket.app.data.prefs.UiPrefs
@@ -73,6 +74,12 @@ private fun DarkMode.label(): String = when (this) {
     DarkMode.DARK -> "始终深色"
 }
 
+private fun DarkContrast.label(): String = when (this) {
+    DarkContrast.STANDARD -> "标准"
+    DarkContrast.MEDIUM -> "中"
+    DarkContrast.HIGH -> "高"
+}
+
 class AppearanceViewModel : ViewModel() {
 
     private val store = AppGraph.uiPrefsStore
@@ -90,6 +97,10 @@ class AppearanceViewModel : ViewModel() {
 
     fun setDarkMode(mode: DarkMode) {
         viewModelScope.launch { store.setDarkMode(mode) }
+    }
+
+    fun setDarkContrast(v: DarkContrast) {
+        viewModelScope.launch { store.setDarkContrast(v) }
     }
 }
 
@@ -142,6 +153,21 @@ fun AppearanceScreen(
                 }
             }
 
+            Text(
+                text = "深色对比度",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DarkContrast.entries.forEach { level ->
+                    FilterChip(
+                        selected = prefs.darkContrast == level,
+                        onClick = { vm.setDarkContrast(level) },
+                        label = { Text(level.label()) },
+                    )
+                }
+            }
+
             Text("配色", style = MaterialTheme.typography.titleSmall)
 
             GlassCard(Modifier.fillMaxWidth()) {
@@ -165,7 +191,9 @@ fun AppearanceScreen(
                             "这也是安卓原生的默认观感。\n" +
                             "· 其余每个配色由一个种子色出发，用 Material 3 同一套算法推出浅色与深色两份色板，" +
                             "所以颜色之间的关系跟原生一致，而不是随手挑的色。\n" +
-                            "· 深浅色可以单独设，不影响配色选择。",
+                            "· 深浅色可以单独设，不影响配色选择。\n" +
+                            "· 深色对比度对标系统的「对比度」选项，只在深色下生效：中/高档把文字、容器、边线整体" +
+                            "推亮；「跟随壁纸」在标准档保持系统原样，选中/高档会以壁纸主色重算一套高对比配色。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -45,6 +45,15 @@ enum class BlockBorder { NONE, SOLID, DASHED }
 enum class DarkMode { SYSTEM, LIGHT, DARK }
 
 /**
+ * 深色对比度：标准 / 中 / 高。
+ *
+ * 对 Material 3 `contrastLevel` 三档的封装（对标 Android 系统设置里的「对比度」）：
+ * 同一套深色 scheme 在 0.0 / 0.5 / 1.0 下重算各角色值——高档把文字、容器、边线
+ * 整体推亮，专治「深色下整体发灰、糊在一块」。只在深色下生效，浅色不受影响。
+ */
+enum class DarkContrast { STANDARD, MEDIUM, HIGH }
+
+/**
  * 全应用配色预设。
  *
  * [DYNAMIC] = 跟随系统壁纸的动态取色（最接近原生 Android 的默认观感）；
@@ -100,6 +109,8 @@ data class UiPrefs(
     val themePreset: ThemePreset = ThemePreset.DYNAMIC,
     /** 深浅色（默认跟随系统） */
     val darkMode: DarkMode = DarkMode.SYSTEM,
+    /** 深色对比度（只在深色下生效，默认标准 = 系统原生观感） */
+    val darkContrast: DarkContrast = DarkContrast.STANDARD,
     /**
      * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
      *
@@ -173,6 +184,8 @@ class UiPrefsStore(context: Context) {
                 ?: ThemePreset.DYNAMIC,
             darkMode = p[KEY_DARK_MODE]?.let { runCatching { DarkMode.valueOf(it) }.getOrNull() }
                 ?: DarkMode.SYSTEM,
+            darkContrast = p[KEY_DARK_CONTRAST]?.let { runCatching { DarkContrast.valueOf(it) }.getOrNull() }
+                ?: DarkContrast.STANDARD,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
@@ -217,6 +230,8 @@ class UiPrefsStore(context: Context) {
     suspend fun setThemePreset(v: ThemePreset) = store.edit { p -> p[KEY_THEME_PRESET] = v.name }
 
     suspend fun setDarkMode(v: DarkMode) = store.edit { p -> p[KEY_DARK_MODE] = v.name }
+
+    suspend fun setDarkContrast(v: DarkContrast) = store.edit { p -> p[KEY_DARK_CONTRAST] = v.name }
 
     /**
      * 写**其中一路**的房间可读名。
@@ -330,6 +345,7 @@ class UiPrefsStore(context: Context) {
         val KEY_BG_VERSION = intPreferencesKey("grid_bg_version")
         val KEY_THEME_PRESET = stringPreferencesKey("theme_preset")
         val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
+        val KEY_DARK_CONTRAST = stringPreferencesKey("dark_contrast")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")

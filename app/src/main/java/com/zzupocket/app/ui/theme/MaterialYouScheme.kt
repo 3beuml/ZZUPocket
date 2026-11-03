@@ -2,6 +2,7 @@ package com.zzupocket.app.ui.theme
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
+import com.zzupocket.app.data.prefs.DarkContrast
 import com.materialkolor.dynamiccolor.DynamicColor
 import com.materialkolor.dynamiccolor.MaterialDynamicColors
 import com.materialkolor.hct.Hct
@@ -33,6 +34,13 @@ object MaterialYouScheme {
 
     /** 默认对比度（系统默认档） */
     const val DEFAULT_CONTRAST = 0.0
+
+    /** 外观页「深色对比度」档位 → MCU contrastLevel（对标系统对比度三档的映射） */
+    fun darkContrastLevel(darkContrast: DarkContrast): Double = when (darkContrast) {
+        DarkContrast.STANDARD -> 0.0
+        DarkContrast.MEDIUM -> 0.5
+        DarkContrast.HIGH -> 1.0
+    }
 
     fun fromSeed(
         seedArgb: Int,
