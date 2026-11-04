@@ -63,12 +63,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.data.eas.EasClient
+import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.RoomRow
 import com.zzupocket.app.ui.components.RelativeTime
 import java.time.Instant
@@ -81,10 +86,76 @@ private val ROOM_DATE_FMT = DateTimeFormatter.ofPattern("M月d日")
 /** 只显示房间号（101 这种），所以列很窄，省下的宽度留给格子 */
 private const val CODE_COL_WIDTH = 58
 
+/** 两节连排分界分隔带的宽度，内嵌一道竖向虚线 */
+private val UNIT_PAIR_GAP = 6.dp
+
+/** 上/下午/晚上分界分隔带的宽度，内嵌一道竖向实线（比连排虚线高一级） */
+private val UNIT_SESSION_GAP = 10.dp
+
+/**
+ * 节次分界的两种强度：PAIR = 两节连排（1-2 | 3-4 | …），SESSION = 上/下午/晚上。
+ */
+private enum class UnitDivider { PAIR, SESSION }
+
+/** "800 表示 08:00" 存的是 HHmm，先换算成分钟再算时间差 */
+private fun minutesOf(hhmm: Int) = hhmm / 100 * 60 + hhmm % 100
+
+/**
+ * 节次列分界从数据推导，不写死"上午 4 + 下午 4 + 晚上 2"：
+ * dayPart（MORNING/AFTERNOON/EVENING，来自 /room/system/course-units）相邻变了
+ * 就是会话分界；dayPart 缺失（接口没给）时兜底看时间差——课间撑死半小时，
+ * 午休/晚饭 ≥ 1 小时。时段分界会重置两两配对的计数，保证 1-2 | 3-4 不会
+ * 跨过时段边界（比如上午只有 3 节时，第 3 节独自贴着时段线，而不是被配进
+ * 下午）。
+ */
+private fun unitDividers(periods: List<Period>): List<UnitDivider?> {
+    val marks = MutableList<UnitDivider?>(periods.size) { null }
+    var sessionStart = 0
+    for (i in 1 until periods.size) {
+        val prev = periods[i - 1]
+        val curr = periods[i]
+        val newSession =
+            (prev.dayPart.isNotBlank() && curr.dayPart.isNotBlank() && prev.dayPart != curr.dayPart) ||
+                minutesOf(curr.startTime) - minutesOf(prev.endTime) >= 60
+        if (newSession) {
+            marks[i] = UnitDivider.SESSION
+            sessionStart = i
+        } else if ((i - sessionStart) % 2 == 0) {
+            marks[i] = UnitDivider.PAIR
+        }
+    }
+    return marks
+}
+
+/** 时段标签；dayPart 缺失时返回空串，标签行留空即可 */
+private fun dayPartLabel(dayPart: String) = when (dayPart) {
+    "MORNING" -> "上午"
+    "AFTERNOON" -> "下午"
+    "EVENING" -> "晚上"
+    else -> ""
+}
+
+/** 会话分组（标签, 列数）：相邻节次之间没有 SESSION 分界即归同组 */
+private fun sessionGroups(periods: List<Period>, marks: List<UnitDivider?>): List<Pair<String, Int>> {
+    val groups = mutableListOf<Pair<String, Int>>()
+    periods.forEachIndexed { index, period ->
+        if (index == 0 || marks[index] == UnitDivider.SESSION) {
+            groups += dayPartLabel(period.dayPart) to 1
+        } else {
+            val (label, count) = groups.last()
+            groups[groups.lastIndex] = label to count + 1
+        }
+    }
+    return groups
+}
+
 /**
  * 教室占用表。
  *
  * 一行一间教室，一排格子对应各节次：**填色 = 那节有课，空白 = 可以用**。
+ * 列之间有两级分界线：两节之间（1-2 | 3-4 | …）一道窄虚线同一节次的判断把
+ * "同一次课"圈在一起；上/下午/晚上之间一道更宽的竖向实线切段落（表头顶上
+ * 也按组标出时段）。分界从节次表的 dayPart/时间差推导，不写死 4+4+2。
  * 按楼分组、楼内按教室号升序（低楼层自然在前）、不显示楼层标题。
  *
  * 工具栏刻意压到两行：日期（可点开日历）+ 筛选按钮 / 节次筛选 chips。
@@ -99,6 +170,8 @@ fun RoomScreen(
     val state by vm.state.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val currentUnit = vm.currentUnitNo()
+    // 节次分界（两节连排/时段）从 periods 推导：表头和数据行共用一份，行列不错位
+    val unitMarks = remember(state.periods) { unitDividers(state.periods) }
 
     val shouldLoadMore by remember { derivedLoadMore(listState) }
     LaunchedEffect(shouldLoadMore) { if (shouldLoadMore) vm.loadMore() }
@@ -221,7 +294,7 @@ fun RoomScreen(
                 )
             }
 
-            UnitHeaderRow(state.periods.map { it.indexNo }, currentUnit)
+            UnitHeaderRow(state.periods, unitMarks, currentUnit)
 
             LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                 state.groups.forEach { (buildingName, rooms) ->
@@ -229,7 +302,7 @@ fun RoomScreen(
                     items(rooms, key = { "r-${it.id}" }) { room ->
                         RoomRowView(
                             room = room,
-                            unitCount = state.periods.size,
+                            unitMarks = unitMarks,
                             currentUnit = currentUnit,
                             onLongPress = { vm.openRaw(room) },
                         )
@@ -254,7 +327,8 @@ fun RoomScreen(
                 }
                 item {
                     Text(
-                        text = "填色 = 那节有课；空白 = 那节空着可以用。" +
+                        text = "填色 = 那节有课；空白 = 那节空着可以用。宽实线 = 上/下午/晚上分界，" +
+                            "窄虚线 = 两节连排分界（大多数课一次连上两节）。" +
                             (if (state.hiddenVirtual > 0) "虚拟教室（${state.hiddenVirtual}）未显示。" else "") +
                             "长按教室号可看接口原始字段。教室借用请走学校流程，这里只做查询。",
                         style = MaterialTheme.typography.labelSmall,
@@ -386,34 +460,85 @@ private fun RoomDatePickerDialog(
     }
 }
 
-/** 表头：教室号列 + 各节次序号；当前时间的节次高亮 */
+/** 表头：教室号列 + 各节次序号；序号上方按会话组标出上午/下午/晚上；当前时间的节次高亮 */
 @Composable
-private fun UnitHeaderRow(indexNos: List<Int>, currentUnit: Int) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = "教室",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(CODE_COL_WIDTH.dp),
-        )
-        indexNos.forEach { no ->
+private fun UnitHeaderRow(periods: List<Period>, marks: List<UnitDivider?>, currentUnit: Int) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        if (periods.isNotEmpty()) {
+            // ── 时段标签行：上午/下午/晚上按会话组居中，列数越多权重越大；
+            // 组间垫实线分隔带同宽的空隙。组宽用纯 weight 对齐，与格子行相差的
+            // 1-2dp 花在小标签的居中上，肉眼可忽略。
+            Row(Modifier.fillMaxWidth()) {
+                Spacer(Modifier.width(CODE_COL_WIDTH.dp))
+                sessionGroups(periods, marks).forEachIndexed { index, (label, columns) ->
+                    if (index > 0) Spacer(Modifier.width(UNIT_SESSION_GAP))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(columns.toFloat()),
+                    )
+                }
+            }
+        }
+        // ── 节次序号行：与占格行同构（同权重格子 + 同宽分隔带），列列对齐 ──
+        Row {
             Text(
-                text = "$no",
+                text = "教室",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (no == currentUnit) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                fontWeight = if (no == currentUnit) FontWeight.Bold else FontWeight.Normal,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.width(CODE_COL_WIDTH.dp),
             )
+            periods.forEachIndexed { index, period ->
+                marks.getOrNull(index)?.let { UnitDividerMark(height = 14.dp, kind = it) }
+                Text(
+                    text = "${period.indexNo}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (period.indexNo == currentUnit) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    fontWeight = if (period.indexNo == currentUnit) FontWeight.Bold else FontWeight.Normal,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
+}
+
+/**
+ * 节次列分界处的一道竖线，两级强度（视觉口径沿用课表网格：
+ * outlineVariant + Compose 没有内置虚线、drawBehind + dashPathEffect 自绘这同一套）：
+ * - SESSION（上/下午/晚上）：更宽的缝 + 实线，重一点的笔画才像"换段落"；
+ * - PAIR（两节连排）：窄缝 + 虚线，把"同一次课"的两节圈在一起。
+ * dash 用 3/3 比课表的 4/4 密一点——20dp 高的短线密节距才读得出"虚线"而非两点。
+ */
+@Composable
+private fun UnitDividerMark(height: Dp, kind: UnitDivider) {
+    val session = kind == UnitDivider.SESSION
+    val lineColor = MaterialTheme.colorScheme.outlineVariant
+        .copy(alpha = if (session) 0.75f else 0.45f)
+    Box(
+        Modifier
+            .width(if (session) UNIT_SESSION_GAP else UNIT_PAIR_GAP)
+            .height(height)
+            .drawBehind {
+                if (session) {
+                    drawLine(lineColor, Offset(center.x, 0f), Offset(center.x, size.height), strokeWidth = 1.dp.toPx())
+                } else {
+                    drawLine(
+                        lineColor,
+                        Offset(center.x, 0f),
+                        Offset(center.x, size.height),
+                        strokeWidth = 0.7.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())),
+                    )
+                }
+            },
+    )
 }
 
 @Composable
@@ -430,17 +555,17 @@ private fun BuildingHeader(name: String, count: Int) {
 @Composable
 private fun RoomRowView(
     room: RoomRow,
-    unitCount: Int,
+    unitMarks: List<UnitDivider?>,
     currentUnit: Int,
     onLongPress: () -> Unit,
 ) {
     val occupiedColor = MaterialTheme.colorScheme.primary
     val emptyColor = MaterialTheme.colorScheme.surfaceVariant
     val highlight = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f)
-    val cells = if (room.occupied.size >= unitCount) {
+    val cells = if (room.occupied.size >= unitMarks.size) {
         room.occupied
     } else {
-        room.occupied + List(unitCount - room.occupied.size) { false }
+        room.occupied + List(unitMarks.size - room.occupied.size) { false }
     }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
@@ -455,6 +580,8 @@ private fun RoomRowView(
                 .combinedClickable(onClick = {}, onLongClick = onLongPress),
         )
         cells.forEachIndexed { index, occupied ->
+            // 两节连排 = 窄虚线；上/下午/晚上 = 宽实线
+            unitMarks.getOrNull(index)?.let { UnitDividerMark(height = 20.dp, kind = it) }
             Box(Modifier.weight(1f).height(20.dp).padding(horizontal = 1.dp)) {
                 Box(
                     Modifier
