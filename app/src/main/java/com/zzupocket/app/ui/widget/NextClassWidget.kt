@@ -161,7 +161,7 @@ class NextClassWidget : AppWidgetProvider() {
                 // 圆气泡删除。2×2 只两行，字号比 4×2 的 13/12 抬一档（本节 15/13，
                 // 下一节 13/12）；矮盒子整组降一档。
                 val (n1, s1) = if (heightDp <= 0 || heightDp >= 170) 15 to 13 else 14 to 12
-                // 第二行（下一节）：≥145dp 才画（nextClassPreviews 的账本，无中间档）
+                // 第二行（下一节）：≥150dp 才画（nextClassPreviews 的账本，无中间档）
                 val second = plan.nextCourse?.takeIf { previews >= 1 }
                 // 可用高度 = 画布 - 内边距 28 - 表头 ~22 - 行距 2；两行就等分（单行独占）
                 val available = if (heightDp > 0) (heightDp - 52).coerceAtLeast(0) else 0
@@ -170,40 +170,41 @@ class NextClassWidget : AppWidgetProvider() {
                 // 账本里"列宽"口径是格子可容宽：卡片内边距 28 先去掉
                 val columnWidthDp = (widthDp - 28).coerceAtLeast(0)
 
-                rv.addView(
-                    R.id.next_rows,
-                    Widgets.courseRow(
+                // ⚠️ 行高**必须显式 setViewLayoutHeight**（周课表同款 API31 正经 API），
+                // 不能只靠 courseRow 的"加内边距"式 stretch：那套的账本（naturalHeight）一旦
+                // 算窄就会 extra≤0 跳过，内容全部顶到标题下面、下半留大片空白
+                // （2026-11-04 桌面截图实证——单节课时整片空底）。row_root 本身带
+                // gravity=center_vertical，显式高度直接让内容行内居中，不再依赖 padding。
+                fun stretchedRow(
+                    course: WidgetCourse,
+                    targetH: Int,
+                    nameDp: Int,
+                    subDp: Int,
+                ): RemoteViews {
+                    val row = Widgets.courseRow(
                         context = context,
-                        row = WidgetSchedule.toRow(first),
+                        row = WidgetSchedule.toRow(course),
                         colors = colors,
                         dark = dark,
                         detail = detail,
-                        rowHeightDp = row1H,
-                        nameSizeDp = n1,
-                        subSizeDp = s1,
+                        rowHeightDp = 0, // 不用 padding 式 stretch，高度在下方显式设定
+                        nameSizeDp = nameDp,
+                        subSizeDp = subDp,
                         naturalHeightDp = WidgetSchedule.rowNaturalHeightDp(
-                            WidgetSchedule.nameLineCount(first.name, columnWidthDp, n1),
-                        ),
-                    ),
-                )
-                second?.let { next ->
-                    // 第二行本档不给地点（previews 只有 0/2 两档，到这里 PREV 必为 1）
-                    rv.addView(
-                        R.id.next_rows,
-                        Widgets.courseRow(
-                            context = context,
-                            row = WidgetSchedule.toRow(next),
-                            colors = colors,
-                            dark = dark,
-                            detail = WidgetSchedule.RowDetail.NAME,
-                            rowHeightDp = row2H,
-                            nameSizeDp = n1 - 2,
-                            subSizeDp = s1 - 1,
-                            naturalHeightDp = WidgetSchedule.rowNaturalHeightDp(
-                                WidgetSchedule.nameLineCount(next.name, columnWidthDp, n1 - 2),
-                            ),
+                            WidgetSchedule.nameLineCount(course.name, columnWidthDp, nameDp),
                         ),
                     )
+                    if (targetH > 0) {
+                        row.setViewLayoutHeight(
+                            R.id.row_root, targetH.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP,
+                        )
+                    }
+                    return row
+                }
+
+                rv.addView(R.id.next_rows, stretchedRow(first, row1H, n1, s1))
+                second?.let { next ->
+                    rv.addView(R.id.next_rows, stretchedRow(next, row2H, n1 - 2, s1 - 1))
                 }
             } else {
                 rv.setTextViewText(R.id.status_title, plan.statusTitle)
