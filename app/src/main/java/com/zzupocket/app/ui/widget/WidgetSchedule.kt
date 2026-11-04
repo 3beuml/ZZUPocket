@@ -109,36 +109,29 @@ data class WidgetTwoDayPlan(
  * 「2×2」组件的内容 —— 只回答一个问题：**我下一节是什么**。
  *
  * ```
- *   今天 · 第 4 周              ╭──╮
- *  ▓ 大学物理                   │ 3│   ← 圆气泡 = 这节课以及之后还有几节（含本节）
- *    10:00 - 11:35              ╰──╯
+ *   今天 · 第 4 周
+ *  ▌大学物理                 ← 行样式（4×2 同款）：色条 + 课名 + 地点/时间段
+ *    10:00 - 11:35
  *    南3 101
- *    → 程序设计基础             ← 再往后那节课（预告主行）
- *      14:00 · 南3 202          ← 时间·地点（预告副行，矮盒先收）
+ *  ▌程序设计基础             ← 第二行 = 下一节（字号小一号）
+ *    南3 202        14:00
  *
- * 这是**回退后的形态**：中间那版做成了"星期表头 + 一行一节的列表"，
- * 真机上被否掉 —— 今天上完、明天又没课时，整个内容区只剩一句状态，看着像坏了；
- * 而且列表版把 4×2 的「明天的课看右边」文案带进了 2×2（2×2 没有右边）。
- * 用户要求回到"一节课大字 + 圆气泡 + 一行预告"，所以这里按那个形态重写。
+ * 演化史：中间那版做成了"星期表头 + 一行一节的列表"，真机上被否掉 —— 今天上完、
+ * 明天又没课时整个内容区只剩一句状态看着像坏了，而且列表版把 4×2 的
+ * 「明天的课看右边」文案带进了 2×2（2×2 没有右边）。随后回退成
+ * "一节课大字 + 圆气泡 + 一行预告"；**2026-11-04 第二轮**：用户要求两节课都用
+ * 4×2 的「色条 + 文字」行样式、圆气泡删除（剩几节的信息 4×2 页脚已有）——
+ * 就是现在的两行形态。⚠️ "别改成整周多行列表"仍成立：这里只排到下一节为止。
  */
 data class WidgetNextClassPlan(
     /** 「今天 · 第 4 周」/「明日预告 · 第 4 周」；状态态下为空 */
     val header: String,
-    /** 圆气泡里的数字：这节课以及之后还有几节（含本节）；0 = 不显示气泡 */
+    /** 这节课以及之后还有几节（含本节），拾光口径；圆气泡已下线，字段留作数据 */
     val remaining: Int,
-    val name: String,
-    /** `10:00 - 11:35`：2×2 竖着有空间，写完整时间段（4×2 的列宽写不下） */
-    val timeRange: String,
-    val place: String,
-    /** 预告主行：「→ 程序设计基础」（下一节的课名）；没有就是空串 */
-    val preview: String,
-    /**
-     * 预告副行：「14:00 · 南3 202」——下一节课的时间·地点（issue #13：地点要能看见）；
-     * 地点空缺时只剩时间；矮盒单行档或没课时不给
-     */
-    val previewSub: String,
-    /** 课程代码，用来给色条取色（与 App 课表格子同一套算法） */
-    val code: String,
+    /** 本节（或下一节），完整信息——渲染层用 [WidgetSchedule.toRow] 排成 4×2 同款行 */
+    val firstCourse: WidgetCourse? = null,
+    /** 下一节（没有则 null）；2×2 的第二行 */
+    val nextCourse: WidgetCourse? = null,
     /** 非空 = 整块状态（无课程 / 假期中 / 还没有课表数据） */
     val statusTitle: String = "",
     val statusMessage: String = "",
@@ -146,7 +139,7 @@ data class WidgetNextClassPlan(
     val isVacation: Boolean = false,
 ) {
     val isStatus: Boolean get() = statusTitle.isNotBlank()
-    val hasCourse: Boolean get() = name.isNotBlank()
+    val hasCourse: Boolean get() = firstCourse != null
 }
 
 /**
@@ -157,8 +150,8 @@ data class WidgetNextClassPlan(
  *  2. 4×2 左列今天 = 今天里**还没下课**的，按开始时间升序 → footer「剩余 N 节」；
  *  3. 4×2 右列明天 = 明天**全部**（不看钟点）→ footer「共有 N 节」；
  *  4. 某列没有课 → 整列居中「无课程」；假期 / 还没同步 → 整块盖住（见 [twoDayPlan]）；
- *  5. 2×2 = **一节课大字 + 圆气泡 + 一行预告**（[nextClassPlan]）：今天还有课就用今天的
- *     第一节；今天没了但明天有 → 顶上明天的第一节（表头「明日预告」）；今明都没有 → 「无课程」。
+ *  5. 2×2 = **两行 4×2 同款行样式（本节 + 下一节）**（[nextClassPlan]）：今天还有课就用今天
+ *     还没下课的头两节；今天没了但明天有 → 明天的头两节（表头「明日预告」）；今明都没有 → 「无课程」。
  *
  * 列头日期是「今天 9.29 周二」这种写法（拾光用 `M.dd`），只用在 4×2 的两列上。
  */
@@ -536,30 +529,17 @@ object WidgetSchedule {
         return (budget / lineH).coerceIn(1, 3)
     }
 
-    // ── 2×2：一节课大字 + 圆气泡 + 一行预告 ──────────────────────────────
-
-    /** 「→ 14:00 程序设计基础」这种预告行 */
-    /** 预告主行：「→ 程序设计基础」——时间在这里挪去主线，课名始终挂在首行 */
-    fun previewText(course: WidgetCourse): String = "→ ${course.name}"
-
-    /**
-     * 预告副行：「14:00 · 南3 202」（issue #13：下节课的地点要能看见）。
-     * 地点空缺（有的课不排教室）时只剩时间，不让行空着。
-     */
-    fun previewSubText(course: WidgetCourse): String =
-        if (course.place.isBlank()) course.startText else "${course.startText} · ${course.place}"
+    // ── 2×2：两行 4×2 同款行样式（本节 + 下一节），圆气泡已下线 ──────────
 
     /**
      * 「2×2」的内容。
      *
      * 取数顺序：
-     *  1. 今天还有没下课的课 → 第一节占大块，表头「今天 · 第 N 周」；
-     *  2. 今天上完了 / 今天本来没课，但**明天有** → 顶上明天的第一节，表头「明日预告 · 第 N 周」。
+     *  1. 今天还有没下课的课 → 头两节排两行，表头「今天 · 第 N 周」；
+     *  2. 今天上完了 / 今天本来没课，但**明天有** → 明天的头两节，表头「明日预告 · 第 N 周」。
      *     组件空着最没用，而且这正是用户这次报的场景（今晚课上完、明天国庆没课，
      *     旧版只剩一句状态，看着像坏了）；
      *  3. 今明都没有 → 一句「无课程」。
-     *
-     * @param previewRows 预告块给到哪一档（0 不画 / 1 只画课名 / ≥2 画整块，见 [nextClassPreviews]）
      */
     fun nextClassPlan(
         hasSchedule: Boolean,
@@ -567,7 +547,6 @@ object WidgetSchedule {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse>,
         nowMin: Int,
-        previewRows: Int = 1,
     ): WidgetNextClassPlan {
         val courses = today.sortedBy { it.startMin }
         val st = state(hasSchedule, week, courses, nowMin)
@@ -575,47 +554,37 @@ object WidgetSchedule {
 
         if (st == WidgetCourseState.NOT_SYNCED || st == WidgetCourseState.VACATION) {
             return WidgetNextClassPlan(
-                header = "", remaining = 0, name = "", timeRange = "", place = "",
-                preview = "", previewSub = "", code = "",
+                header = "", remaining = 0,
                 statusTitle = statusTitle(st), statusMessage = statusMessage(st),
                 isVacation = st == WidgetCourseState.VACATION,
             )
         }
 
         val remain = remainingToday(courses, nowMin)
-        if (remain.isNotEmpty()) return nextClassOf(remain, "今天$weekSuffix", previewRows)
+        if (remain.isNotEmpty()) return nextClassOf(remain, "今天$weekSuffix")
 
         val tomorrowCourses = tomorrow.sortedBy { it.startMin }
         if (tomorrowCourses.isNotEmpty()) {
-            return nextClassOf(tomorrowCourses, "明日预告$weekSuffix", previewRows)
+            return nextClassOf(tomorrowCourses, "明日预告$weekSuffix")
         }
 
         return WidgetNextClassPlan(
-            header = "", remaining = 0, name = "", timeRange = "", place = "",
-            preview = "", previewSub = "", code = "", statusTitle = statusTitle(st),
+            header = "", remaining = 0, statusTitle = statusTitle(st),
         )
     }
 
-    /** 把一串课排成"第一节大字 + 后面几行预告" */
+    /** 计划只带"本节 + 下一节"两门课的完整信息；每档显示多少由渲染层按盒子高度收 */
     private fun nextClassOf(
         courses: List<WidgetCourse>,
         header: String,
-        previewRows: Int,
     ): WidgetNextClassPlan {
         val first = courses.first()
-        val next = courses.getOrNull(1)
         return WidgetNextClassPlan(
             header = header,
-            // 这节课以及之后还有几节（含本节）—— 与拾光的圆气泡口径一致
+            // 这节课以及之后还有几节（含本节）—— 拾光口径；气泡已下线，字段留作数据
             remaining = courses.size,
-            name = first.name,
-            timeRange = first.rangeText,
-            place = first.place,
-            // 预告块（issue #13）：主行 = 下一节的课名，副行 = 时间·地点。
-            // 2×2 只回答"下一节"，多节依然是 4×2 的活 —— 不再往一行里拼多节。
-            preview = if (previewRows >= 1 && next != null) previewText(next) else "",
-            previewSub = if (previewRows >= 2 && next != null) previewSubText(next) else "",
-            code = first.code,
+            firstCourse = first,
+            nextCourse = courses.getOrNull(1),
         )
     }
 
@@ -751,22 +720,17 @@ object WidgetSchedule {
     fun rowFontSizes(heightDp: Int): Pair<Int, Int> =
         if (heightDp <= 0 || heightDp >= 170) 13 to 12 else 12 to 11
 
-    /** 2×2「下一节课」的大字课名：标准档 17dp，矮盒子 15dp */
-    fun bigNameSizeDp(heightDp: Int): Int =
-        if (heightDp <= 0 || heightDp >= 170) 17 else 15
-
     /**
-     * 「2×2」预告块给到哪一档（issue #13）。
+     * 「2×2」第二行（下一节）画不画（issue #13 第二轮）。
      *
-     * 整块 = 主行（课名）+ 副行（时间·地点）。195dp 实测画布的账：
-     * 内边距 28 + 表头 22 + 中块 ~58 + 预告整块 ~31 ≈ 139dp，盒子 ≥150dp 保证放得下整块；
-     * 中档只画课名一行；<105dp 什么都不画——从下往上收，宁可少一行完整的字也不截半截。
-     * 读不到尺寸（≤0）时按"只剩课名"的保守档。
+     * ⚠️ 行样式下没有"中间档"：row 的自然高 ~44dp 不会因为藏了地点变小
+     * （课名+时间段仍是两行字），所以两行要么整行画、要么不画。
+     * 账本：内边距 28 + 表头 22 + 行距 2 + 两行 44×2 ≈ 140dp，留 10dp 余量 → ≥150dp
+     * 才画第二行；读不到尺寸（≤0）时保守只画本节一行。
      */
     fun nextClassPreviews(heightDp: Int): Int = when {
-        heightDp <= 0 -> 1
+        heightDp <= 0 -> 0
         heightDp >= 150 -> 2
-        heightDp >= 105 -> 1
         else -> 0
     }
 

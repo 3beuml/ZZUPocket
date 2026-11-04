@@ -19,26 +19,28 @@ import kotlinx.coroutines.launch
  * 「下一节课」桌面组件（2×2）—— 只回答一个问题：**我下一节是什么**。
  *
  * ```
- *   今天 · 第 4 周              ╭──╮
- *  ▓ 大学物理                   │ 3│   ← 圆气泡 = 这节课以及之后还有几节（含本节）
- *    10:00 - 11:35              ╰──╯
- *    南3 101
- *    → 程序设计基础
- *      14:00 · 南3 202          ← 预告副行（issue #13：下节课地点）
+ *   今天 · 第 4 周
+ *  ▌大学物理                    ← 本节行（4×2 同款 courseRow，字号大一号）
+ *    南3 101        10:00-11:35
+ *  ▌程序设计基础                 ← 第二行 = 下一节（字号小一号）
+ *    南3 202        14:00-…
  * ```
  *
  * 三种形态（判断全在 [WidgetSchedule.nextClassPlan]，纯函数、有单测）：
- *  1. 今天还有没下课的课 → 第一节大字 + 「今天 · 第 N 周」；
- *  2. 今天上完了 / 今天本来没课，但明天有 → 顶上明天的第一节，表头「明日预告 · 第 N 周」；
+ *  1. 今天还有没下课的课 → 头两节排两行 + 「今天 · 第 N 周」；
+ *  2. 今天上完了 / 今天本来没课，但明天有 → 明天的头两节，表头「明日预告 · 第 N 周」；
  *  3. 今明都没有 → 居中一句「无课程」；假期 / 还没同步分别是「假期中」「还没有课表数据」。
  *
- * ⚠️ **别再把它改成"一行一节的列表"**：中间那版那么做过，真机上被否掉 ——
+ * ⚠️ **别把它改成"整周多行列表"**：中间那版那么做过，真机上被否掉 ——
  * 今天上完、明天又没课时整个内容区只剩一句状态，看着像坏了；
  * 而且列表版把 4×2 的「明天的课看右边」文案带进了 2×2（2×2 没有右边）。
+ * （2026-11-04 第二轮：用户要求两节课都用 4×2 的「色条 + 文字」行样式、圆气泡删除——
+ * 已照办，这里只排到下一节为止，再多就是 4×2 的活。）
  *
- * 课名/时间段/地点/预告按盒子高度从下往上收（[WidgetSchedule.nextClassDetail] /
- * [WidgetSchedule.nextClassPreviews]），矮盒子里也不会被裁成半截字。
- * 一块 = 左侧课程色条 + 课名 + 完整时间段 + 地点，**不显示老师**（用户要求）。
+ * 两行直接复用 [Widgets.courseRow]（4×2 的行构建），字号比 4×2 抬一档（2×2 只两行）；
+ * 第二行按 [WidgetSchedule.nextClassPreviews] 的档位画/收，本节地点按
+ * [WidgetSchedule.nextClassDetail] 收，矮盒子里不会被裁成半截字。
+ * **不显示老师**（用户要求，App 内"格子里不显示老师"的约定延续到组件）。
  */
 class NextClassWidget : AppWidgetProvider() {
 
@@ -99,8 +101,8 @@ class NextClassWidget : AppWidgetProvider() {
             val dark = WidgetStyle.isDark(context, prefs)
             val click = Widgets.openApp(context, AppRoutes.SCHEDULE)
             ids.forEach { id ->
-                val (_, heightDp) = Widgets.sizeDp(mgr, id)
-                val plan = schedule.nextClassPlan(WidgetSchedule.nextClassPreviews(heightDp))
+                val (widthDp, heightDp) = Widgets.sizeDp(mgr, id)
+                val plan = schedule.nextClassPlan()
                 val rv = build(
                     context = context,
                     plan = plan,
@@ -108,6 +110,8 @@ class NextClassWidget : AppWidgetProvider() {
                     dark = dark,
                     click = click,
                     detail = WidgetSchedule.nextClassDetail(heightDp),
+                    previews = WidgetSchedule.nextClassPreviews(heightDp),
+                    widthDp = widthDp,
                     heightDp = heightDp,
                 )
                 runCatching { mgr.updateAppWidget(id, rv) }
@@ -121,25 +125,15 @@ class NextClassWidget : AppWidgetProvider() {
             dark: Boolean,
             click: PendingIntent,
             detail: WidgetSchedule.RowDetail,
+            previews: Int,
+            widthDp: Int,
             heightDp: Int,
         ): RemoteViews {
             val rv = RemoteViews(context.packageName, R.layout.widget_next_class)
             WidgetStyle.tint(rv, R.id.card, colors.bg)
             rv.setOnClickPendingIntent(R.id.widget_root, click)
-            // 大字课名按画布高度分档（矮盒子缩一号防裁字，issue #6）
-            rv.setTextViewTextSize(
-                R.id.tv_course_name,
-                android.util.TypedValue.COMPLEX_UNIT_DIP,
-                WidgetSchedule.bigNameSizeDp(heightDp).toFloat(),
-            )
 
             rv.setTextColor(R.id.header, colors.text)
-            rv.setTextColor(R.id.bubble, colors.accent)
-            rv.setTextColor(R.id.tv_course_name, colors.text)
-            rv.setTextColor(R.id.tv_course_time, colors.dim)
-            rv.setTextColor(R.id.tv_course_place, colors.hint)
-            rv.setTextColor(R.id.preview, colors.hint)
-            rv.setTextColor(R.id.preview_sub, colors.hint)
             rv.setTextColor(R.id.status_title, colors.text)
             rv.setTextColor(R.id.status_message, colors.dim)
 
@@ -155,48 +149,62 @@ class NextClassWidget : AppWidgetProvider() {
                 return rv
             }
 
-            // ⚠️ 三种形态的可见性**每次都要显式写一遍**：桌面上的组件是拿新 RemoteViews
-            // 重新应用的，不归零就会看到上一状态的残留部件（拾光专门有个 resetWidgetState 干这事）。
-            //
-            // 圆气泡在表头行里，**不属于** container_info / container_status 任何一边，
-            // 所以必须单独写一次 —— 真机上就是这里漏了：状态态下气泡仍然挂着布局里的占位数字「3」。
-            rv.setTextViewText(R.id.bubble, plan.remaining.toString())
-            rv.setViewVisibility(
-                R.id.bubble,
-                if (plan.hasCourse && plan.remaining > 0) View.VISIBLE else View.GONE,
-            )
-            rv.setViewVisibility(R.id.container_info, if (plan.hasCourse) View.VISIBLE else View.GONE)
+            // ⚠️ 三种形态的可见性**每次都要显式写一遍**（不归零会看到上一状态的残留部件）；
+            // 行是 addView 进 @id/next_rows 的，所以每次先 removeAllViews 清场，
+            // 状态态/低矮档才不会残留上一态的两行。
+            rv.removeAllViews(R.id.next_rows)
             rv.setViewVisibility(R.id.container_status, if (plan.isStatus) View.VISIBLE else View.GONE)
 
             if (plan.hasCourse) {
-                rv.setTextViewText(R.id.tv_course_name, plan.name)
-                rv.setTextViewText(R.id.tv_course_time, plan.timeRange)
-                rv.setTextViewText(R.id.tv_course_place, plan.place)
+                val first = checkNotNull(plan.firstCourse)
+                // 2026-11-04 第二轮（用户要求）：两节都用 4×2 同款的「色条 + 文字」行、
+                // 圆气泡删除。2×2 只两行，字号比 4×2 的 13/12 抬一档（本节 15/13，
+                // 下一节 13/12）；矮盒子整组降一档。
+                val (n1, s1) = if (heightDp <= 0 || heightDp >= 170) 15 to 13 else 14 to 12
+                // 第二行（下一节）：≥145dp 才画（nextClassPreviews 的账本，无中间档）
+                val second = plan.nextCourse?.takeIf { previews >= 1 }
+                // 可用高度 = 画布 - 内边距 28 - 表头 ~22 - 行距 2；两行就等分（单行独占）
+                val available = if (heightDp > 0) (heightDp - 52).coerceAtLeast(0) else 0
+                val row1H = if (second != null) available / 2 + available % 2 else available
+                val row2H = if (second != null) available - row1H else 0
+                // 账本里"列宽"口径是格子可容宽：卡片内边距 28 先去掉
+                val columnWidthDp = (widthDp - 28).coerceAtLeast(0)
 
-                // 气泡颜色跟着主色走（可见性在上面统一处理）
-                WidgetStyle.tint(rv, R.id.bubble, colors.accent)
-                rv.setTextColor(R.id.bubble, WidgetStyle.textOn(colors.accent))
-
-                // 色条按课程代码取色（与 App 课表格子同一套算法）
-                WidgetStyle.tint(rv, R.id.bar, WidgetStyle.courseColor(plan.code, colors, dark))
-
-                // 矮盒子从下往上收：先收本节地点；预告块按 nextClassPreviews 的档位缩
-                // （副行先没——previewRows<2 时 previewSub 本来就是空串——再整块没）
-                val full = detail == WidgetSchedule.RowDetail.FULL
-                rv.setViewVisibility(
-                    R.id.tv_course_place,
-                    if (full && plan.place.isNotBlank()) View.VISIBLE else View.GONE,
+                rv.addView(
+                    R.id.next_rows,
+                    Widgets.courseRow(
+                        context = context,
+                        row = WidgetSchedule.toRow(first),
+                        colors = colors,
+                        dark = dark,
+                        detail = detail,
+                        rowHeightDp = row1H,
+                        nameSizeDp = n1,
+                        subSizeDp = s1,
+                        naturalHeightDp = WidgetSchedule.rowNaturalHeightDp(
+                            WidgetSchedule.nameLineCount(first.name, columnWidthDp, n1),
+                        ),
+                    ),
                 )
-                rv.setTextViewText(R.id.preview, plan.preview)
-                rv.setViewVisibility(
-                    R.id.preview,
-                    if (full && plan.preview.isNotBlank()) View.VISIBLE else View.GONE,
-                )
-                rv.setTextViewText(R.id.preview_sub, plan.previewSub)
-                rv.setViewVisibility(
-                    R.id.preview_sub,
-                    if (full && plan.previewSub.isNotBlank()) View.VISIBLE else View.GONE,
-                )
+                second?.let { next ->
+                    // 第二行本档不给地点（previews 只有 0/2 两档，到这里 PREV 必为 1）
+                    rv.addView(
+                        R.id.next_rows,
+                        Widgets.courseRow(
+                            context = context,
+                            row = WidgetSchedule.toRow(next),
+                            colors = colors,
+                            dark = dark,
+                            detail = WidgetSchedule.RowDetail.NAME,
+                            rowHeightDp = row2H,
+                            nameSizeDp = n1 - 2,
+                            subSizeDp = s1 - 1,
+                            naturalHeightDp = WidgetSchedule.rowNaturalHeightDp(
+                                WidgetSchedule.nameLineCount(next.name, columnWidthDp, n1 - 2),
+                            ),
+                        ),
+                    )
+                }
             } else {
                 rv.setTextViewText(R.id.status_title, plan.statusTitle)
                 rv.setTextViewText(R.id.status_message, plan.statusMessage)

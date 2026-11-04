@@ -200,51 +200,53 @@ Write-Host "写入 $out1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2) 「下一节课」2×2 = 163×195dp
-#    形态：表头（今天 · 第 N 周）+ 右上角圆气泡 + 一节课大字（课名/时间段/地点）+ 一行预告。
-#    与 res/layout/widget_next_class.xml 一一对应；字号取 res/values/dimens.xml 里的
-#    widget_name_lg(20) / widget_time_lg(12.5) / widget_preview_line(11.5) / widget_bubble(24)。
+#    形态（2026-11-04 第二轮，issue #13）：表头（今天 · 第 N 周）+ 两行 4×2 同款
+#    「色条 + 文字」行 —— 本节大一号（课名 15 / 地点·时间段 13），下一节小一号（13 / 12）。
+#    右上角圆气泡已下线。与 res/layout/widget_next_class_preview.xml 一一对应，
+#    行结构与 Widgets.courseRow 相同；改 res 布局时同步改这里再重跑本脚本。
 # ════════════════════════════════════════════════════════════════════════════
 $w = 163; $h = 195
 $c = New-Canvas $w $h
 $g = $c.Graphics
 
 $fColHead = New-Font 12 $true
-$fNameLg = New-Font 20 $true
-$fTimeLg = New-Font 12.5 $false
-$fPreview = New-Font 11.5 $false
-$fBubble = New-Font 13 $true
+$fRowName = New-Font 15 $true
+# 副字用 12：13dp 时「南3 101 + 完整时间段」在 163dp 的卡里会顶在一起（真实渲染里
+# RemoteViews 会用 weight 挤压/省略，静态预览得自己留出空当）
+$fRowSub = New-Font 12 $false
+$fName2 = New-Font 13 $true
+$fSub2 = New-Font 11 $false
 
-# 表头行（22dp 高）：左边「今天 · 第 5 周」，右边圆气泡
+# 表头行：今天 · 第 5 周（气泡已删， 整行给表头）
 $top = $pad
-$rowH = 24
-Draw-Text $g '今天 · 第 5 周' $fColHead $bText $pad $top $rowH | Out-Null
+Draw-Text $g '今天 · 第 5 周' $fColHead $bText $pad $top 22 | Out-Null
 
-$bubbleSize = 24
-$bx = $w - $pad - $bubbleSize
-$bAccent = New-Brush $Accent
-$g.FillEllipse($bAccent, [float]($bx * $Scale), [float]($top * $Scale),
-    [float]($bubbleSize * $Scale), [float]($bubbleSize * $Scale))
-$bAccent.Dispose()
-$bOnAccent = New-Brush ([System.Drawing.ColorTranslator]::FromHtml('#FFFFFF'))
-Draw-Text $g '3' $fBubble $bOnAccent ($bx + $bubbleSize / 2.0 - 3.5) $top $bubbleSize | Out-Null
-$bOnAccent.Dispose()
+# 两行等分剩余高度（真实渲染里由 courseRow 的 stretch 均摊）
+$rowsTop = $top + 22 + 2
+$rowsH = $h - $pad - $rowsTop
+$row1H = [int]($rowsH / 2) + ($rowsH % 2)
+$row2H = $rowsH - $row1H
 
-# 信息块：竖向居中在表头与预告之间
-$infoTop = $top + $rowH + 2
-$previewH = 15
-$infoBottom = $h - $pad - $previewH
-$blockH = 22 + 2 + 15 + 2 + 15     # 课名 + 时间段 + 地点
-$barH = 46
-$blockTop = $infoTop + (($infoBottom - $infoTop) - $blockH) / 2.0
-
-Draw-Bar $g $pad ($blockTop + 4) 3 $barH $Bar4
+# 行1（本节，大一号）：色条 + 课名 + 地点(左) / 完整时间段(右)
+Draw-Bar $g $pad ($rowsTop + ($row1H - 26) / 2) 3 26 $Bar4
 $nameX = $pad + 3 + 8
-Draw-Text $g '大学物理' $fNameLg $bText $nameX $blockTop 22 | Out-Null
-Draw-Text $g '10:00-11:35' $fTimeLg $bDim $nameX ($blockTop + 24) 15 | Out-Null
-Draw-Text $g '南3 101' $fTimeLg $bHint $nameX ($blockTop + 41) 15 | Out-Null
+$y1 = $rowsTop + ($row1H - 19 - 2 - 16) / 2
+Draw-Text $g '大学物理' $fRowName $bText $nameX $y1 19 | Out-Null
+$subY1 = $y1 + 19 + 2
+Draw-Text $g '南3 101' $fRowSub $bHint $nameX $subY1 16 | Out-Null
+$tw1 = [Math]::Ceiling($g.MeasureString('10:00-11:35', $fRowSub).Width / $Scale)
+Draw-Text $g '10:00-11:35' $fRowSub $bDim ($w - $pad - $tw1) $subY1 16 | Out-Null
 
-# 预告（钉在底部）
-Draw-Text $g '→ 14:00 程序设计基础' $fPreview $bHint $pad ($h - $pad - $previewH) $previewH | Out-Null
+# 行2（下一节，小一号）
+$row2Top = $rowsTop + $row1H
+$Bar5 = [System.Drawing.ColorTranslator]::FromHtml('#C97F5A')
+Draw-Bar $g $pad ($row2Top + ($row2H - 26) / 2) 3 26 $Bar5
+$y2 = $row2Top + ($row2H - 17 - 2 - 15) / 2
+Draw-Text $g '程序设计基础' $fName2 $bText $nameX $y2 17 | Out-Null
+$subY2 = $y2 + 17 + 2
+Draw-Text $g '南3 202' $fSub2 $bHint $nameX $subY2 15 | Out-Null
+$tw2 = [Math]::Ceiling($g.MeasureString('14:00', $fSub2).Width / $Scale)
+Draw-Text $g '14:00' $fSub2 $bDim ($w - $pad - $tw2) $subY2 15 | Out-Null
 
 $out2 = Join-Path $drawable 'widget_preview_next_class.png'
 $c.Bitmap.Save($out2, [System.Drawing.Imaging.ImageFormat]::Png)

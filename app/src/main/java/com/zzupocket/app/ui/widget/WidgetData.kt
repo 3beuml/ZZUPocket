@@ -48,14 +48,13 @@ data class WidgetScheduleBundle(
             columnHeightDp = columnHeightDp,
         )
 
-    /** 2×2：一节课大字（今天没了就顶明天的第一节） */
-    fun nextClassPlan(previewRows: Int): WidgetNextClassPlan = WidgetSchedule.nextClassPlan(
+    /** 2×2：两行 4×2 同款行样式（本节 + 下一节）；今天没了就顶明天的头两节 */
+    fun nextClassPlan(): WidgetNextClassPlan = WidgetSchedule.nextClassPlan(
         hasSchedule = hasSchedule,
         week = week,
         today = today,
         tomorrow = tomorrow,
         nowMin = nowMin,
-        previewRows = previewRows,
     )
 }
 

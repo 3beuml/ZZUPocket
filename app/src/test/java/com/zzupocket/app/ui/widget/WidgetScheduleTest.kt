@@ -328,46 +328,42 @@ class WidgetScheduleTest {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse> = emptyList(),
         nowMin: Int,
-        // 与正常 2×2（195dp 实盒）同档：预告给到满（主行+副行）；矮盒档见下面的档位测试
-        previewRows: Int = 2,
     ) = WidgetSchedule.nextClassPlan(
         hasSchedule = hasSchedule,
         week = week,
         today = today,
         tomorrow = tomorrow,
         nowMin = nowMin,
-        previewRows = previewRows,
     )
 
     @Test
-    fun `2×2 今天还有课就显示下一节_带圆气泡与预告`() {
+    fun `2×2 今天还有课就排头两节_行样式数据完整`() {
         val p = nextClass(
             today = listOf(course(600, 695, "大学物理", "南3 101"), course(840, 885, "线性代数")),
             tomorrow = listOf(course(480, 525, "编译原理实验")),
             nowMin = 500,
         )
         assertEquals("今天 · 第 5 周", p.header)
-        assertEquals("大学物理", p.name)
-        assertEquals("10:00-11:35", p.timeRange)
-        assertEquals("南3 101", p.place)
-        // 圆气泡 = 这节课以及之后还有几节（含本节）
+        assertEquals("大学物理", p.firstCourse?.name)
+        assertEquals("南3 101", p.firstCourse?.place)
+        // 第二行 = 下一节，完整课程对象（渲染层排成 4×2 同款行）
+        assertEquals("线性代数", p.nextCourse?.name)
+        assertEquals(840, p.nextCourse?.startMin)
+        // 圆气泡已下线，remaining 只作数据口径
         assertEquals(2, p.remaining)
-        assertEquals("→ 线性代数", p.preview)
-        assertEquals("14:00", p.previewSub)
         assertTrue(p.hasCourse)
         assertTrue(!p.isStatus)
     }
 
     @Test
-    fun `2×2 正在上的那节算下一节_且剩一节时气泡是 1`() {
+    fun `2×2 正在上的那节算下一节_只剩一节时第二行为空`() {
         val p = nextClass(
             today = listOf(course(600, 695, "大学物理", "南3 101")),
             nowMin = 620,
         )
-        assertEquals("大学物理", p.name)
+        assertEquals("大学物理", p.firstCourse?.name)
         assertEquals(1, p.remaining)
-        assertEquals("", p.preview)
-        assertEquals("", p.previewSub)
+        assertEquals(null, p.nextCourse)
     }
 
     @Test
@@ -378,10 +374,10 @@ class WidgetScheduleTest {
             nowMin = 700,
         )
         assertEquals("明日预告 · 第 5 周", p.header)
-        assertEquals("编译原理实验", p.name)
+        assertEquals("编译原理实验", p.firstCourse?.name)
         assertEquals(2, p.remaining)
-        assertEquals("→ 编译原理", p.preview)
-        assertEquals("10:10 · 北3 201", p.previewSub)
+        assertEquals("编译原理", p.nextCourse?.name)
+        assertEquals("北3 201", p.nextCourse?.place)
     }
 
     @Test
@@ -397,22 +393,21 @@ class WidgetScheduleTest {
     }
 
     @Test
-    fun `2×2 预告档位按盒子高度给_副行只在保证高度的盒子上`() {
+    fun `2×2 两行画不画按高度给_行样式下没有中间档`() {
+        // 账本：内边距 28 + 表头 22 + 行距 2 + 两行自然高 44×2 ≈ 140，≥145 给第二行
         assertEquals(2, WidgetSchedule.nextClassPreviews(195))
         assertEquals(2, WidgetSchedule.nextClassPreviews(150))
-        assertEquals(1, WidgetSchedule.nextClassPreviews(149))
-        assertEquals(1, WidgetSchedule.nextClassPreviews(105))
+        assertEquals(0, WidgetSchedule.nextClassPreviews(149))
+        assertEquals(0, WidgetSchedule.nextClassPreviews(105))
         assertEquals(0, WidgetSchedule.nextClassPreviews(80))
-        assertEquals(1, WidgetSchedule.nextClassPreviews(0))
-
+        assertEquals(0, WidgetSchedule.nextClassPreviews(0))
+        // 行样式下藏地点不影响行高（课名+时间段仍是两行字），所以没有"中档"——
+        // 第二行要么整行画要么不画。多出的节不画（2×2 只答"下一节"）。
         val multi = nextClass(
             today = listOf(course(600, 645, "A"), course(700, 745, "B", "南4 403"), course(800, 845, "C")),
             nowMin = 500,
-            previewRows = 2,
         )
-        // 满档预告块：主行课名 + 副行时间·地点；后面多出来的节不再往行里拼（2×2 只答"下一节"）
-        assertEquals("→ B", multi.preview)
-        assertEquals("11:40 · 南4 403", multi.previewSub)
+        assertEquals("B", multi.nextCourse?.name)
     }
 
     @Test
@@ -539,8 +534,6 @@ class WidgetScheduleTest {
         assertEquals(13 to 12, WidgetSchedule.rowFontSizes(0))
         // 矮盒子（别的启动器 4×2 槽位更矮）用紧凑档防裁字
         assertEquals(12 to 11, WidgetSchedule.rowFontSizes(160))
-        assertEquals(17, WidgetSchedule.bigNameSizeDp(195))
-        assertEquals(15, WidgetSchedule.bigNameSizeDp(160))
     }
 
     @Test
