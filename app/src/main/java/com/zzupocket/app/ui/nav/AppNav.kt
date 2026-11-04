@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -43,6 +44,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -352,7 +354,22 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                 // 窄软方向影 + 上缘受光的 bevel 才是"物体浮在纸上"的读法）。
                 // 现在它不再吃掉内容区，滚动内容从胶囊底下穿过 —— 真正的悬浮。
                 if (showBottomBar) {
-                    Box(Modifier.align(Alignment.BottomCenter)) {
+                    // dock 覆盖层化（0.33.0）后内容从胶囊底下穿过：胶囊以外的带子
+                    // （左右 20dp、上下 8dp、四个圆角切角）既不绘制也不吃事件，
+                    // 点击会穿透到底下的内容（issue #12：更多页滚到底，点胶囊上缘
+                    // 留白会把「检测更新」弹窗拉起来）。给外层 Box 吸一层只吞 tap
+                    // 的手势——不用 clickable，那会进语义树、被 TalkBack 读成
+                    // 一个可点控件；detectTapGestures 也不消费 move，带子上起手
+                    // 滑列表仍交给父级 scrollable。fillMaxWidth 是保险带：bounds
+                    // 若随内部 Surface 改动缩水，吞 tap 也不漏。
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .pointerInput(Unit) {
+                                detectTapGestures { /* 消费掉 tap，不下传 */ }
+                            },
+                    ) {
                         Surface(
                             shape = RoundedCornerShape(28.dp),
                             color = dockColor,
