@@ -6,7 +6,7 @@
          name = 选择页里显示的名字；desc = 名字下面那行说明。
          两者都只在"添加小组件"那个界面用得到，不显示在桌面上。 -->
     <string name="widget_next_class">下一节课</string>
-    <string name="widget_next_class_desc">下一节课：课名、完整时间段、地点，右上角还有几节要上</string>
+    <string name="widget_next_class_desc">下一节课：本节与下一节两行展示课名、地点与时间段（选择器里的预览即样例）</string>
     <string name="widget_today_classes">今明课表</string>
     <string name="widget_today_classes_desc">左边今天、右边明天，各列出两节课：课名、地点、时间段</string>
     <string name="widget_week_classes">一周课表</string>
