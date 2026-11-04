@@ -23,7 +23,8 @@ import kotlinx.coroutines.launch
  *  ▓ 大学物理                   │ 3│   ← 圆气泡 = 这节课以及之后还有几节（含本节）
  *    10:00 - 11:35              ╰──╯
  *    南3 101
- *    → 14:00 程序设计基础
+ *    → 程序设计基础
+ *      14:00 · 南3 202          ← 预告副行（issue #13：下节课地点）
  * ```
  *
  * 三种形态（判断全在 [WidgetSchedule.nextClassPlan]，纯函数、有单测）：
@@ -138,6 +139,7 @@ class NextClassWidget : AppWidgetProvider() {
             rv.setTextColor(R.id.tv_course_time, colors.dim)
             rv.setTextColor(R.id.tv_course_place, colors.hint)
             rv.setTextColor(R.id.preview, colors.hint)
+            rv.setTextColor(R.id.preview_sub, colors.hint)
             rv.setTextColor(R.id.status_title, colors.text)
             rv.setTextColor(R.id.status_message, colors.dim)
 
@@ -178,7 +180,8 @@ class NextClassWidget : AppWidgetProvider() {
                 // 色条按课程代码取色（与 App 课表格子同一套算法）
                 WidgetStyle.tint(rv, R.id.bar, WidgetStyle.courseColor(plan.code, colors, dark))
 
-                // 矮盒子从下往上收：先收地点，再收预告
+                // 矮盒子从下往上收：先收本节地点；预告块按 nextClassPreviews 的档位缩
+                // （副行先没——previewRows<2 时 previewSub 本来就是空串——再整块没）
                 val full = detail == WidgetSchedule.RowDetail.FULL
                 rv.setViewVisibility(
                     R.id.tv_course_place,
@@ -188,6 +191,11 @@ class NextClassWidget : AppWidgetProvider() {
                 rv.setViewVisibility(
                     R.id.preview,
                     if (full && plan.preview.isNotBlank()) View.VISIBLE else View.GONE,
+                )
+                rv.setTextViewText(R.id.preview_sub, plan.previewSub)
+                rv.setViewVisibility(
+                    R.id.preview_sub,
+                    if (full && plan.previewSub.isNotBlank()) View.VISIBLE else View.GONE,
                 )
             } else {
                 rv.setTextViewText(R.id.status_title, plan.statusTitle)

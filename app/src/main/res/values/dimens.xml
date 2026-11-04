@@ -43,10 +43,11 @@
     <dimen name="widget_status_title">15dp</dimen>  <!-- 假期/无课这类状态大字 -->
     <dimen name="widget_status_msg">11dp</dimen>    <!-- 状态下面那行小字 -->
 
-    <!-- ── 2×2「下一节课」：一节课大字 + 圆气泡 + 一行预告 ──────────── -->
+    <!-- ── 2×2「下一节课」：一节课大字 + 圆气泡 + 预告块 ─────────────── -->
     <dimen name="widget_name_lg">17dp</dimen>       <!-- 那节课的课名（issue #6：略缩、可两行） -->
     <dimen name="widget_time_lg">12.5dp</dimen>     <!-- 完整时间段 / 地点 -->
-    <dimen name="widget_preview_line">11.5dp</dimen> <!-- 「→ 14:00 程序设计基础」 -->
+    <dimen name="widget_preview_line">11.5dp</dimen> <!-- 「→ 程序设计基础」预告主行 -->
+    <dimen name="widget_preview_line_sub">10.5dp</dimen> <!-- 「14:00 · 南3 202」预告副行 -->
     <dimen name="widget_bubble">24dp</dimen>        <!-- 右上角圆气泡直径 -->
     <dimen name="widget_bubble_text">13dp</dimen>   <!-- 气泡里的数字 -->
     <dimen name="widget_bar_h_lg">46dp</dimen>      <!-- 那节课左边的色条（贴着三行文字） -->

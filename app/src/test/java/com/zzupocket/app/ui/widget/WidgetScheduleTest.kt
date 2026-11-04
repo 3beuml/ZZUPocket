@@ -328,7 +328,8 @@ class WidgetScheduleTest {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse> = emptyList(),
         nowMin: Int,
-        previewRows: Int = 1,
+        // 与正常 2×2（195dp 实盒）同档：预告给到满（主行+副行）；矮盒档见下面的档位测试
+        previewRows: Int = 2,
     ) = WidgetSchedule.nextClassPlan(
         hasSchedule = hasSchedule,
         week = week,
@@ -351,7 +352,8 @@ class WidgetScheduleTest {
         assertEquals("南3 101", p.place)
         // 圆气泡 = 这节课以及之后还有几节（含本节）
         assertEquals(2, p.remaining)
-        assertEquals("→ 14:00 线性代数", p.preview)
+        assertEquals("→ 线性代数", p.preview)
+        assertEquals("14:00", p.previewSub)
         assertTrue(p.hasCourse)
         assertTrue(!p.isStatus)
     }
@@ -365,19 +367,21 @@ class WidgetScheduleTest {
         assertEquals("大学物理", p.name)
         assertEquals(1, p.remaining)
         assertEquals("", p.preview)
+        assertEquals("", p.previewSub)
     }
 
     @Test
     fun `2×2 今天没了但明天有_顶上明天的第一节`() {
         val p = nextClass(
             today = listOf(course(480, 525, "线性代数")),
-            tomorrow = listOf(course(480, 525, "编译原理实验", "中2414"), course(610, 650, "编译原理")),
+            tomorrow = listOf(course(480, 525, "编译原理实验", "中2414"), course(610, 650, "编译原理", "北3 201")),
             nowMin = 700,
         )
         assertEquals("明日预告 · 第 5 周", p.header)
         assertEquals("编译原理实验", p.name)
         assertEquals(2, p.remaining)
-        assertEquals("→ 10:10 编译原理", p.preview)
+        assertEquals("→ 编译原理", p.preview)
+        assertEquals("10:10 · 北3 201", p.previewSub)
     }
 
     @Test
@@ -393,18 +397,22 @@ class WidgetScheduleTest {
     }
 
     @Test
-    fun `2×2 预告行数按盒子高度给_最多一行`() {
-        // 这个组件的定位是"我下一节是什么"，预告多了就变成课表（那是 4×2 的事）
-        assertEquals(1, WidgetSchedule.nextClassPreviews(195))
-        assertEquals(1, WidgetSchedule.nextClassPreviews(0))
+    fun `2×2 预告档位按盒子高度给_副行只在保证高度的盒子上`() {
+        assertEquals(2, WidgetSchedule.nextClassPreviews(195))
+        assertEquals(2, WidgetSchedule.nextClassPreviews(150))
+        assertEquals(1, WidgetSchedule.nextClassPreviews(149))
+        assertEquals(1, WidgetSchedule.nextClassPreviews(105))
         assertEquals(0, WidgetSchedule.nextClassPreviews(80))
+        assertEquals(1, WidgetSchedule.nextClassPreviews(0))
 
         val multi = nextClass(
-            today = listOf(course(600, 645, "A"), course(700, 745, "B"), course(800, 845, "C")),
+            today = listOf(course(600, 645, "A"), course(700, 745, "B", "南4 403"), course(800, 845, "C")),
             nowMin = 500,
             previewRows = 2,
         )
-        assertEquals("→ 11:40 B   → 13:20 C", multi.preview)
+        // 满档预告块：主行课名 + 副行时间·地点；后面多出来的节不再往行里拼（2×2 只答"下一节"）
+        assertEquals("→ B", multi.preview)
+        assertEquals("11:40 · 南4 403", multi.previewSub)
     }
 
     @Test

@@ -113,8 +113,8 @@ data class WidgetTwoDayPlan(
  *  ▓ 大学物理                   │ 3│   ← 圆气泡 = 这节课以及之后还有几节（含本节）
  *    10:00 - 11:35              ╰──╯
  *    南3 101
- *    → 14:00 程序设计基础               ← 再往后那节课
- * ```
+ *    → 程序设计基础             ← 再往后那节课（预告主行）
+ *      14:00 · 南3 202          ← 时间·地点（预告副行，矮盒先收）
  *
  * 这是**回退后的形态**：中间那版做成了"星期表头 + 一行一节的列表"，
  * 真机上被否掉 —— 今天上完、明天又没课时，整个内容区只剩一句状态，看着像坏了；
@@ -130,8 +130,13 @@ data class WidgetNextClassPlan(
     /** `10:00 - 11:35`：2×2 竖着有空间，写完整时间段（4×2 的列宽写不下） */
     val timeRange: String,
     val place: String,
-    /** 课名下面那行预告：「→ 14:00 程序设计基础」；没有就是空串 */
+    /** 预告主行：「→ 程序设计基础」（下一节的课名）；没有就是空串 */
     val preview: String,
+    /**
+     * 预告副行：「14:00 · 南3 202」——下一节课的时间·地点（issue #13：地点要能看见）；
+     * 地点空缺时只剩时间；矮盒单行档或没课时不给
+     */
+    val previewSub: String,
     /** 课程代码，用来给色条取色（与 App 课表格子同一套算法） */
     val code: String,
     /** 非空 = 整块状态（无课程 / 假期中 / 还没有课表数据） */
@@ -534,7 +539,15 @@ object WidgetSchedule {
     // ── 2×2：一节课大字 + 圆气泡 + 一行预告 ──────────────────────────────
 
     /** 「→ 14:00 程序设计基础」这种预告行 */
-    fun previewText(course: WidgetCourse): String = "→ ${course.startText} ${course.name}"
+    /** 预告主行：「→ 程序设计基础」——时间在这里挪去主线，课名始终挂在首行 */
+    fun previewText(course: WidgetCourse): String = "→ ${course.name}"
+
+    /**
+     * 预告副行：「14:00 · 南3 202」（issue #13：下节课的地点要能看见）。
+     * 地点空缺（有的课不排教室）时只剩时间，不让行空着。
+     */
+    fun previewSubText(course: WidgetCourse): String =
+        if (course.place.isBlank()) course.startText else "${course.startText} · ${course.place}"
 
     /**
      * 「2×2」的内容。
@@ -546,7 +559,7 @@ object WidgetSchedule {
      *     旧版只剩一句状态，看着像坏了）；
      *  3. 今明都没有 → 一句「无课程」。
      *
-     * @param previewRows 课名下面还能放几行预告（按盒子高度算，见 [nextClassPreviews]）
+     * @param previewRows 预告块给到哪一档（0 不画 / 1 只画课名 / ≥2 画整块，见 [nextClassPreviews]）
      */
     fun nextClassPlan(
         hasSchedule: Boolean,
@@ -563,7 +576,7 @@ object WidgetSchedule {
         if (st == WidgetCourseState.NOT_SYNCED || st == WidgetCourseState.VACATION) {
             return WidgetNextClassPlan(
                 header = "", remaining = 0, name = "", timeRange = "", place = "",
-                preview = "", code = "",
+                preview = "", previewSub = "", code = "",
                 statusTitle = statusTitle(st), statusMessage = statusMessage(st),
                 isVacation = st == WidgetCourseState.VACATION,
             )
@@ -579,7 +592,7 @@ object WidgetSchedule {
 
         return WidgetNextClassPlan(
             header = "", remaining = 0, name = "", timeRange = "", place = "",
-            preview = "", code = "", statusTitle = statusTitle(st),
+            preview = "", previewSub = "", code = "", statusTitle = statusTitle(st),
         )
     }
 
@@ -590,6 +603,7 @@ object WidgetSchedule {
         previewRows: Int,
     ): WidgetNextClassPlan {
         val first = courses.first()
+        val next = courses.getOrNull(1)
         return WidgetNextClassPlan(
             header = header,
             // 这节课以及之后还有几节（含本节）—— 与拾光的圆气泡口径一致
@@ -597,9 +611,10 @@ object WidgetSchedule {
             name = first.name,
             timeRange = first.rangeText,
             place = first.place,
-            preview = courses.drop(1)
-                .take(previewRows.coerceAtLeast(0))
-                .joinToString("   ") { previewText(it) },
+            // 预告块（issue #13）：主行 = 下一节的课名，副行 = 时间·地点。
+            // 2×2 只回答"下一节"，多节依然是 4×2 的活 —— 不再往一行里拼多节。
+            preview = if (previewRows >= 1 && next != null) previewText(next) else "",
+            previewSub = if (previewRows >= 2 && next != null) previewSubText(next) else "",
             code = first.code,
         )
     }
@@ -741,15 +756,16 @@ object WidgetSchedule {
         if (heightDp <= 0 || heightDp >= 170) 17 else 15
 
     /**
-     * 「2×2」能放几行预告。
+     * 「2×2」预告块给到哪一档（issue #13）。
      *
-     * 195dp 的实测画布上：课名 / 时间段 / 地点三行约 50dp，加上表头与内边距共约 110dp，
-     * 剩下 85dp 本来能放好几行预告 —— 但**只放一行**：这个组件的定位是"我下一节是什么"，
-     * 预告多了就变成课表了（那是 4×2 该干的事）。
-     * 盒子被拉矮时先收预告。
+     * 整块 = 主行（课名）+ 副行（时间·地点）。195dp 实测画布的账：
+     * 内边距 28 + 表头 22 + 中块 ~58 + 预告整块 ~31 ≈ 139dp，盒子 ≥150dp 保证放得下整块；
+     * 中档只画课名一行；<105dp 什么都不画——从下往上收，宁可少一行完整的字也不截半截。
+     * 读不到尺寸（≤0）时按"只剩课名"的保守档。
      */
     fun nextClassPreviews(heightDp: Int): Int = when {
-        heightDp <= 0 -> 1      // 读不到尺寸时按正常 2×2
+        heightDp <= 0 -> 1
+        heightDp >= 150 -> 2
         heightDp >= 105 -> 1
         else -> 0
     }

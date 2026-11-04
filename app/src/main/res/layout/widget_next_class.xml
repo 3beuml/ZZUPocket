@@ -8,7 +8,8 @@
   │ ▓ 大学物理             │ 3│  │
   │   10:00 - 11:35        ╰──╯  │ ← 完整时间段：2×2 竖着有空间，4×2 的列宽写不下
   │   南3 101                    │
-  │  → 14:00 程序设计基础          │ ← 再往后那节课（一行，钉在底部）
+  │  → 程序设计基础               │ ← 再往后那节课（预告主行，钉在底部）
+  │    14:00 · 南3 202            │ ← 时间·地点（预告副行，issue #13；矮盒先收）
   └──────────────────────────────┘
 
   三种形态（判断全在 `WidgetSchedule.nextClassPlan`，纯函数、有单测）：
@@ -25,7 +26,9 @@
 
   ## 尺寸账（2×2 = 195dp 高，别再用官方老公式的 110dp）
       内边距 14+14 + 表头 22 + 间距 2 + 信息块（课名 22 + 时间段 14 + 地点 14）≈ 116dp
-      底部预告 15dp → 共约 130dp ≤ 195dp（盒子被拉矮时由 `nextClassDetail` 从下往上收）
+      底部预告块 ~31dp（主行 15 + 副行 14）→ 满档共 ~147dp ≤ 195dp；
+      矮盒子按 `nextClassPreviews` 分档从下往上收（副行先没了、再整块没了），
+      本节地点由 `nextClassDetail` 收。
 
   ## RemoteViews 的限制（改这个文件前先读）
     · 只能用白名单控件（LinearLayout / FrameLayout / RelativeLayout / TextView / ImageView…），
@@ -182,7 +185,7 @@
             </LinearLayout>
         </RelativeLayout>
 
-        <!-- 再往后那节课（钉在底部，所以中间那块空得下也不影响它） -->
+        <!-- 再往后那节课：主行课名 + 副行「时间 · 地点」（issue #13）；钉在底部 -->
         <TextView
             android:id="@+id/preview"
             android:layout_width="match_parent"
@@ -193,6 +196,18 @@
             android:text="@string/widget_preview_next_preview"
             android:textColor="@color/widget_text_hint"
             android:textSize="@dimen/widget_preview_line"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/preview_sub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:textColor="@color/widget_text_hint"
+            android:textSize="@dimen/widget_preview_line_sub"
             android:visibility="gone" />
     </LinearLayout>
 
