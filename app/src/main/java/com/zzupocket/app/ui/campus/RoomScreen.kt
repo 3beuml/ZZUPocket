@@ -70,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.data.eas.EasClient
@@ -203,8 +204,9 @@ fun RoomScreen(
                 Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { vm.shiftDate(-1) }) {
-                    Icon(Icons.Filled.ChevronLeft, contentDescription = "前一天")
+                // 顶部紧凑化：翻日键 48→40、图标 24→20（触摸面积保持 40+，省 ~16dp 高度）
+                IconButton(onClick = { vm.shiftDate(-1) }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.ChevronLeft, contentDescription = "前一天", Modifier.size(20.dp))
                 }
                 Row(
                     Modifier
@@ -226,8 +228,8 @@ fun RoomScreen(
                         style = MaterialTheme.typography.titleMedium,
                     )
                 }
-                IconButton(onClick = { vm.shiftDate(1) }) {
-                    Icon(Icons.Filled.ChevronRight, contentDescription = "后一天")
+                IconButton(onClick = { vm.shiftDate(1) }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.ChevronRight, contentDescription = "后一天", Modifier.size(20.dp))
                 }
                 Spacer(Modifier.weight(1f))
                 OutlinedButton(onClick = vm::openFilter) {
@@ -262,28 +264,24 @@ fun RoomScreen(
                 }
             }
 
+            // 顶部紧凑化：汇总与「来自本地快照」提示合并成一行（提示出现时整行可点刷新）。
+            // 空教室是"此刻是否有课"的数据，得让人知道这是什么时候抓的，但不值得为它
+            // 单开一行（原两行 ~32dp）——提示合进来，时间信息一条不少。
             Text(
-                text = "${state.campusName} · ${state.buildingSummary} · ${state.unitSummary} · " +
-                    "显示 ${state.visibleCount} 间" +
-                    (state.lastFetchedAt?.let { " · 数据截至 ${RelativeTime.timeOfDay(it)}" } ?: ""),
+                text = buildString {
+                    state.notice?.let { append(it).append(" · ") }
+                    append("${state.campusName} · ${state.buildingSummary} · ${state.unitSummary} · ")
+                    append("显示 ${state.visibleCount} 间")
+                    state.lastFetchedAt?.let { append(" · 数据截至 ").append(RelativeTime.timeOfDay(it)) }
+                    if (state.notice != null) append(" · 点此刷新")
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (state.notice == null) Modifier else Modifier.clickable { vm.refresh() })
+                    .padding(horizontal = 12.dp),
             )
-
-            // 来自本地快照时的提示：一行灰字 + 时间。空教室是"此刻是否有课"的数据，
-            // 必须让人知道这是什么时候抓的，但不用红字（红字像在说账号出问题了）。
-            state.notice?.let { message ->
-                Text(
-                    text = "$message · 点此刷新",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { vm.refresh() }
-                        .padding(horizontal = 12.dp, vertical = 2.dp),
-                )
-            }
 
             state.error?.let { message ->
                 Text(
@@ -474,7 +472,8 @@ private fun UnitHeaderRow(periods: List<Period>, marks: List<UnitDivider?>, curr
                     if (index > 0) Spacer(Modifier.width(UNIT_SESSION_GAP))
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelSmall,
+                        // 行高压到字高（labelSmall 默认 16sp 行高）：表头收 ~3dp
+                        style = MaterialTheme.typography.labelSmall.copy(lineHeight = 12.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.weight(columns.toFloat()),
@@ -494,7 +493,7 @@ private fun UnitHeaderRow(periods: List<Period>, marks: List<UnitDivider?>, curr
                 marks.getOrNull(index)?.let { UnitDividerMark(height = 14.dp, kind = it) }
                 Text(
                     text = "${period.indexNo}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(lineHeight = 13.sp),
                     color = if (period.indexNo == currentUnit) {
                         MaterialTheme.colorScheme.primary
                     } else {
