@@ -112,6 +112,11 @@ data class UiPrefs(
     /** 深色对比度（只在深色下生效，默认标准 = 系统原生观感） */
     val darkContrast: DarkContrast = DarkContrast.STANDARD,
     /**
+     * 深色保留颜色（Material 3 Expressive 的 2025 spec）：深色表面带主色色相、
+     * 明度整体上抬，不再走近灰的默认深色底。只在深色下生效。
+     */
+    val darkTinted: Boolean = false,
+    /**
      * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
      *
      * ⚠️ 为什么要分开存：照明与空调是两套独立表计，**可以是两个不同的房间** ——
@@ -186,6 +191,7 @@ class UiPrefsStore(context: Context) {
                 ?: DarkMode.SYSTEM,
             darkContrast = p[KEY_DARK_CONTRAST]?.let { runCatching { DarkContrast.valueOf(it) }.getOrNull() }
                 ?: DarkContrast.STANDARD,
+            darkTinted = p[KEY_DARK_TINTED] ?: false,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
@@ -232,6 +238,8 @@ class UiPrefsStore(context: Context) {
     suspend fun setDarkMode(v: DarkMode) = store.edit { p -> p[KEY_DARK_MODE] = v.name }
 
     suspend fun setDarkContrast(v: DarkContrast) = store.edit { p -> p[KEY_DARK_CONTRAST] = v.name }
+
+    suspend fun setDarkTinted(v: Boolean) = store.edit { p -> p[KEY_DARK_TINTED] = v }
 
     /**
      * 写**其中一路**的房间可读名。
@@ -346,6 +354,7 @@ class UiPrefsStore(context: Context) {
         val KEY_THEME_PRESET = stringPreferencesKey("theme_preset")
         val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
         val KEY_DARK_CONTRAST = stringPreferencesKey("dark_contrast")
+        val KEY_DARK_TINTED = booleanPreferencesKey("dark_tinted")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
