@@ -213,11 +213,13 @@ class WeekClassesWidget : AppWidgetProvider() {
                             cellRv.setTextColor(R.id.week_cell_place, WidgetStyle.textOnBlock(colors.text, 0.70f))
                             cellRv.setTextColor(R.id.week_cell_time, WidgetStyle.textOnBlock(colors.text, 0.55f))
                             // 课程块：左侧色条下线，改成 App 内课表格子同款——
-                            // 整面填充课程色 + 6dp 圆角（widget_block 运行期 tint）
+                            // 整面填充课程色 + 6dp 圆角（widget_block 运行期 tint）。
+                            // 填充块用 blockColor（App 同款粉彩/暗彩），不能用给色条保命的
+                            // 中明度色——铺满整格会"发深"（2026-11-04 用户反馈实证）
                             WidgetStyle.tint(
                                 cellRv,
                                 R.id.week_cell_block,
-                                WidgetStyle.courseColor(cell.code, colors, dark),
+                                WidgetStyle.blockColor(cell.code, colors, dark),
                             )
                             // 格高 = 行高 × 占槽数（setViewLayoutHeight 是 API31 正经 API）
                             if (rowHeightDp > 0) {

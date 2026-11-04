@@ -24,6 +24,8 @@ data class WidgetColors(
     /** 比 [dim] 更弱的一档（地点、状态小字），用透明度拉开层次 */
     val hint: Int,
     val accent: Int,
+    /** 「单色」模式下课程**填充块**的底色（与 App 内 CourseBlock 的单色口径一致） */
+    val secondaryContainer: Int,
     /** 警示色（欠费 / 电量偏低 / 余额偏低） */
     val error: Int,
     /** 课程配色是否"多彩"（关掉就只有主色一种，和 App 课表页的「单色」口径一致） */
@@ -105,6 +107,7 @@ object WidgetStyle {
             // 比 dim 再弱一档：地点、状态小字用透明度压下去，不必另挑一个灰色
             hint = withAlpha(dim, 0.62f),
             accent = s.primary.toArgb(),
+            secondaryContainer = s.secondaryContainer.toArgb(),
             error = s.error.toArgb(),
             colorful = prefs.colorMode == CourseColorMode.COLORFUL,
         )
@@ -159,6 +162,22 @@ object WidgetStyle {
         if (!colors.colorful) return colors.accent
         val hue = (((code.hashCode() % 360) + 360) % 360).toFloat()
         return Color.hsl(hue, 0.55f, if (dark) 0.62f else 0.52f).toArgb()
+    }
+
+    /**
+     * 课程**填充块**的底色（周课表整面格子这类大面积色面）：
+     * 与 App 内课表格子**同一套公式**（ScheduleScreen.courseColor）——
+     * 浅色 = hsl(hue, 0.55, 0.88) 粉彩、深色 = hsl(hue, 0.35, 0.26) 低饱和暗彩，
+     * 所以桌面上的格子颜色就是 App 里那种"浅浅一层彩"的感觉。
+     *
+     * ⚠️ 别把 [courseColor]（中明度，给 3dp 色条保命用的：太浅看不见）整面铺开——
+     * 2026-11-04 周课表改填充块后沿用色条色，用户反馈"发深、没有 App 里的颜色感觉"，
+     * 细条和大块的用色需求本来就不一样。单色模式 = secondaryContainer。
+     */
+    fun blockColor(code: String, colors: WidgetColors, dark: Boolean): Int {
+        if (!colors.colorful) return colors.secondaryContainer
+        val hue = (((code.hashCode() % 360) + 360) % 360).toFloat()
+        return Color.hsl(hue, if (dark) 0.35f else 0.55f, if (dark) 0.26f else 0.88f).toArgb()
     }
 
     /** 给某个圆角 shape 刷上颜色（保住圆角，见类注释） */
