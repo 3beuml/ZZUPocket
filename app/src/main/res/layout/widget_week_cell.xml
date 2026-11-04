@@ -1,39 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  「一周课表」的一个节次格（有课）/ 空槽占位（隐藏文字、仅占高）。
+  「一周课表」的一个课程块（App 内课表格子同款）/ 空槽占位（藏块、仅占高）。
 
-      ▌高等数学A      ← 课名，可 2~3 行（行高与列宽决定，见 WidgetSchedule.weekNameMaxLines）
-        南2 206        ← 地点（列宽/行高不够就隐藏）
-        8:00-9:40      ← 时间段（行高不够就隐藏；比地点优先级高）
+      ╭───────────╮
+      │ 高等数学A  │   ← 课名，可 2~3 行（行高与列宽决定，见 WidgetSchedule.weekNameMaxLines）
+      │ 南2 206    │   ← 地点（列宽/行高不够就隐藏）
+      │ 8:00-9:40  │   ← 时间段（行高不够就隐藏；比地点优先级高）
+      ╰───────────╯
 
-  · 格子高度由 App 渲染时用 setViewLayoutHeight 精确设置（rowH × slotSpan），
-    空槽占位同款设高 —— 各列的节次行线才能对齐。
-  · 跨节次的课：同一格放高，不加第二个格子。
+  · 2026-11-04 由「左侧竖色条 + 透明底文字」改为此形态：整面填充课程色 + 6dp 圆角
+    （widget_block drawable 运行期 tint），与 App 内课表格子同一观感（issue #13 面）。
+    左色条随之下线——块内文字可用宽度因此多出 ~7dp，账本（weekNameMaxLines）
+    **第一版不改**，宁少放一行课名也不裁字，真机确认后再放开。
+  · 格子高度由 App 渲染时用 setViewLayoutHeight 精确设置（rowH × slotSpan，设在
+    week_cell_root 上，空槽占位同款设高）——各列的节次行线才能对齐。
+  · 根上的 padding（2/3/2/3）就是格子之间的缝：课程块填在 padding 以内，
+    所以相邻块永远不相贴；空槽把块藏掉后缝也一并消失。
+  · 跨节次的课：同一块放高，不加第二个格子。
+  · RemoteViews 白名单：LinearLayout/TextView/shape drawable 都安全。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/week_cell_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:baselineAligned="false"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
+    android:orientation="vertical"
     android:paddingStart="2dp"
     android:paddingTop="3dp"
     android:paddingEnd="2dp"
     android:paddingBottom="3dp">
 
-    <TextView
-        android:id="@+id/week_cell_bar"
-        android:layout_width="2dp"
-        android:layout_height="match_parent"
-        android:background="@drawable/widget_bar" />
-
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="4dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:id="@+id/week_cell_block"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/widget_block"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:paddingStart="4dp"
+        android:paddingTop="2dp"
+        android:paddingEnd="3dp"
+        android:paddingBottom="2dp">
 
         <TextView
             android:id="@+id/week_cell_name"

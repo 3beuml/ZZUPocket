@@ -21,10 +21,12 @@ import kotlinx.coroutines.launch
  * ```
  *                                              第 8 周
  *   一 11.2     二 11.3    今 11.4    四 11.5    五 11.6
- *  ▌高等数学A  ▌大学物理   （空）     ▌编译原理   ▌线性代数
- *    南2 206     南3 101                南4 103     南1 302
- *    8:00-9:40   10:00-11:35            10:10-…     14:00-…
- *  ▌体育       （跨节的课一格占多行）
+ *  ╭━━━━━━━╮ ╭━━━━━━━╮  （空）    ╭━━━━━━━╮ ╭━━━━━━━╮
+ *  ┃高等数学A┃ ┃大学物理 ┃            ┃编译原理 ┃ ┃线性代数┃
+ *  ┃南2 206  ┃ ┃南3 101  ┃            ┃南4 103  ┃ ┃南1 302┃
+ *  ┃8:00-9:40┃ ┃10:00-…  ┃            ┃10:10-…  ┃ ┃14:00-…┃
+ *  ╰━━━━━━━╯ ╰━━━━━━━╯            ╰━━━━━━━╯ ╰━━━━━━━╯
+ *            （跨节的课一格占多行；格子=整面填充课程色+6dp 圆角，App 内同款）
  * ```
  *
  * ## 为什么是 4×5
@@ -169,7 +171,7 @@ class WeekClassesWidget : AppWidgetProvider() {
                             spacer.setViewVisibility(R.id.week_cell_name, View.GONE)
                             spacer.setViewVisibility(R.id.week_cell_place, View.GONE)
                             spacer.setViewVisibility(R.id.week_cell_time, View.GONE)
-                            spacer.setViewVisibility(R.id.week_cell_bar, View.GONE)
+                            spacer.setViewVisibility(R.id.week_cell_block, View.GONE)
                             if (rowHeightDp > 0) {
                                 spacer.setViewLayoutHeight(
                                     R.id.week_cell_root, rowHeightDp.toFloat(), TypedValue.COMPLEX_UNIT_DIP,
@@ -206,11 +208,15 @@ class WeekClassesWidget : AppWidgetProvider() {
                                 if (showTime) View.VISIBLE else View.GONE,
                             )
                             cellRv.setTextColor(R.id.week_cell_name, colors.text)
-                            cellRv.setTextColor(R.id.week_cell_place, colors.hint)
-                            cellRv.setTextColor(R.id.week_cell_time, colors.dim)
+                            // 填充块内的次级文字：正文色降透明度（见 textOnBlock），不能再用
+                            // 固定灰——底色现在是每种课自己的浅彩色
+                            cellRv.setTextColor(R.id.week_cell_place, WidgetStyle.textOnBlock(colors.text, 0.70f))
+                            cellRv.setTextColor(R.id.week_cell_time, WidgetStyle.textOnBlock(colors.text, 0.55f))
+                            // 课程块：左侧色条下线，改成 App 内课表格子同款——
+                            // 整面填充课程色 + 6dp 圆角（widget_block 运行期 tint）
                             WidgetStyle.tint(
                                 cellRv,
-                                R.id.week_cell_bar,
+                                R.id.week_cell_block,
                                 WidgetStyle.courseColor(cell.code, colors, dark),
                             )
                             // 格高 = 行高 × 占槽数（setViewLayoutHeight 是 API31 正经 API）

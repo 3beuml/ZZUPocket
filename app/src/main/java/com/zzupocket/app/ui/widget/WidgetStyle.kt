@@ -58,6 +58,14 @@ data class WidgetColors(
  */
 object WidgetStyle {
 
+    /**
+     * 课程色块内的次级文字色：正文色降透明度（周课表填充块用）。
+     * 挑这个而不是保留灰（hint），是因为底色现在是每种课自己的（同一套课程色板，
+     * 浅彩底），固定灰在个别课色上会发飘；降透明度的正文色任何课色底都稳。
+     */
+    fun textOnBlock(text: Int, alpha: Float): Int =
+        ((alpha.coerceIn(0f, 1f) * 255).toInt() shl 24) or (text and 0x00FFFFFF)
+
     /** 组件该用浅色还是深色 —— 跟 App 的「深浅色」设置走，不是跟系统走 */
     fun isDark(context: Context, prefs: UiPrefs): Boolean = when (prefs.darkMode) {
         DarkMode.LIGHT -> false
