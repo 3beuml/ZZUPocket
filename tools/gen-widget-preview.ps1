@@ -200,53 +200,51 @@ Write-Host "写入 $out1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2) 「下一节课」2×2 = 163×195dp
-#    形态（2026-11-04 第二轮，issue #13）：表头（今天 · 第 N 周）+ 两行 4×2 同款
-#    「色条 + 文字」行 —— 本节大一号（课名 15 / 地点·时间段 13），下一节小一号（13 / 12）。
-#    右上角圆气泡已下线。与 res/layout/widget_next_class_preview.xml 一一对应，
-#    行结构与 Widgets.courseRow 相同；改 res 布局时同步改这里再重跑本脚本。
+#    形态（#13 三轮，2026-11-05）：表头（今天 · 第 N 周）+ 两行**竖排三行**行
+#    —— 色条 + 课名 / 地点 / 完整时间段各占一行。本节大一号（课名 15 / 地点·时间段 13），
+#    下一节小一号（13 / 12）。卡片内边距渲染层 14→10（账本 NEXT_CLASS_CHROME_DP=44），
+#    这里按 10 同步。与 res/layout/widget_next_class_preview.xml 一一对应；
+#    改 res 布局时同步改这里再重跑本脚本。
 # ════════════════════════════════════════════════════════════════════════════
 $w = 163; $h = 195
 $c = New-Canvas $w $h
 $g = $c.Graphics
 
+$pad2 = 10
 $fColHead = New-Font 12 $true
 $fRowName = New-Font 15 $true
-# 副字用 12：13dp 时「南3 101 + 完整时间段」在 163dp 的卡里会顶在一起（真实渲染里
-# RemoteViews 会用 weight 挤压/省略，静态预览得自己留出空当）
-$fRowSub = New-Font 12 $false
+$fRowSub = New-Font 13 $false
 $fName2 = New-Font 13 $true
-$fSub2 = New-Font 11 $false
+$fSub2 = New-Font 12 $false
 
-# 表头行：今天 · 第 5 周（气泡已删， 整行给表头）
-$top = $pad
-Draw-Text $g '今天 · 第 5 周' $fColHead $bText $pad $top 22 | Out-Null
+# 表头行：今天 · 第 5 周（气泡已删，整行给表头）
+$top = $pad2
+Draw-Text $g '今天 · 第 5 周' $fColHead $bText $pad2 $top 22 | Out-Null
 
-# 两行等分剩余高度（真实渲染里由 courseRow 的 stretch 均摊）
+# 两行等分剩余高度（真实渲染里行高由 setViewLayoutHeight 显式给定）
 $rowsTop = $top + 22 + 2
-$rowsH = $h - $pad - $rowsTop
+$rowsH = $h - $pad2 - $rowsTop
 $row1H = [int]($rowsH / 2) + ($rowsH % 2)
 $row2H = $rowsH - $row1H
+$nameX = $pad2 + 3 + 8
 
-# 行1（本节，大一号）：色条 + 课名 + 地点(左) / 完整时间段(右)
-Draw-Bar $g $pad ($rowsTop + ($row1H - 26) / 2) 3 26 $Bar4
-$nameX = $pad + 3 + 8
-$y1 = $rowsTop + ($row1H - 19 - 2 - 16) / 2
+# 行1（本节，大一号）：色条 + 课名 / 地点 / 完整时间段（竖排三行，永不同挤）
+$natural1 = 19 + 2 + 16 + 2 + 16
+$y1 = $rowsTop + ($row1H - $natural1) / 2
+Draw-Bar $g $pad2 ($rowsTop + ($row1H - 26) / 2) 3 26 $Bar4
 Draw-Text $g '大学物理' $fRowName $bText $nameX $y1 19 | Out-Null
-$subY1 = $y1 + 19 + 2
-Draw-Text $g '南3 101' $fRowSub $bHint $nameX $subY1 16 | Out-Null
-$tw1 = [Math]::Ceiling($g.MeasureString('10:00-11:35', $fRowSub).Width / $Scale)
-Draw-Text $g '10:00-11:35' $fRowSub $bDim ($w - $pad - $tw1) $subY1 16 | Out-Null
+Draw-Text $g '南3 101' $fRowSub $bHint $nameX ($y1 + 21) 16 | Out-Null
+Draw-Text $g '10:00-11:35' $fRowSub $bDim $nameX ($y1 + 39) 16 | Out-Null
 
-# 行2（下一节，小一号）
+# 行2（下一节，小一号）：同款竖排
 $row2Top = $rowsTop + $row1H
 $Bar5 = [System.Drawing.ColorTranslator]::FromHtml('#C97F5A')
-Draw-Bar $g $pad ($row2Top + ($row2H - 26) / 2) 3 26 $Bar5
-$y2 = $row2Top + ($row2H - 17 - 2 - 15) / 2
+$natural2 = 17 + 2 + 15 + 2 + 15
+$y2 = $row2Top + ($row2H - $natural2) / 2
+Draw-Bar $g $pad2 ($row2Top + ($row2H - 26) / 2) 3 26 $Bar5
 Draw-Text $g '程序设计基础' $fName2 $bText $nameX $y2 17 | Out-Null
-$subY2 = $y2 + 17 + 2
-Draw-Text $g '南3 202' $fSub2 $bHint $nameX $subY2 15 | Out-Null
-$tw2 = [Math]::Ceiling($g.MeasureString('14:00', $fSub2).Width / $Scale)
-Draw-Text $g '14:00' $fSub2 $bDim ($w - $pad - $tw2) $subY2 15 | Out-Null
+Draw-Text $g '南3 202' $fSub2 $bHint $nameX ($y2 + 19) 15 | Out-Null
+Draw-Text $g '14:00' $fSub2 $bDim $nameX ($y2 + 36) 15 | Out-Null
 
 $out2 = Join-Path $drawable 'widget_preview_next_class.png'
 $c.Bitmap.Save($out2, [System.Drawing.Imaging.ImageFormat]::Png)

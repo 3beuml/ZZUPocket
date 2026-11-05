@@ -2,6 +2,9 @@ package com.zzupocket.app.ui.widget
 
 import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.Session
+import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.COMPACT
+import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.HIDE
+import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.STACKED
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -393,16 +396,31 @@ class WidgetScheduleTest {
     }
 
     @Test
-    fun `2×2 两行画不画按高度给_行样式下没有中间档`() {
-        // 账本：内边距 28 + 表头 22 + 行距 2 + 两行自然高 44×2 ≈ 140，≥145 给第二行
-        assertEquals(2, WidgetSchedule.nextClassPreviews(195))
-        assertEquals(2, WidgetSchedule.nextClassPreviews(150))
-        assertEquals(0, WidgetSchedule.nextClassPreviews(149))
-        assertEquals(0, WidgetSchedule.nextClassPreviews(105))
-        assertEquals(0, WidgetSchedule.nextClassPreviews(80))
-        assertEquals(0, WidgetSchedule.nextClassPreviews(0))
-        // 行样式下藏地点不影响行高（课名+时间段仍是两行字），所以没有"中档"——
-        // 第二行要么整行画要么不画。多出的节不画（2×2 只答"下一节"）。
+    fun `2×2 竖排行自然高与固定开销`() {
+        // 竖排 = 单行版式 44 + 一行地点小字（13dp 行 + 2dp 行距 ≈ 15）
+        assertEquals(59, WidgetSchedule.stackedRowNaturalHeightDp(1))
+        // 课名两行另加 16
+        assertEquals(75, WidgetSchedule.stackedRowNaturalHeightDp(2))
+        // 固定开销 = 内边距 20（10×2）+ 表头 22 + 行距 2
+        assertEquals(44, WidgetSchedule.NEXT_CLASS_CHROME_DP)
+        assertEquals(121, WidgetSchedule.nextClassAvailableDp(165))
+        assertEquals(0, WidgetSchedule.nextClassAvailableDp(0))
+    }
+
+    @Test
+    fun `2×2 第二行降档而不是蒸发`() {
+        // Meizu 2×2：可用 121，两行竖排 59+59=118 放得下 → 满档
+        assertEquals(STACKED, WidgetSchedule.nextClassSecondRow(165, 1, 1))
+        // 高度读不到（≤0）→ **画满**（旧版是"保守收 0"，HyperOS 的不可靠读数
+        // 让第二节课整行消失，issue #13 三轮实证）
+        assertEquals(STACKED, WidgetSchedule.nextClassSecondRow(0, 1, 1))
+        // 本节课名两行（75）：第二行降为紧凑单行（75+44=119 ≤ 121）
+        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRow(165, 2, 1))
+        // 中等偏矮的画布：竖排两行放不下，但"竖排本节 + 紧凑下一节"放得下 → 降档不消失
+        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRow(155, 1, 1))
+        // 连紧凑都放不下（可用 96 < 103）才收 0
+        assertEquals(HIDE, WidgetSchedule.nextClassSecondRow(140, 1, 1))
+        // 多出的节不画（2×2 只答"下一节"）
         val multi = nextClass(
             today = listOf(course(600, 645, "A"), course(700, 745, "B", "南4 403"), course(800, 845, "C")),
             nowMin = 500,

@@ -721,17 +721,65 @@ object WidgetSchedule {
         if (heightDp <= 0 || heightDp >= 170) 13 to 12 else 12 to 11
 
     /**
-     * 「2×2」第二行（下一节）画不画（issue #13 第二轮）。
-     *
-     * ⚠️ 行样式下没有"中间档"：row 的自然高 ~44dp 不会因为藏了地点变小
-     * （课名+时间段仍是两行字），所以两行要么整行画、要么不画。
-     * 账本：内边距 28 + 表头 22 + 行距 2 + 两行 44×2 ≈ 140dp，留 10dp 余量 → ≥150dp
-     * 才画第二行；读不到尺寸（≤0）时保守只画本节一行。
+     * 「2×2」第二行（下一节）画成什么形态（issue #13 第三轮，HyperOS 实证后的重做）。
      */
-    fun nextClassPreviews(heightDp: Int): Int = when {
-        heightDp <= 0 -> 0
-        heightDp >= 150 -> 2
-        else -> 0
+    enum class NextClassPreviewStyle {
+        /** 收成 0：第二行彻底不画（盒子小到连紧凑档都放不下） */
+        HIDE,
+        /** 降档：第二行 = 单行紧凑形态（课名 + 时间段右对齐，不画地点），自然高 = [COURSE_ROW_HEIGHT_DP] */
+        COMPACT,
+        /** 满档：第二行 = 竖排三行形态（课名 / 地点 / 时间段），与第一行同款 */
+        STACKED,
+    }
+
+    /**
+     * 「2×2」的固定开销账本（2026-11-05，issue #13 HyperOS 翻车后重算）：
+     * 卡片内边距 20（10×2，配合 NextClassWidget.build 里的 setViewPadding 14→10）
+     * + 表头 22 + 行距 2。账例同 0.32 系列：**宁可多记**（可用高度算小）。
+     */
+    const val NEXT_CLASS_CHROME_DP = 44
+
+    /** 「2×2」渲染层的可用高度 = 画布 − 固定开销；读不到尺寸返回 0（走"自然高"分支） */
+    fun nextClassAvailableDp(heightDp: Int): Int =
+        if (heightDp <= 0) 0 else (heightDp - NEXT_CLASS_CHROME_DP).coerceAtLeast(0)
+
+    /**
+     * 竖排行（课名 / 地点 / 时间段各占一行）的自然高。
+     *
+     * 竖排 = 单行版式（[COURSE_ROW_HEIGHT_DP]=44：课名 + "地点·时间"一行）多出一行地点小字：
+     * 13dp 行 + 2dp 行距 ≈ 15dp。课名换行另加 [NAME_LINE_EXTRA_DP]。
+     */
+    fun stackedRowNaturalHeightDp(nameLines: Int): Int =
+        rowNaturalHeightDp(nameLines) + 15
+
+    /**
+     * 「2×2」第二行（下一节）的档位——**降档，而不是整行蒸发**。
+     *
+     * ⚠️ 旧版是"画 or 不画"二值逻辑：账本（<150 就不画）在 MEIZU 上标定，
+     * HyperOS 的报值口径不同 → 高度一算窄，第二节课整行消失（issue #13 第三轮实证）。
+     * 现在从下往上先降档再收：
+     *
+     *  · 高度读不到（≤0）→ **画满**（两行竖排、自然高不撑）。宁可多画一行完整的课，
+     *    也不能因为一个不可靠的读数把"下一节"整行藏掉——options 回调第一次就位前
+     *    的短暂空档不该表现为"课没了"；
+     *  · 竖排两行（自然高 59×2=118）放得下 → 满档；
+     *  · 放不下但"竖排本节 + 紧凑第二行"放得下 → 第二行降成单行（课名+时间段）；
+     *  · 连紧凑都放不下（可用 < ~103dp）→ 才收成 0（minResizeHeight=110 的画布不会走到）。
+     *
+     * @param firstLines / [secondLines] 两节课名按列宽估的换行数（[nameLineCount]）
+     */
+    fun nextClassSecondRow(
+        heightDp: Int,
+        firstLines: Int,
+        secondLines: Int,
+    ): NextClassPreviewStyle {
+        if (heightDp <= 0) return NextClassPreviewStyle.STACKED
+        val avail = nextClassAvailableDp(heightDp)
+        val firstStacked = stackedRowNaturalHeightDp(firstLines)
+        val secondStacked = stackedRowNaturalHeightDp(secondLines)
+        if (firstStacked + secondStacked <= avail) return NextClassPreviewStyle.STACKED
+        if (firstStacked + COURSE_ROW_HEIGHT_DP <= avail) return NextClassPreviewStyle.COMPACT
+        return NextClassPreviewStyle.HIDE
     }
 
     /**

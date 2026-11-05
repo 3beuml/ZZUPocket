@@ -105,6 +105,10 @@ object Widgets {
      *   下面近百 dp 全空（用户报的"下部分很空"）。
      * @param naturalHeightDp 这一行**不撑时**的自然高 —— 两行课名的行比单行的高 16dp
      *   （换行感知账本，见 [WidgetSchedule.rowNaturalHeightDp]）；传错就会把内容裁掉。
+     * @param stacked 竖排三行版式（课名 / 地点 / 时间段各占一行，issue #13 第三轮）：
+     *   2×2 用它 —— 定不了 HyperOS 的 2×2 实际宽度，与其猜宽度门槛，不如让
+     *   地点/时间段永远不挤同一行（用户报的"挤在一起看不清时间"）。两个布局的
+     *   view id 完全一致，渲染代码不分支；4×2 不传（保持单行版式不动）。
      */
     fun courseRow(
         context: Context,
@@ -116,8 +120,12 @@ object Widgets {
         nameSizeDp: Int,
         subSizeDp: Int,
         naturalHeightDp: Int = NATURAL_COURSE_ROW_HEIGHT_DP,
+        stacked: Boolean = false,
     ): RemoteViews {
-        val rv = RemoteViews(context.packageName, R.layout.widget_course_row)
+        val rv = RemoteViews(
+            context.packageName,
+            if (stacked) R.layout.widget_course_row_stacked else R.layout.widget_course_row,
+        )
         rv.setTextViewText(R.id.row_name, row.course.name)
         rv.setTextViewText(R.id.row_place, row.place)
         rv.setTextViewText(R.id.row_time, row.timeRange)

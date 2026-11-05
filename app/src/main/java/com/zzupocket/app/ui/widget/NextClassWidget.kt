@@ -38,7 +38,8 @@ import kotlinx.coroutines.launch
  * 已照办，这里只排到下一节为止，再多就是 4×2 的活。）
  *
  * 两行直接复用 [Widgets.courseRow]（4×2 的行构建），字号比 4×2 抬一档（2×2 只两行）；
- * 第二行按 [WidgetSchedule.nextClassPreviews] 的档位画/收，本节地点按
+ * 第二行按 [WidgetSchedule.nextClassSecondRow] 档位降级（满档竖排 / 紧凑单行 / 收 0），
+ * 本节地点按
  * [WidgetSchedule.nextClassDetail] 收，矮盒子里不会被裁成半截字。
  * **不显示老师**（用户要求，App 内"格子里不显示老师"的约定延续到组件）。
  */
@@ -110,7 +111,6 @@ class NextClassWidget : AppWidgetProvider() {
                     dark = dark,
                     click = click,
                     detail = WidgetSchedule.nextClassDetail(heightDp),
-                    previews = WidgetSchedule.nextClassPreviews(heightDp),
                     widthDp = widthDp,
                     heightDp = heightDp,
                 )
@@ -125,12 +125,22 @@ class NextClassWidget : AppWidgetProvider() {
             dark: Boolean,
             click: PendingIntent,
             detail: WidgetSchedule.RowDetail,
-            previews: Int,
             widthDp: Int,
             heightDp: Int,
         ): RemoteViews {
             val rv = RemoteViews(context.packageName, R.layout.widget_next_class)
             WidgetStyle.tint(rv, R.id.card, colors.bg)
+            // ⚠️ 卡片内边距 14→10（XML 是 14）：这 8dp 是 2×2 账本（NEXT_CLASS_CHROME_DP
+            // =44 按 10dp 记）的一部分。竖排三行后两行课的自然高 59×2=118，
+            // Meizu 实测画布 165dp 扣内边距 28 只剩 137dp 装不下；与 4×2 同招收
+            // 内边距 14→10 后可用 121dp，两行竖排 118 恰好放下（2026-11-05 issue #13）。
+            rv.setViewPadding(
+                R.id.card,
+                Widgets.dpToPx(context, 10),
+                Widgets.dpToPx(context, 10),
+                Widgets.dpToPx(context, 10),
+                Widgets.dpToPx(context, 10),
+            )
             rv.setOnClickPendingIntent(R.id.widget_root, click)
 
             rv.setTextColor(R.id.header, colors.text)
@@ -157,18 +167,43 @@ class NextClassWidget : AppWidgetProvider() {
 
             if (plan.hasCourse) {
                 val first = checkNotNull(plan.firstCourse)
-                // 2026-11-04 第二轮（用户要求）：两节都用 4×2 同款的「色条 + 文字」行、
-                // 圆气泡删除。2×2 只两行，字号比 4×2 的 13/12 抬一档（本节 15/13，
-                // 下一节 13/12）；矮盒子整组降一档。
+                // 2026-11-04 第二轮（用户要求）：两节都用「色条 + 文字」行、圆气泡删除。
+                // 2×2 只两行，字号比 4×2 的 13/12 抬一档（本节 15/13，下一节 13/12）；
+                // 矮盒子整组降一档。
                 val (n1, s1) = if (heightDp <= 0 || heightDp >= 170) 15 to 13 else 14 to 12
-                // 第二行（下一节）：≥150dp 才画（nextClassPreviews 的账本，无中间档）
-                val second = plan.nextCourse?.takeIf { previews >= 1 }
-                // 可用高度 = 画布 - 内边距 28 - 表头 ~22 - 行距 2；两行就等分（单行独占）
-                val available = if (heightDp > 0) (heightDp - 52).coerceAtLeast(0) else 0
-                val row1H = if (second != null) available / 2 + available % 2 else available
-                val row2H = if (second != null) available - row1H else 0
-                // 账本里"列宽"口径是格子可容宽：卡片内边距 28 先去掉
-                val columnWidthDp = (widthDp - 28).coerceAtLeast(0)
+                val n2 = n1 - 2
+                val s2 = s1 - 1
+                // 账本里"列宽"口径是格子可容宽：卡片内边距 20 先去掉
+                val columnWidthDp = (widthDp - 20).coerceAtLeast(0)
+                val firstLines = WidgetSchedule.nameLineCount(first.name, columnWidthDp, n1)
+
+                // 第二行（下一节）的档位（nextClassSecondRow）：满档竖排三行 / 降档单行 /
+                // 收 0。⚠️ 高度读不到（≤0）时是**画满**，不是不画—— 不让一个不可靠的
+                // 读数把"下一节"整行藏掉（issue #13 HyperOS 实证的教训）。
+                val second = plan.nextCourse?.let { next ->
+                    val secondLines = WidgetSchedule.nameLineCount(next.name, columnWidthDp, n2)
+                    (next to WidgetSchedule.nextClassSecondRow(heightDp, firstLines, secondLines))
+                        .takeUnless { it.second == WidgetSchedule.NextClassPreviewStyle.HIDE }
+                }
+
+                // 可用高度 = 画布 - 内边距 20 - 表头 22 - 行距 2（nextClassAvailableDp）；
+                // 有第二行就等分（单行独占），**并保证不低于各自的自然高**——硬塞低于
+                // 自然高的显式高度就是裁字，宁可顶出底部也不裁（2026-11-01 的教训）。
+                val available = WidgetSchedule.nextClassAvailableDp(heightDp)
+                val nat1 = WidgetSchedule.stackedRowNaturalHeightDp(firstLines)
+                val row1H = if (second != null) (available / 2 + available % 2).coerceAtLeast(nat1)
+                else available.coerceAtLeast(nat1)
+                val row2H = if (second != null) {
+                    val secondStyle = second.second
+                    val nat2 = when (secondStyle) {
+                        WidgetSchedule.NextClassPreviewStyle.STACKED ->
+                            WidgetSchedule.stackedRowNaturalHeightDp(
+                                WidgetSchedule.nameLineCount(second.first.name, columnWidthDp, n2),
+                            )
+                        else -> WidgetSchedule.COURSE_ROW_HEIGHT_DP
+                    }
+                    (available - row1H).coerceAtLeast(nat2)
+                } else 0
 
                 // ⚠️ 行高**必须显式 setViewLayoutHeight**（周课表同款 API31 正经 API），
                 // 不能只靠 courseRow 的"加内边距"式 stretch：那套的账本（naturalHeight）一旦
@@ -180,19 +215,28 @@ class NextClassWidget : AppWidgetProvider() {
                     targetH: Int,
                     nameDp: Int,
                     subDp: Int,
+                    stacked: Boolean,
+                    rowDetail: WidgetSchedule.RowDetail = detail,
                 ): RemoteViews {
                     val row = Widgets.courseRow(
                         context = context,
                         row = WidgetSchedule.toRow(course),
                         colors = colors,
                         dark = dark,
-                        detail = detail,
+                        detail = rowDetail,
                         rowHeightDp = 0, // 不用 padding 式 stretch，高度在下方显式设定
                         nameSizeDp = nameDp,
                         subSizeDp = subDp,
-                        naturalHeightDp = WidgetSchedule.rowNaturalHeightDp(
-                            WidgetSchedule.nameLineCount(course.name, columnWidthDp, nameDp),
-                        ),
+                        naturalHeightDp = if (stacked) {
+                            WidgetSchedule.stackedRowNaturalHeightDp(
+                                WidgetSchedule.nameLineCount(course.name, columnWidthDp, nameDp),
+                            )
+                        } else {
+                            WidgetSchedule.rowNaturalHeightDp(
+                                WidgetSchedule.nameLineCount(course.name, columnWidthDp, nameDp),
+                            )
+                        },
+                        stacked = stacked,
                     )
                     if (targetH > 0) {
                         row.setViewLayoutHeight(
@@ -202,9 +246,20 @@ class NextClassWidget : AppWidgetProvider() {
                     return row
                 }
 
-                rv.addView(R.id.next_rows, stretchedRow(first, row1H, n1, s1))
-                second?.let { next ->
-                    rv.addView(R.id.next_rows, stretchedRow(next, row2H, n1 - 2, s1 - 1))
+                // 2×2 的两行一律用**竖排三行**行版式（课名 / 地点 / 时间段不挤一行，
+                // issue #13 第三轮：HyperOS 上地点被省略号吃掉、时间段看不清）；
+                // 第二行降档时例外——单行紧凑（课名+时间段，不画地点）。
+                rv.addView(R.id.next_rows, stretchedRow(first, row1H, n1, s1, stacked = true))
+                second?.let { (next, secondStyle) ->
+                    when (secondStyle) {
+                        WidgetSchedule.NextClassPreviewStyle.STACKED ->
+                            rv.addView(R.id.next_rows, stretchedRow(next, row2H, n2, s2, stacked = true))
+                        else ->
+                            rv.addView(
+                                R.id.next_rows,
+                                stretchedRow(next, row2H, n2, s2, stacked = false, rowDetail = WidgetSchedule.RowDetail.NAME),
+                            )
+                    }
                 }
             } else {
                 rv.setTextViewText(R.id.status_title, plan.statusTitle)

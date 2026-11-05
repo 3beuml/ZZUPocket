@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  课表里的一行课程块 —— **竖排三行**变体（问题 #13 第三轮，为 2×2 準备）。
+
+      ▌大学物理           ← 课名 13dp 粗、可两行
+        南3 101           ← 地点，整行独占
+        10:00-11:35       ← 完整时间段，整行独占
+
+  ## 为什么 2×2 不再与 4×2 共用 widget_course_row.xml 的单行版式
+  单行版式把"地点（左）／时间段（右）"挤在一行，在 HyperOS 这种格子偏窄的启动器上
+  会把地点压成省略号、时间段被挤到看不清（issue #13 第三轮实证）。与其给
+  **定不了数的各家启动器**再立一个宽度门槛，不如让这两行信息永远不共用一行 ——
+  用户直接点名的改法（"建议直接分开为两行（仅2×2）"）。4×2 保持单行版式不动。
+
+  ## 与 widget_course_row.xml 的约定
+  · **view id 一模一样**（row_root / row_bar / row_name / row_place / row_time）：
+    Widgets.courseRow 两套布局共用一段渲染代码，setTextViewText / 字号 / 显隐全不用分支；
+  · 上下的内边距同样是**账本的一部分**：竖排自然高 = 44 + 15（多出一行地点 13dp 行 +
+    2dp 行距）= 59dp，课名每多一行再加 16dp（见 WidgetSchedule.stackedRowNaturalHeightDp）；
+    改字号/内边距必须同步那个账本；
+  · 2×2 渲染层（NextClassWidget.build）会先 `removeAllViews` 再 addView 这行，
+    行高仍由 setViewLayoutHeight 显式给定（至少不低于自然高，防裁字）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
+
+    <TextView
+        android:id="@+id/row_bar"
+        android:layout_width="@dimen/widget_bar_w"
+        android:layout_height="@dimen/widget_bar_h"
+        android:background="@drawable/widget_bar" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/widget_gap"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/row_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="2"
+            android:text="@string/widget_preview_class1_name"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_row_name"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/row_place"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_gap_xs"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_place"
+            android:textColor="@color/widget_text_hint"
+            android:textSize="@dimen/widget_row_sub" />
+
+        <TextView
+            android:id="@+id/row_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_gap_xs"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_range"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="@dimen/widget_row_sub" />
+    </LinearLayout>
+</LinearLayout>
