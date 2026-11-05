@@ -2,6 +2,7 @@
 <!--
   ============================================================
   「选择小组件」时的实时预览图（appwidget-provider 的 android:previewLayout）
+  「下一节课」2×2 的预览（真实画布 163×195dp）
   ============================================================
 
   早期这几个组件在选择页里**看不到预览**：provider 里 `android:previewImage` 写的是
@@ -14,12 +15,11 @@
 
   为什么预览布局不直接用真实布局：真实布局 next_rows 里的行是运行期 addView 的
   （RemoteViews 填内容），拿来预览会是一张空卡。所以这里写一份**填了样例数据**的
-  独立布局，行手工排成与真实渲染（Widgets.courseRow，4×2 同款）一致的两行。
+  独立布局，行手工排成竖排三行形态（#13 三轮起 2×2 的真实渲染形态：
+  色条 + 课名 / 地点 / 完整时间段各占一行，版式见 widget_course_row_stacked.xml）。
   样例一律虚构的课名/教室，不涉及真实个人信息。
   ⚠️ 颜色写死（预览不走 RemoteViews，拿不到主题色的运行期 tint），取 App 默认主题的值。
-
-  ============================================================
-  「下一节课」2×2 的预览（真实画布 163×195dp）：两行 4×2 同款行样式（本节+下一节）
+  ⚠️ 卡片内边距与真实渲染一致：真实渲染层 14→10（账本 NEXT_CLASS_CHROME_DP=44）。
   ============================================================
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -27,7 +27,7 @@
     android:layout_height="match_parent"
     android:background="@drawable/widget_bg"
     android:orientation="vertical"
-    android:padding="@dimen/widget_pad">
+    android:padding="10dp">
 
     <!-- 表头：今天 · 第 N 周（右上圆气泡已下线，2026-11-04） -->
     <TextView
@@ -40,7 +40,7 @@
         android:textSize="@dimen/widget_col_header"
         android:textStyle="bold" />
 
-    <!-- 本节行：色条 + 课名 / 地点（左）· 完整时间段（右）——复用 4×2 行形态 -->
+    <!-- 本节行（大一号）：色条 + 课名 / 地点 / 完整时间段，竖排三行 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -72,37 +72,29 @@
                 android:textSize="15dp"
                 android:textStyle="bold" />
 
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/widget_gap_xs"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_place"
+                android:textColor="@color/widget_text_hint"
+                android:textSize="13dp" />
 
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="@string/widget_preview_next_place"
-                    android:textColor="@color/widget_text_hint"
-                    android:textSize="13dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="@string/widget_preview_next_range"
-                    android:textColor="@color/widget_text_dim"
-                    android:textSize="13dp" />
-            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/widget_gap_xs"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_range"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="13dp" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 下一节行（小一号）：课名 / 地点 · 开始时刻 -->
+    <!-- 下一节行（小一号）：同款竖排三行 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -133,33 +125,25 @@
                 android:textSize="13dp"
                 android:textStyle="bold" />
 
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/widget_gap_xs"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="南3 202"
+                android:textColor="@color/widget_text_hint"
+                android:textSize="12dp" />
 
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="南3 202"
-                    android:textColor="@color/widget_text_hint"
-                    android:textSize="12dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="14:00"
-                    android:textColor="@color/widget_text_dim"
-                    android:textSize="12dp" />
-            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/widget_gap_xs"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="14:00"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="12dp" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
