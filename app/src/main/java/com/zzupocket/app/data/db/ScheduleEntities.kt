@@ -301,6 +301,10 @@ interface RoomOccupancyDao {
     @Query("SELECT * FROM room_occupancy WHERE date = :date AND campusId = :campusId")
     suspend fun byDateAndCampus(date: String, campusId: Long): List<RoomOccupancyEntity>
 
+    /** 断网时拿不到校区列表：按日期把该天所有校区的快照都取出来（调用方挑最新的一组） */
+    @Query("SELECT * FROM room_occupancy WHERE date = :date")
+    suspend fun byDate(date: String): List<RoomOccupancyEntity>
+
     @Query("SELECT MAX(fetchedAt) FROM room_occupancy WHERE date = :date AND campusId = :campusId")
     suspend fun fetchedAt(date: String, campusId: Long): Long?
 

@@ -429,6 +429,38 @@ class WidgetScheduleTest {
     }
 
     @Test
+    fun `2×2 阶梯判档按实测自然高_MiSans 与 Roboto 两组口径`() {
+        // #13 四轮：渲染层用 Paint 实测各档自然高喂给 nextClassSecondRowAvail。
+        // 魔数账本（竖排 59）在 HyperOS/MiSans 上偏小 → 判档说放得下、实际裁字。
+        // 实测口径（stackedNat / compactNat）：lhN×行数 + (2+lhS)×2 + 行内边距10 + 余量2
+        //
+        // Meizu/Roboto：15dp 粗体 ≈18、13dp ≈16
+        //   竖排(1行) = 18 + (2+16) + (2+16) + 10 + 2 = 66；紧凑 = 18 + 2 + 16 + 10 + 2 = 48
+        val robotoFirst = 66
+        val robotoStacked = 66
+        val robotoCompact = 48
+        // chrome 实测：20 + 表头(12dp 粗体 ≈15) + 2 = 37 → 165 画布可用 128。
+        // 竖排两行 66+66=132 放不下 → 紧凑（66+48=114 ≤ 128）；旧魔数账本判 STACKED
+        // 是因为 59 低估了真实行高，恰好"塞进去"只差一两 dp，换台设备就裁字。
+        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRowAvail(128, robotoFirst, robotoStacked, robotoCompact))
+        assertEquals(HIDE, WidgetSchedule.nextClassSecondRowAvail(112, robotoFirst, robotoStacked, robotoCompact))
+        // HyperOS/MiSans：15dp 粗体 ≈21、13dp ≈18
+        //   竖排(1行) = 21 + (2+18) + (2+18) + 10 + 2 = 73；紧凑 = 21 + 2 + 18 + 10 + 2 = 53
+        val misansFirst = 73
+        val misansStacked = 73
+        val misansCompact = 53
+        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRowAvail(128, misansFirst, misansStacked, misansCompact))
+        assertEquals(HIDE, WidgetSchedule.nextClassSecondRowAvail(122, misansFirst, misansStacked, misansCompact))
+        // 更高的盒子（拖到 2×3）竖排两行放得下 → 满档
+        assertEquals(STACKED, WidgetSchedule.nextClassSecondRowAvail(150, misansFirst, misansStacked, misansCompact))
+        // 高度读不到：照样画满（不让不可靠读数藏掉第二行）
+        assertEquals(STACKED, WidgetSchedule.nextClassSecondRowAvail(0, misansFirst, misansStacked, misansCompact))
+        // chrome 可传入实测值（表头行高随系统字体变）
+        assertEquals(128, WidgetSchedule.nextClassAvailableDp(165, 37))
+        assertEquals(0, WidgetSchedule.nextClassAvailableDp(30, 37))
+    }
+
+    @Test
     fun `2×2 矮盒子先收地点_课名永远留着`() {
         assertEquals(WidgetSchedule.RowDetail.FULL, WidgetSchedule.nextClassDetail(195))
         assertEquals(WidgetSchedule.RowDetail.FULL, WidgetSchedule.nextClassDetail(78))

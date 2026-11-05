@@ -95,6 +95,44 @@ object Widgets {
         (dp * context.resources.displayMetrics.density).toInt()
 
     /**
+     * 一行文字的真实行高（dp，向上取整）。
+     *
+     * RemoteViews 量不了文本（gotcha/widget-font-tiering），但渲染发生在**本进程**：
+     * 用 Paint 按当前设备的系统字体（HyperOS = MiSans、Meizu = 它的默认字体）量
+     * fontMetrics，比魔数账本准 —— 2026-11-05 #13 第四轮实证：账本按 Meizu/Roboto
+     * 标定（44 基准 / 竖排行 15），HyperOS 的 MiSans 垂直度量更大，显式行高
+     * （setViewLayoutHeight）小于真实内容高 → 时间段被裁掉半截字。
+     *
+     * 字号口径与 setTextViewTextSize(COMPLEX_UNIT_DIP) 一致：**不受系统字体缩放影响**。
+     * 布局里全部 includeFontPadding=false，TextView 实高就是 descent−ascent，口径吻合。
+     */
+    fun textLineHeightDp(context: Context, sizeDp: Int, bold: Boolean = false): Int {
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = dpToPx(context, sizeDp).toFloat()
+            typeface = if (bold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        val fm = paint.fontMetrics
+        return kotlin.math.ceil((fm.descent - fm.ascent) / context.resources.displayMetrics.density)
+            .toInt().coerceAtLeast(1)
+    }
+
+    /**
+     * 文字在给定宽度里的换行数（Android 侧实测宽度，比 CJK 1em/ASCII 0.55em 的
+     * 字符分类估得准；总宽除法对 CJK 逐字换行是精确的，对带空格的 ASCII 偏保守
+     * —— 往多变一行只会让行高更宽裕，方向安全）。
+     */
+    fun textLineCount(context: Context, text: String, sizeDp: Int, bold: Boolean, widthDp: Int): Int {
+        if (widthDp <= 0 || text.isBlank()) return 1
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = dpToPx(context, sizeDp).toFloat()
+            typeface = if (bold) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+        val usable = dpToPx(context, widthDp).toFloat()
+        if (usable <= 0f) return 1
+        return kotlin.math.ceil(paint.measureText(text) / usable).toInt().coerceIn(1, 4)
+    }
+
+    /**
      * 画一行课程（4×2 与 2×2 共用同一套行，两个组件的观感才一致）。
      *
      * 一行 = 左侧课程色条 + 课名（大）+ 一行「地点（左）／时间段（右）」小字。
@@ -121,6 +159,7 @@ object Widgets {
         subSizeDp: Int,
         naturalHeightDp: Int = NATURAL_COURSE_ROW_HEIGHT_DP,
         stacked: Boolean = false,
+        nameMaxLines: Int = 2,
     ): RemoteViews {
         val rv = RemoteViews(
             context.packageName,
@@ -133,6 +172,11 @@ object Widgets {
         rv.setTextViewTextSize(R.id.row_name, android.util.TypedValue.COMPLEX_UNIT_DIP, nameSizeDp.toFloat())
         rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, subSizeDp.toFloat())
         rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, subSizeDp.toFloat())
+        // 2×2 紧凑档把课名收到单行省略：长课名换两行的话单行高度装不下，
+        // 显式行高会把时间段裁没（#13 四轮）。setMaxLines 带 @RemotableViewMethod，可反射调。
+        if (nameMaxLines != 2) {
+            rv.setInt(R.id.row_name, "setMaxLines", nameMaxLines)
+        }
 
         rv.setTextColor(R.id.row_name, colors.text)
         rv.setTextColor(R.id.row_place, colors.hint)

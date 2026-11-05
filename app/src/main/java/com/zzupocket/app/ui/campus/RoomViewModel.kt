@@ -1,5 +1,6 @@
 ﻿package com.zzupocket.app.ui.campus
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.zzupocket.app.core.AppGraph
@@ -105,21 +106,32 @@ class RoomViewModel : ViewModel() {
             } else {
                 null
             }
-            val campuses = repo.campuses()
-            val campus = campuses.firstOrNull { it.nameZh.contains("主校区") } ?: campuses.firstOrNull()
             _state.update {
-                it.copy(
-                    campuses = campuses,
-                    campusId = campus?.id,
-                    periods = periods,
-                    semesterRange = range,
-                )
+                it.copy(periods = periods, semesterRange = range)
             }
-            val buildings = campus?.let { orderedBuildings(repo.buildings(it.id)) }.orEmpty()
-            _state.update { it.copy(buildings = buildings) }
-            // ① 先用本地快照渲染（教务挂了/断网也能看今天早上抓到的状态）
-            val shownFromCache = renderCachedSnapshot(campus?.id)
-            // ② 距上次成功抓取不足 30 分钟就不联网了（空教室是分钟级数据，但也不该每秒重拉）
+            // ① 先用本地快照渲染（教务挂了/断网也能看今天早上抓到的状态）。
+            // ⚠️ 快照渲染必须放在任何网络调用之前：断网时 campuses() 会抛，
+            // 走不到快照渲染的话明明有数据也整页红条（2026-11-05 用户蜂窝实测，#15 复发）。
+            val shownFromCache = renderCachedSnapshot()
+            // ② 校区/楼栋字典失败不再炸整页：有快照就停在快照 + 灰字，没快照才红条
+            val dictResult = runCatching {
+                val campuses = repo.campuses()
+                val campus = campuses.firstOrNull { it.nameZh.contains("主校区") } ?: campuses.firstOrNull()
+                if (campus != null) {
+                    val buildings = orderedBuildings(repo.buildings(campus.id))
+                    _state.update {
+                        it.copy(campuses = campuses, campusId = campus.id, buildings = buildings)
+                    }
+                }
+                campus != null
+            }
+            if (!dictResult.getOrDefault(false)) {
+                degradeToCache(
+                    dictResult.exceptionOrNull() ?: IllegalStateException("校区字典不可用"),
+                )
+                return
+            }
+            // ③ 距上次成功抓取不足 30 分钟就不联网了（空教室是分钟级数据，但也不该每秒重拉）
             if (shownFromCache && !com.zzupocket.app.core.SyncPolicy.shouldRefresh(
                     now = System.currentTimeMillis(),
                     lastFetchedAt = _state.value.lastFetchedAt,
@@ -127,23 +139,33 @@ class RoomViewModel : ViewModel() {
                 )
             ) {
                 _state.update { it.copy(loading = false) }
+                startPrefetchIfOnline()
                 return
             }
             fetch(reset = true)
+            startPrefetchIfOnline()
         } catch (e: Throwable) {
-            // 有快照就别报红错，只留一行灰字
-            if (allRooms.isNotEmpty()) {
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        error = null,
-                        fromCache = true,
-                        notice = noticeOf(it.lastFetchedAt) ?: "暂时连不上教务系统 · 点此重试",
-                    )
-                }
-            } else {
-                _state.update { it.copy(loading = false, error = e.toUserMessage()) }
+            degradeToCache(e)
+        }
+    }
+
+    /**
+     * 网络失败的统一降级：**有快照就不报红错**（红字会让人以为账号出问题），
+     * 留一行灰字说明数据是几点抓的；真没快照才红条。
+     */
+    private fun degradeToCache(e: Throwable) {
+        if (allRooms.isNotEmpty()) {
+            _state.update {
+                it.copy(
+                    loading = false,
+                    loadingMore = false,
+                    error = null,
+                    fromCache = true,
+                    notice = noticeOf(it.lastFetchedAt) ?: "暂时连不上教务系统 · 点此重试",
+                )
             }
+        } else {
+            _state.update { it.copy(loading = false, error = e.toUserMessage()) }
         }
     }
 
@@ -157,16 +179,15 @@ class RoomViewModel : ViewModel() {
     }
 
     /**
-     * 用本地快照渲染当前日期/校区；返回 true 表示有可用快照。
+     * 用本地快照渲染当前日期；返回 true 表示有可用快照。
      *
      * 快照里存的是**原始占用时间段**，所以这里用当前节次表重新算格子 ——
-     * 作息变了也不会错位。
+     * 作息变了也不会错位。不依赖校区字典（断网时字典拿不到，快照自带 campusId）。
      */
-    private suspend fun renderCachedSnapshot(campusId: Long?): Boolean {
-        val id = campusId ?: return false
+    private suspend fun renderCachedSnapshot(): Boolean {
         val s = _state.value
         val snap = runCatching {
-            AppGraph.scheduleRepository.cachedRoomSnapshot(s.date.toString(), id)
+            AppGraph.scheduleRepository.cachedRoomSnapshotAnyCampus(s.date.toString())
         }.getOrNull() ?: return false
         if (snap.rows.isEmpty()) return false
         val units = s.periods.map { it.startTime to it.endTime }
@@ -258,22 +279,10 @@ class RoomViewModel : ViewModel() {
         if (reset) {
             runCatching {
                 val campusId = s.campusId ?: return@runCatching
-                val cacheRows = result.data.filterNot { it.virtual }.map { room ->
-                    com.zzupocket.app.data.repo.RoomCacheRow(
-                        roomId = room.id,
-                        code = RoomNames.numberOf(room.nameZh, room.code),
-                        buildingId = room.buildingId,
-                        buildingName = buildingNames[room.buildingId] ?: "未知楼栋",
-                        campusName = room.campusNameZh.orEmpty(),
-                        occupations = room.roomOccupationInfoVms.map {
-                            RoomOccupation(it.startTime, it.endTime, it.activityType.orEmpty())
-                        },
-                    )
-                }
                 AppGraph.scheduleRepository.saveRoomSnapshot(
                     date = s.date.toString(),
                     campusId = campusId,
-                    rows = cacheRows,
+                    rows = toCacheRows(result, s.buildings),
                 )
             }
         }
@@ -306,6 +315,84 @@ class RoomViewModel : ViewModel() {
         }
     }
 
+    /** 接口一页教室 → 快照行（当天快照与预取共用同一转换，口径才不会分叉） */
+    private fun toCacheRows(
+        result: EasClient.ClassroomPageDto,
+        buildings: List<EasClient.BuildingDto>,
+    ): List<com.zzupocket.app.data.repo.RoomCacheRow> {
+        val buildingNames = buildings.associate { it.id to it.nameZh }
+        return result.data.filterNot { it.virtual }.map { room ->
+            com.zzupocket.app.data.repo.RoomCacheRow(
+                roomId = room.id,
+                code = RoomNames.numberOf(room.nameZh, room.code),
+                buildingId = room.buildingId,
+                buildingName = buildingNames[room.buildingId] ?: "未知楼栋",
+                campusName = room.campusNameZh.orEmpty(),
+                occupations = room.roomOccupationInfoVms.map {
+                    RoomOccupation(it.startTime, it.endTime, it.activityType.orEmpty())
+                },
+            )
+        }
+    }
+
+    /** 一次进页只做一轮预取（filter 切换/翻日不触发，失败当天内不反复重试） */
+    private var prefetchJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 进页联网成功后，把**今天+1 ~ 今天+5** 的占用预取落库
+     * （2026-11-05 用户拍定：本地保留 7 天 = 昨天 1 天 + 今天起 6 天；
+     * 昨天的靠保留窗口不删，未来几天的靠这里补 —— 不然只有"浏览过的日期"才有快照）。
+     *
+     * 串行、低优先、逐日跳过当天已抓过的：二次进页零请求；中途断网就整轮停掉。
+     */
+    private fun startPrefetchIfOnline() {
+        if (prefetchJob?.isActive == true) return
+        val s = _state.value
+        if (s.date != LocalDate.now()) return
+        val campusId = s.campusId ?: return
+        val buildingIds = s.buildings.map { it.id }
+        if (buildingIds.isEmpty()) return
+        prefetchJob = viewModelScope.launch {
+            for (offset in 1..PREFETCH_DAYS) {
+                val day = LocalDate.now().plusDays(offset.toLong())
+                runCatching { prefetchDay(campusId, buildingIds, day) }
+                    .onFailure {
+                        Log.w(TAG, "预取 $day 教室占用失败，本轮到此为止", it)
+                        return@launch
+                    }
+            }
+        }
+    }
+
+    private suspend fun prefetchDay(campusId: Long, buildingIds: List<Long>, date: LocalDate) {
+        // 该天已有"今天抓的"快照就跳过（预取只在成功联网后跑，快照即新鲜）
+        val existing = scheduleRepo.cachedRoomSnapshot(date.toString(), campusId)
+        if (existing != null && java.time.Instant.ofEpochMilli(existing.fetchedAt)
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate() == LocalDate.now()
+        ) {
+            return
+        }
+        var page = 1
+        while (true) {
+            val result = repo.roomsPage(
+                date = date,
+                buildingIds = buildingIds,
+                page = page,
+                pageSize = RoomRepository.PAGE_SIZE_LARGE,
+            )
+            runCatching {
+                AppGraph.scheduleRepository.saveRoomSnapshot(
+                    date = date.toString(),
+                    campusId = campusId,
+                    rows = toCacheRows(result, _state.value.buildings),
+                )
+            }
+            val totalPages = result.page?.totalPages ?: 1
+            if (page >= totalPages) break
+            page++
+        }
+    }
+
     private fun rebuildGroups(
         rooms: List<RoomRow>,
         buildingOrder: List<Long>,
@@ -332,7 +419,9 @@ class RoomViewModel : ViewModel() {
                 repo.campuses(force = true)
                 _state.value.campusId?.let { repo.buildings(it, force = true) }
             }
-            fetch(reset = true)
+            runCatching { fetch(reset = true) }
+                .onFailure { e -> degradeToCache(e) }
+            startPrefetchIfOnline()
         }
     }
 
@@ -343,9 +432,7 @@ class RoomViewModel : ViewModel() {
         _state.update { it.copy(loadingMore = true) }
         viewModelScope.launch {
             runCatching { fetch(reset = false) }
-                .onFailure { e ->
-                    _state.update { it.copy(loadingMore = false, error = e.toUserMessage()) }
-                }
+                .onFailure { e -> degradeToCache(e) }
         }
     }
 
@@ -364,9 +451,7 @@ class RoomViewModel : ViewModel() {
                 val buildings = orderedBuildings(repo.buildings(id))
                 _state.update { it.copy(buildings = buildings) }
                 fetch(reset = true)
-            }.onFailure { e ->
-                _state.update { it.copy(loading = false, error = e.toUserMessage()) }
-            }
+            }.onFailure { e -> degradeToCache(e) }
         }
     }
 
@@ -374,7 +459,7 @@ class RoomViewModel : ViewModel() {
         _state.update { it.copy(selectedBuildings = ids, loading = true) }
         viewModelScope.launch {
             runCatching { fetch(reset = true) }
-                .onFailure { e -> _state.update { it.copy(loading = false, error = e.toUserMessage()) } }
+                .onFailure { e -> degradeToCache(e) }
         }
     }
 
@@ -382,7 +467,7 @@ class RoomViewModel : ViewModel() {
         _state.update { it.copy(date = date, loading = true, showDatePicker = false) }
         viewModelScope.launch {
             runCatching { fetch(reset = true) }
-                .onFailure { e -> _state.update { it.copy(loading = false, error = e.toUserMessage()) } }
+                .onFailure { e -> degradeToCache(e) }
         }
     }
 
@@ -433,7 +518,12 @@ class RoomViewModel : ViewModel() {
     }
 
     private companion object {
+        private const val TAG = "RoomViewModel"
+
         /** 过滤后少于这个数就自动续页 */
         const val MIN_VISIBLE = 15
+
+        /** 预取天数：今天+1 ~ 今天+5（与保留窗口"昨天~今天+5"配套） */
+        const val PREFETCH_DAYS = 5
     }
 }

@@ -15,11 +15,13 @@
 
   为什么预览布局不直接用真实布局：真实布局 next_rows 里的行是运行期 addView 的
   （RemoteViews 填内容），拿来预览会是一张空卡。所以这里写一份**填了样例数据**的
-  独立布局，行手工排成竖排三行形态（#13 三轮起 2×2 的真实渲染形态：
-  色条 + 课名 / 地点 / 完整时间段各占一行，版式见 widget_course_row_stacked.xml）。
+  独立布局：本节行 = 竖排三行（色条 + 课名/地点/完整时间段，widget_course_row_stacked.xml）；
+  下一节行 = **紧凑单行**（课名 + 时间段，不画地点）——#13 四轮（2026-11-05）起
+  行高按系统字体实测，标准 2×2 的真实画布放不下两行竖排（两行 66+66=132 > 可用 ~128），
+  判档会落到"竖排本节 + 紧凑下一节"，预览必须与之一致，免得"选的时候一个样、上桌面一个样"。
   样例一律虚构的课名/教室，不涉及真实个人信息。
   ⚠️ 颜色写死（预览不走 RemoteViews，拿不到主题色的运行期 tint），取 App 默认主题的值。
-  ⚠️ 卡片内边距与真实渲染一致：真实渲染层 14→10（账本 NEXT_CLASS_CHROME_DP=44）。
+  ⚠️ 卡片内边距与真实渲染一致：真实渲染层 14→10（实测 chrome = 20 + 表头 + 行距 2）。
   ============================================================
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -94,7 +96,7 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 下一节行（小一号）：同款竖排三行 -->
+    <!-- 下一节行（小一号）：紧凑单行（课名 + 时间段右对齐，不画地点） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -118,6 +120,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
                 android:includeFontPadding="false"
                 android:maxLines="1"
                 android:text="程序设计基础"
@@ -125,25 +128,26 @@
                 android:textSize="13dp"
                 android:textStyle="bold" />
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="@dimen/widget_gap_xs"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:text="南3 202"
-                android:textColor="@color/widget_text_hint"
-                android:textSize="12dp" />
+                android:orientation="horizontal">
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/widget_gap_xs"
-                android:includeFontPadding="false"
-                android:maxLines="1"
-                android:text="14:00"
-                android:textColor="@color/widget_text_dim"
-                android:textSize="12dp" />
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
+                    android:text="14:00-15:40"
+                    android:textColor="@color/widget_text_dim"
+                    android:textSize="12dp" />
+            </LinearLayout>
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

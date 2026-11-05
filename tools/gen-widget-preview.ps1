@@ -200,11 +200,12 @@ Write-Host "写入 $out1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2) 「下一节课」2×2 = 163×195dp
-#    形态（#13 三轮，2026-11-05）：表头（今天 · 第 N 周）+ 两行**竖排三行**行
-#    —— 色条 + 课名 / 地点 / 完整时间段各占一行。本节大一号（课名 15 / 地点·时间段 13），
-#    下一节小一号（13 / 12）。卡片内边距渲染层 14→10（账本 NEXT_CLASS_CHROME_DP=44），
-#    这里按 10 同步。与 res/layout/widget_next_class_preview.xml 一一对应；
-#    改 res 布局时同步改这里再重跑本脚本。
+#    形态（#13 四轮，2026-11-05）：表头 + 本节**竖排三行**（课名/地点/时间段各占一行，
+#    课名 15 / 地点·时间段 13）+ 下一节**紧凑单行**（课名 13 + 时间段右对齐 12，不画地点）。
+#    行高按系统字体实测后，标准 2×2 画布放不下两行竖排（66+66=132 > 可用 ~128），
+#    判档落"竖排本节 + 紧凑下一节"（nextClassSecondRowAvail → COMPACT），
+#    预览必须与真实渲染一致。卡片内边距渲染层 14→10，这里按 10 同步。
+#    与 res/layout/widget_next_class_preview.xml 一一对应；改 res 布局时同步改这里再重跑本脚本。
 # ════════════════════════════════════════════════════════════════════════════
 $w = 163; $h = 195
 $c = New-Canvas $w $h
@@ -236,15 +237,14 @@ Draw-Text $g '大学物理' $fRowName $bText $nameX $y1 19 | Out-Null
 Draw-Text $g '南3 101' $fRowSub $bHint $nameX ($y1 + 21) 16 | Out-Null
 Draw-Text $g '10:00-11:35' $fRowSub $bDim $nameX ($y1 + 39) 16 | Out-Null
 
-# 行2（下一节，小一号）：同款竖排
+# 行2（下一节，小一号）：紧凑单行（课名 + 时间段右对齐，不画地点）
 $row2Top = $rowsTop + $row1H
 $Bar5 = [System.Drawing.ColorTranslator]::FromHtml('#C97F5A')
-$natural2 = 17 + 2 + 15 + 2 + 15
+$natural2 = 17 + 2 + 15
 $y2 = $row2Top + ($row2H - $natural2) / 2
 Draw-Bar $g $pad2 ($row2Top + ($row2H - 26) / 2) 3 26 $Bar5
 Draw-Text $g '程序设计基础' $fName2 $bText $nameX $y2 17 | Out-Null
-Draw-Text $g '南3 202' $fSub2 $bHint $nameX ($y2 + 19) 15 | Out-Null
-Draw-Text $g '14:00' $fSub2 $bDim $nameX ($y2 + 36) 15 | Out-Null
+Draw-Text $g '14:00-15:40' $fSub2 $bDim 0 ($y2 + 19) 15 'right' ($w - $pad2) | Out-Null
 
 $out2 = Join-Path $drawable 'widget_preview_next_class.png'
 $c.Bitmap.Save($out2, [System.Drawing.Imaging.ImageFormat]::Png)

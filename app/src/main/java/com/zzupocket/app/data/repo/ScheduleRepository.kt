@@ -691,14 +691,15 @@ class ScheduleRepository(
                     )
                 },
             )
-            // 保留窗口：今天 ~ 今天+6（用户拍定的"七天"= 今天往后看六天）。
+            // 保留窗口：**昨天 ~ 今天+5**，共 7 天（2026-11-05 用户拍定：昨天 1 天 +
+            // 今天起 6 天）。昨天也要留 —— 断网时翻回去能看"昨天此时"的占用。
             // ⚠️ 必须按**今天**算，不能按"这次抓取的日期"算 —— 否则切到未来某天抓一次，
             // 会把今天的快照顺手删掉（旧实现正是这样）。
             run {
                 val today = java.time.LocalDate.now()
                 db.roomOccupancyDao().pruneOutside(
-                    minDate = today.toString(),
-                    maxDate = today.plusDays(ROOM_KEEP_DAYS - 1L).toString(),
+                    minDate = today.minusDays(1).toString(),
+                    maxDate = today.plusDays(ROOM_KEEP_DAYS - 2L).toString(),
                 )
             }
         }
@@ -707,10 +708,32 @@ class ScheduleRepository(
     /** 读某一天、某校区的快照；没有返回 null（调用方据此决定"没数据可用"） */
     suspend fun cachedRoomSnapshot(date: String, campusId: Long): CachedRoomSnapshot? {
         val rows = db.roomOccupancyDao().byDateAndCampus(date, campusId)
+        return rowsToSnapshot(date, rows)
+    }
+
+    /**
+     * 读某一天的快照，**不指定校区**（多校区时取最近抓取的那组）。
+     *
+     * 断网时 `campuses()` 拿不到列表、推不出 campusId —— 空教室页的快照渲染
+     * 不能被校区字典卡住（2026-11-05 用户蜂窝实测：明明有快照却整页红条）。
+     * 返回的 [CachedRoomSnapshot.campusId] 让调用方知道该信哪一校区。
+     */
+    suspend fun cachedRoomSnapshotAnyCampus(date: String): CachedRoomSnapshot? {
+        val rows = db.roomOccupancyDao().byDate(date)
         if (rows.isEmpty()) return null
+        val best = rows.groupBy { it.campusId }
+            .maxByOrNull { (_, group) -> group.maxOf { it.fetchedAt } }
+            ?: return null
+        return rowsToSnapshot(date, best.value)
+    }
+
+    private suspend fun rowsToSnapshot(date: String, rows: List<RoomOccupancyEntity>): CachedRoomSnapshot? {
+        if (rows.isEmpty()) return null
+        val campusId = rows.first().campusId
         val at = db.roomOccupancyDao().fetchedAt(date, campusId) ?: return null
         return CachedRoomSnapshot(
             fetchedAt = at,
+            campusId = campusId,
             rows = rows.map { e ->
                 RoomCacheRow(
                     roomId = e.roomId,
@@ -883,4 +906,6 @@ data class RoomCacheRow(
 data class CachedRoomSnapshot(
     val fetchedAt: Long,
     val rows: List<RoomCacheRow>,
+    /** 快照属于哪个校区（anyCampus 查询时由数据自带；指定校区查询 = 传入的那个） */
+    val campusId: Long? = null,
 )

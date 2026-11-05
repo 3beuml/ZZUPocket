@@ -282,6 +282,9 @@ class ScheduleViewModel : ViewModel() {
     /** 研究生课表缓存有效期：24 小时（课表变动很小，一天最多后台刷一次） */
     private val GRAD_TTL_MS = 24L * 60 * 60 * 1000
 
+    /** 本科课表同步的兜底超时：CAS 刷新 + 整学期课表两次请求的预算 */
+    private val EAS_SYNC_TIMEOUT_MS = 30_000L
+
     /** `14:20` 这种口径的"获取时间" */
     private fun hhmm(millis: Long): String =
         java.time.Instant.ofEpochMilli(millis)
@@ -571,7 +574,10 @@ cacheNoticeNeedsLogin = expired,
         try {
             var all = repo.semesters()
             if (all.isEmpty() && loggedIn) {
-                repo.refreshSemesters()
+                // 学期列表拉不到不再炸整页（#15 复发：蜂窝下 refreshSemesters 抛
+                // "网络不可达"，外层 catch 把整页打成红错+空白 —— 本地明明有整学期缓存）。
+                // 失败就空着继续走：loadSemester 自己有"缓存优先 + 灰字"兜底。
+                runCatching { repo.refreshSemesters() }
                 all = repo.semesters()
             }
             val (visible, notice) = applyYearFilter(all)
@@ -581,7 +587,8 @@ cacheNoticeNeedsLogin = expired,
                     loading = selected == null,
                     loggedIn = loggedIn,
                     error = null,
-                    notice = notice,
+                    notice = notice
+                        ?: if (selected == null && loggedIn) "还没同步过学期列表，联网后重进课表页会自动同步" else null,
                     allSemesters = all,
                     semesters = visible,
                     selectedSemester = selected,
@@ -589,6 +596,7 @@ cacheNoticeNeedsLogin = expired,
             }
             if (selected != null) loadSemester(selected, loggedIn, forceSync = false)
         } catch (e: Throwable) {
+            // 走到这里说明本地库读取都失败了（不是网络）：真异常才红条
             _state.update { it.copy(loading = false, error = e.toUserMessage()) }
         }
     }
@@ -651,9 +659,19 @@ cacheNoticeNeedsLogin = expired,
         var refreshFailed = false
         try {
             if (loggedIn && (forceSync || !repo.hasCourseData(semester.id) || stale)) {
-                repo.refreshCourseTable(semester.id)
+                // 兜底超时：蜂窝/弱网下 CAS 刷新会挂很久，没这层的话页面一直转圈
+                // （研究生链路同款做法）。超时走下面的缓存兜底，不白等。
+                kotlinx.coroutines.withTimeout(EAS_SYNC_TIMEOUT_MS) {
+                    repo.refreshCourseTable(semester.id)
+                }
             }
         } catch (e: Throwable) {
+            // 用户离开页面导致的协程取消不是"刷新失败"，原样上抛让协程正常收尾
+            if (e is kotlinx.coroutines.CancellationException &&
+                e !is kotlinx.coroutines.TimeoutCancellationException
+            ) {
+                throw e
+            }
             refreshFailed = true
             if (repo.hasCourseData(semester.id)) {
                 val at = fetchedAt?.let { hhmm(it) }

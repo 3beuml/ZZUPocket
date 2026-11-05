@@ -741,7 +741,11 @@ object WidgetSchedule {
 
     /** 「2×2」渲染层的可用高度 = 画布 − 固定开销；读不到尺寸返回 0（走"自然高"分支） */
     fun nextClassAvailableDp(heightDp: Int): Int =
-        if (heightDp <= 0) 0 else (heightDp - NEXT_CLASS_CHROME_DP).coerceAtLeast(0)
+        nextClassAvailableDp(heightDp, NEXT_CLASS_CHROME_DP)
+
+    /** 同上，固定开销由渲染层实测（表头行高随系统字体变，魔数 44 在 MiSans 上偏小） */
+    fun nextClassAvailableDp(heightDp: Int, chromeDp: Int): Int =
+        if (heightDp <= 0) 0 else (heightDp - chromeDp).coerceAtLeast(0)
 
     /**
      * 竖排行（课名 / 地点 / 时间段各占一行）的自然高。
@@ -772,13 +776,32 @@ object WidgetSchedule {
         heightDp: Int,
         firstLines: Int,
         secondLines: Int,
+    ): NextClassPreviewStyle = nextClassSecondRowAvail(
+        availDp = nextClassAvailableDp(heightDp),
+        firstNatDp = stackedRowNaturalHeightDp(firstLines),
+        secondStackedNatDp = stackedRowNaturalHeightDp(secondLines),
+        secondCompactNatDp = COURSE_ROW_HEIGHT_DP,
+    )
+
+    /**
+     * 阶梯判档的核心，按**各档自然高**判断（2026-11-05 #13 四轮拆出来的纯函数）。
+     *
+     * 旧签名按"行数 + 魔数"在函数里现算自然高 —— 那套魔数按 Meizu/Roboto 标定，
+     * HyperOS 的 MiSans 更高，判档说"放得下"、实际放不下，显式行高把字裁掉。
+     * 渲染层（NextClassWidget.build）现在用 Paint 实测各档自然高喂进来；
+     * 魔数签名保留作账本口径（单测与"拿不到 Paint 的场景"用）。
+     *
+     * @param availDp 可用高度（画布 − 固定开销）；≤0 = 读不到尺寸 → 画满
+     */
+    fun nextClassSecondRowAvail(
+        availDp: Int,
+        firstNatDp: Int,
+        secondStackedNatDp: Int,
+        secondCompactNatDp: Int,
     ): NextClassPreviewStyle {
-        if (heightDp <= 0) return NextClassPreviewStyle.STACKED
-        val avail = nextClassAvailableDp(heightDp)
-        val firstStacked = stackedRowNaturalHeightDp(firstLines)
-        val secondStacked = stackedRowNaturalHeightDp(secondLines)
-        if (firstStacked + secondStacked <= avail) return NextClassPreviewStyle.STACKED
-        if (firstStacked + COURSE_ROW_HEIGHT_DP <= avail) return NextClassPreviewStyle.COMPACT
+        if (availDp <= 0) return NextClassPreviewStyle.STACKED
+        if (firstNatDp + secondStackedNatDp <= availDp) return NextClassPreviewStyle.STACKED
+        if (firstNatDp + secondCompactNatDp <= availDp) return NextClassPreviewStyle.COMPACT
         return NextClassPreviewStyle.HIDE
     }
 
