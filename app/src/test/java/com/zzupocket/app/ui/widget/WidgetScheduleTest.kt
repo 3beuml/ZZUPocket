@@ -420,9 +420,61 @@ class WidgetScheduleTest {
     }
 
     @Test
+    fun `地点恒一行_先缩字号再裁左边保留教室号`() {
+        val width = 130
+        // 短地点：11dp 原样放下
+        val short = WidgetSchedule.fitPlaceText("南3 101", width, 11, 9)
+        assertEquals("南3 101", short.text)
+        assertEquals(11, short.sizeDp)
+        // 中等：11dp 放不下，缩到 10dp 就完整显示，一个字都不裁
+        val mid = WidgetSchedule.fitPlaceText("南校区综合教学楼 3 层 305", width, 11, 9)
+        assertEquals("南校区综合教学楼 3 层 305", mid.text)
+        assertEquals(10, mid.sizeDp)
+        // 超长：缩到下限 9dp 仍放不下 → 裁左边，保留尾部教室细节
+        val origin = "北校区实验实训中心 B 区 2 层 205 计算机机房（东）"
+        val long = WidgetSchedule.fitPlaceText(origin, width, 11, 9)
+        assertEquals(9, long.sizeDp)
+        assertTrue(long.text.startsWith("…"))
+        assertTrue(long.text.endsWith("（东）"))
+        assertTrue(long.text.length < origin.length)
+    }
+
+    @Test
+    fun `地点适配可以接入安卓Paint实测宽度`() {
+        // 渲染层传的 lambda（这里用一个字固定 10dp 宽代替 Paint）
+        val fit = WidgetSchedule.fitPlaceText("南3 101", 60, 11, 9) { text, _ -> text.length * 10f }
+        assertEquals("南3 101", fit.text)
+        assertEquals(11, fit.sizeDp)
+        val cut = WidgetSchedule.fitPlaceText("南3 101", 40, 11, 9) { text, _ -> text.length * 10f }
+        assertEquals(9, cut.sizeDp)
+        assertEquals("…101", cut.text)
+    }
+
+    @Test
+    fun `2×2 紧凑三行在150dp画布留出安全垫且不降级`() {
+        fun compactNat(lhN: Int, lhS: Int) =
+            lhN + lhS * 2 + WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1
+        // Paint 实测的代表值：13 粗≈16 / 11≈13 / 12 粗≈15 / 10≈12
+        val first = compactNat(16, 13)
+        val second = compactNat(15, 12)
+        val avail = WidgetSchedule.nextClassAvailableDp(150)   // 106（账本 chrome=44，比渲染实测更保守）
+        val budget = avail - WidgetSchedule.NEXT_CLASS_LADDER_BUFFER_DP   // 98
+        assertTrue(
+            "150dp 画布至少要留 6dp 安全垫: sum=${first + second} budget=$budget",
+            budget - (first + second) >= 6,
+        )
+        val n = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 66, firstCompact = first, firstMini = 30,
+            secondStacked = 62, secondCompact = second, secondMini = 28,
+        )
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(avail, n))
+    }
+
+    @Test
     fun `2×2 阶梯判档按实测自然高_两行统一紧凑_永不蒸发`() {
-        // #13 六轮（2026-11-06 用户拍板）：两行统一"课名 + 地点|时间"紧凑两行式；
-        // 满档竖排只留给拉高的 2×3。判档纯函数 nextClassRowPair 只从
+        // 判档纯函数的契约测试：下面构造的 naturals 沿用六轮口径，只验证「阶梯怎么选」，
+        // 不代表七轮渲染层的真实行高（真实值由上面的 150dp 安全垫测试覆盖）。
+        // 满档竖排只留给拉高的 2×3。nextClassRowPair 只从
         // 满/满 → 紧凑/紧凑 → 紧凑/单行 → 单行/单行 里选，取第一对放得下的；
         // 全超预算落 (MINI,MINI) —— 第二节课在任何尺寸下都存在。
         fun nats(
@@ -480,6 +532,7 @@ class WidgetScheduleTest {
 
     @Test
     fun `2×2 阶梯全域扫描_任何画布与字体度量组合都不丢行不溢出`() {
+        // 沿用六轮的字号/自然高构造做全域压力测试（判档契约与渲染层口径解耦）。
         // 把"能不能适配不同机型"写成可执行的证明：画布（真实剪裁后）100..260dp ×
         // 字体度量比 1.05..1.45（Roboto≈1.16 到 MiSans≈1.36，两侧行都多留余量），
         // 每个组合断言三条不变量：

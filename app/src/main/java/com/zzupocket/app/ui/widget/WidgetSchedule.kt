@@ -732,7 +732,7 @@ object WidgetSchedule {
         /** 单行一行式：课名（超长省略）+ 时间段同一行，不画地点。最低档 */
         MINI,
 
-        /** 单行两行式：课名（单行省略）与时间段各占一行，不画地点 */
+        /** 紧凑三行式：课名 / 地点 / 时间段各占一行；地点恒一行，过长先缩字号再裁左边 */
         COMPACT,
 
         /** 满档：竖排三行形态（课名 / 地点 / 时间段各占一行，不挤一行） */
@@ -769,20 +769,64 @@ object WidgetSchedule {
      */
     const val NEXT_CLASS_LADDER_BUFFER_DP = 8
 
+    /** 紧凑三行档里地点的最小字号（dp）；再小就看不清了，改为裁左边 */
+    const val NEXT_CLASS_PLACE_MIN_DP = 9
+
+    /** 紧凑三行档的单边内边距（dp）；XML padding 与 compactNat 账本共用这一个数 */
+    const val NEXT_CLASS_TRIPLE_PAD_DP = 2
+
+    /** 地点自适应结果：最终显示的文本与字号（dp） */
+    data class PlaceFit(val text: String, val sizeDp: Int)
+
     /**
-     * 「2×2」两行的档位阶梯——**两行统一紧凑**版（#13 六轮，2026-11-06 用户拍板）。
+     * 地点永远只占一行：先把字号从 [maxSizeDp] 逐级缩到 [minSizeDp] 直到完整放下，
+     * 仍放不下就从**左边**裁（"…"+尾部）——教室细节（楼栋之后的房号）在末尾。
      *
-     * 用户真机拍板：两行都用"色条 + 课名 + 「地点(左，省略)｜时间段(右)」"**紧凑两行式**
-     * （就像此前 2×2 里"222/南222 · 时间"那行）；竖排三行的满档只留给拉高的
-     * 2×3+。这样 2×2 的总需求从 ~146dp 降到 ~100dp，全部已知机型的 2×2 画布
-     * （Meizu 165 / HyperOS ~150）都装得下两节——阶梯的临界点从"贴边 1dp"挪到
-     * "宽裕十几 dp"，判档不再翻车。
+     * 纯函数：宽度由 [measureWidthDp] 提供，渲染层传 Paint 实测，JVM 单测用默认估算。
+     * 缩字号只会让行变矮，行高账本按 [maxSizeDp] 记属于"多记"，方向安全。
+     */
+    fun fitPlaceText(
+        place: String,
+        usableWidthDp: Int,
+        maxSizeDp: Int,
+        minSizeDp: Int,
+        measureWidthDp: (String, Int) -> Float = { text, size -> estimatePlaceWidthDp(text, size) },
+    ): PlaceFit {
+        if (place.isBlank() || usableWidthDp <= 0) return PlaceFit(place, maxSizeDp)
+        val floor = minSizeDp.coerceIn(1, maxSizeDp)
+        for (size in maxSizeDp downTo floor) {
+            if (measureWidthDp(place, size) <= usableWidthDp.toFloat()) {
+                return PlaceFit(place, size)
+            }
+        }
+        val budget = usableWidthDp.toFloat() - measureWidthDp("…", floor)
+        var tail = ""
+        for (ch in place.reversed()) {
+            val candidate = ch + tail
+            if (measureWidthDp(candidate, floor) > budget) break
+            tail = candidate
+        }
+        return PlaceFit("…" + tail, floor)
+    }
+
+    /** 无 Android 依赖的宽度估算：CJK 记 1em、ASCII 记 0.55em（与 nameLineCount 同口径，偏保守） */
+    private fun estimatePlaceWidthDp(text: String, sizeDp: Int): Float =
+        text.sumOf { ch -> (if (ch.code > 0x2E80) 1.0 else 0.55) * sizeDp }.toFloat()
+
+    /**
+     * 「2×2」两行的档位阶梯——紧凑档改成**紧凑三行**版（#13 七轮，2026-11-06 用户拍板）。
+     *
+     * 六轮的紧凑两行式把"地点(左，省略)｜时间段(右)"挤在同一行，长教室名会被右边的
+     * 时间段吃掉。七轮把紧凑档换成 `widget_course_row_triple.xml`：课名 / 地点 / 时间段
+     * 各占一行，地点恒单行（过长由 [fitPlaceText] 缩字号 + 裁左边）。为把多出来的一行
+     * 小字塞回 2×2，紧凑档同时收字号（13/11、12/10）、课名强制单行、行内边距 2dp、行距 0
+     * ——两行合计约 90dp，比六轮长课名时的 ~109dp 还省，150dp 画布也留出约 8dp 安全垫。
+     * 满档竖排仍只留给拉高的 2×3+。
      *
      *  · 高度读不到（≤0）→ **画满**（两行都满档竖排、自然高不撑）：options 首次回调
      *    前的空档不能表现为"课没了"；行是自然高，画满也不会行内裁字；
      *  · 从 [满/满, 紧凑/紧凑, 紧凑/单行, 单行/单行] 里取**第一个"两行自然高之和
-     *    ≤ 可用−缓冲"的组合**——注意紧凑档是**两行都**一起转，不做"一行竖排一行紧凑"
-     *    的混搭（用户拍的统一版式优先于逐行信息最大）；
+     *    ≤ 可用−缓冲"的组合**——紧凑档是**两行都**一起转，不做混搭；
      *  · 全都超预算 → 单行/单行兜底——最低档任何合法盒子都放得下，
      *    **两节课在任何情况下都至少以最低档存在**。
      *
