@@ -3,6 +3,7 @@
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -113,6 +114,9 @@ data class DiagState(
     val libSessionAt: Long = 0L,
     /** 自检工具是否展开（默认收起，别挡住日常信息） */
     val probesOpen: Boolean = false,
+    // ── 小组件几何（2026-11-06 #13 五轮起，面向所有用户的自适配排障数据）────
+    /** 桌面上每个组件实例的画布上报值/尺寸通道/字体实测行高；空串 = 还没收集到 */
+    val widgetReport: String = "",
 )
 
 class DiagnosticsViewModel : ViewModel() {
@@ -137,6 +141,11 @@ class DiagnosticsViewModel : ViewModel() {
                 gmsLoggedIn = AppGraph.gmsScheduleSource.hasSession(),
                 gmsLoginAt = AppGraph.gmsScheduleSource.loginAt(),
                 libSessionAt = AppGraph.libSessionSource.capturedAt(),
+                widgetReport = runCatching {
+                    AppGraph.appContextOrNull()?.let {
+                        com.zzupocket.app.ui.widget.WidgetDiagnostics.collect(it)
+                    } ?: "applicationContext 未初始化"
+                }.getOrElse { e -> e.message ?: e.toString() },
             )
         }
     }
@@ -346,6 +355,19 @@ class DiagnosticsViewModel : ViewModel() {
      * 报告由 [GmsProbe.Recorder] 生成：只有请求路径、参数名、响应字段名与类型，
      * **不含任何字段值与令牌** —— 因为这份东西是要贴到公开 issue 上的。
      */
+    /** 重新采集小组件几何（刚在桌面添加/调整组件之后点一下，数据就是新的） */
+    fun refreshWidgets() {
+        _state.update {
+            it.copy(
+                widgetReport = runCatching {
+                    AppGraph.appContextOrNull()?.let { ctx ->
+                        com.zzupocket.app.ui.widget.WidgetDiagnostics.collect(ctx)
+                    } ?: "applicationContext 未初始化"
+                }.getOrElse { e -> e.message ?: e.toString() },
+            )
+        }
+    }
+
     fun acceptGmsReport(text: String) = _state.update {
         it.copy(gmsDialogOpen = false, gmsReport = text, gmsError = "")
     }
@@ -448,6 +470,30 @@ fun DiagnosticsScreen(
                         "登录后在统一认证「安全中心」把这个设备设为可信设备，以后就不再需要短信验证码。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            // ── 小组件几何（所有人可见的自适配排障数据）────────────────────
+            // 桌面组件显示不对时的反馈凭据：报数偏差/字体度量/尺寸通道三类问题，
+            // 这张卡片的截图基本都能定位。ycli：只读几何，无个人信息。
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("小组件几何", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = { vm.refreshWidgets() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                            Text("重新采集", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Text(
+                        "桌面小组件显示不正常时，把这整张卡片截图发到反馈里即可（只含尺寸数据，无个人信息）。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        state.widgetReport.ifBlank { "正在采集…" },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     )
                 }
             }

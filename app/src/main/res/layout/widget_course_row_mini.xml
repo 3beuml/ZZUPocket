@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  课表里的一行课程块 —— **单行一行式**变体（问题 #13 五轮，2026-11-06）。
+
+      ▌程序设计基础         ← 课名单行（超长省略）
+              16:00-17:40   ← 时间段右对齐，同一行
+
+  ## 为什么需要它
+  2×2 的判档阶梯在第五轮删掉了"收 0（整行不画）"——HyperOS 实证：可用空间
+  离门槛差 1dp 就会"第二节蒸发"。MINI 是阶梯的**最低档**：课名一行+时间段一行
+  合并成单行，自然高 ≈ max(课名行高, 时间段行高) + 行内边距，小到任何合法盒子
+  （minResizeHeight=110）都放得下。**两节课在任何尺寸下都至少以最低档存在。**
+
+  ## 与 widget_course_row.xml / widget_course_row_stacked.xml 的约定
+  · view id 一模一样（row_root / row_bar / row_name / row_place / row_time）：
+    Widgets.courseRow 几套布局共用一段渲染代码。row_place 在本版式里没有排版位
+    （MINI 恒不画地点），但**必须保留 view**（visibility=gone 占位），否则
+    RemoteViews 对不存在的 id 下setVisibility 是静默丢弃，状态会错。
+  · 行内边距是"自然高账本"的一部分：MINI 自然高 = max(课名行高, 时间段行高)
+    + 上下内边距 10 + 余量 2（NextClassWidget.build 里 stackedNat/compactNat/
+    miniNat 同步核对；改字号/内边距必须同步）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
+
+    <TextView
+        android:id="@+id/row_bar"
+        android:layout_width="@dimen/widget_bar_w"
+        android:layout_height="@dimen/widget_bar_h_sm"
+        android:background="@drawable/widget_bar" />
+
+    <TextView
+        android:id="@+id/row_name"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/widget_gap"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/widget_preview_class1_name"
+        android:textColor="@color/widget_text"
+        android:textSize="@dimen/widget_row_name"
+        android:textStyle="bold" />
+
+    <!-- MINI 恒不画地点；保留 id 供共用渲染代码安全操作 -->
+    <TextView
+        android:id="@+id/row_place"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/row_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/widget_gap_xs"
+        android:ellipsize="none"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:text="@string/widget_preview_range"
+        android:textColor="@color/widget_text_dim"
+        android:textSize="@dimen/widget_row_sub" />
+</LinearLayout>

@@ -200,11 +200,11 @@ Write-Host "写入 $out1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2) 「下一节课」2×2 = 163×195dp
-#    形态（#13 四轮，2026-11-05）：表头 + 本节**竖排三行**（课名/地点/时间段各占一行，
-#    课名 15 / 地点·时间段 13）+ 下一节**紧凑单行**（课名 13 + 时间段右对齐 12，不画地点）。
-#    行高按系统字体实测后，标准 2×2 画布放不下两行竖排（66+66=132 > 可用 ~128），
-#    判档落"竖排本节 + 紧凑下一节"（nextClassSecondRowAvail → COMPACT），
-#    预览必须与真实渲染一致。卡片内边距渲染层 14→10，这里按 10 同步。
+#    形态（#13 六轮，2026-11-06 用户拍板）：表头 + 两行**统一紧凑两行式**
+#    （色条 + 课名（可两行）+ 「地点(左，省略)｜时间段(右)」同行；本节 15/13、
+#    下一节 13/12）。满档竖排只给拉高的 2×3；更矮的盒子落单行一行式
+#    （widget_course_row_mini.xml）。行高按系统字体实测（不写死）；
+#    卡片内边距渲染层 14→10，这里按 10 同步。
 #    与 res/layout/widget_next_class_preview.xml 一一对应；改 res 布局时同步改这里再重跑本脚本。
 # ════════════════════════════════════════════════════════════════════════════
 $w = 163; $h = 195
@@ -222,28 +222,32 @@ $fSub2 = New-Font 12 $false
 $top = $pad2
 Draw-Text $g '今天 · 第 5 周' $fColHead $bText $pad2 $top 22 | Out-Null
 
-# 两行等分剩余高度（真实渲染里行高由 setViewLayoutHeight 显式给定）
+# 两行分摊剩余高度（真实渲染里 surplus 用内边距摊，行高 ≥ 各自自然高）
 $rowsTop = $top + 22 + 2
 $rowsH = $h - $pad2 - $rowsTop
 $row1H = [int]($rowsH / 2) + ($rowsH % 2)
 $row2H = $rowsH - $row1H
+# 行1（本节，大一号）：紧凑两行式 = 色条 + 课名（可两行）+ 「地点/时间段」同行
+# （#13 六轮 2026-11-06 用户拍板：2×2 两行统一紧凑版式，满档竖排只给 2×3）
 $nameX = $pad2 + 3 + 8
-
-# 行1（本节，大一号）：色条 + 课名 / 地点 / 完整时间段（竖排三行，永不同挤）
-$natural1 = 19 + 2 + 16 + 2 + 16
+$rowsTop2 = $rowsTop + 2
+$row1H = [int]($rowsH / 2) + ($rowsH % 2)
+$row2H = $rowsH - $row1H
+$natural1 = 19 + 2 + 16
 $y1 = $rowsTop + ($row1H - $natural1) / 2
 Draw-Bar $g $pad2 ($rowsTop + ($row1H - 26) / 2) 3 26 $Bar4
 Draw-Text $g '大学物理' $fRowName $bText $nameX $y1 19 | Out-Null
 Draw-Text $g '南3 101' $fRowSub $bHint $nameX ($y1 + 21) 16 | Out-Null
-Draw-Text $g '10:00-11:35' $fRowSub $bDim $nameX ($y1 + 39) 16 | Out-Null
+Draw-Text $g '10:00-11:35' $fRowSub $bDim 0 ($y1 + 21) 16 'right' ($w - $pad2) | Out-Null
 
-# 行2（下一节，小一号）：紧凑单行（课名 + 时间段右对齐，不画地点）
+# 行2（下一节，小一号）：同款紧凑两行式（课名 13 + 「地点|时间段」12）
 $row2Top = $rowsTop + $row1H
 $Bar5 = [System.Drawing.ColorTranslator]::FromHtml('#C97F5A')
 $natural2 = 17 + 2 + 15
 $y2 = $row2Top + ($row2H - $natural2) / 2
 Draw-Bar $g $pad2 ($row2Top + ($row2H - 26) / 2) 3 26 $Bar5
 Draw-Text $g '程序设计基础' $fName2 $bText $nameX $y2 17 | Out-Null
+Draw-Text $g '南3 202' $fSub2 $bHint $nameX ($y2 + 19) 15 | Out-Null
 Draw-Text $g '14:00-15:40' $fSub2 $bDim 0 ($y2 + 19) 15 'right' ($w - $pad2) | Out-Null
 
 $out2 = Join-Path $drawable 'widget_preview_next_class.png'

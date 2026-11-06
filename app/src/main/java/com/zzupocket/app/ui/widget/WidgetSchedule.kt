@@ -696,8 +696,8 @@ object WidgetSchedule {
         return naturals.map { it + extra }
     }
 
-    /** 撑高的上限（相对自然高）：只温和撑，防"巨大空框里飘一行字" */
-    private const val MAX_STRETCH_DP = 12
+    /** 撑高的上限（相对自然高）：只温和撑，防"巨大空框里飘一行字"（2×2 五轮起公开共用） */
+    const val MAX_STRETCH_DP = 12
 
     /**
      * 除课程行以外的固定开销（2026-11-01 从 66 收到 58，随卡片内边距 14→10 联动）：
@@ -721,15 +721,91 @@ object WidgetSchedule {
         if (heightDp <= 0 || heightDp >= 170) 13 to 12 else 12 to 11
 
     /**
-     * 「2×2」第二行（下一节）画成什么形态（issue #13 第三轮，HyperOS 实证后的重做）。
+     * 「2×2」两行课程各自画成什么形态（issue #13 五轮，2026-11-06，HyperOS rc2 实证后的重做）。
+     *
+     * ⚠️ 五轮教训：四轮的阶梯最后一档是"收 0（不画）"，判档门槛又依赖启动器报数 ——
+     * HyperOS 2×2 的可用空间离紧凑档门槛只差 1~7dp，直接掉底变成"只剩一节课 +
+     * 大片空白"。**"藏起一节课"永远不应该是任何高度档位的出口**，所以 HIDE 删除，
+     * 最低档改成"单行一行式"——它小到任何合法盒子（minResize 110dp）都放得下。
      */
     enum class NextClassPreviewStyle {
-        /** 收成 0：第二行彻底不画（盒子小到连紧凑档都放不下） */
-        HIDE,
-        /** 降档：第二行 = 单行紧凑形态（课名 + 时间段右对齐，不画地点），自然高 = [COURSE_ROW_HEIGHT_DP] */
+        /** 单行一行式：课名（超长省略）+ 时间段同一行，不画地点。最低档 */
+        MINI,
+
+        /** 单行两行式：课名（单行省略）与时间段各占一行，不画地点 */
         COMPACT,
-        /** 满档：第二行 = 竖排三行形态（课名 / 地点 / 时间段），与第一行同款 */
+
+        /** 满档：竖排三行形态（课名 / 地点 / 时间段各占一行，不挤一行） */
         STACKED,
+    }
+
+    /**
+     * 判档用的**各档自然高**（渲染层 Paint 实测后填入，纯函数只做选择）。
+     * 每行的三档形态都给自然高——阶梯会从"本节"降到底，不只降"第二行"。
+     */
+    data class NextClassRowNaturals(
+        val firstStacked: Int,
+        val firstCompact: Int,
+        val firstMini: Int,
+        val secondStacked: Int,
+        val secondCompact: Int,
+        val secondMini: Int,
+    )
+
+    /** 某行某档的自然高（渲染层与单测共用口径） */
+    fun nextClassRowNatDp(
+        n: NextClassRowNaturals,
+        style: NextClassPreviewStyle,
+        first: Boolean,
+    ): Int = when (style) {
+        NextClassPreviewStyle.STACKED -> if (first) n.firstStacked else n.secondStacked
+        NextClassPreviewStyle.COMPACT -> if (first) n.firstCompact else n.secondCompact
+        NextClassPreviewStyle.MINI -> if (first) n.firstMini else n.secondMini
+    }
+
+    /**
+     * 判档缓冲：宁可早降一档（形态保守、底部略空），也不赌启动器报数是准的。
+     * 2026-11-06 rc2 实证：124 与 126 之间 1dp 就差一个"第二节消失"。
+     */
+    const val NEXT_CLASS_LADDER_BUFFER_DP = 8
+
+    /**
+     * 「2×2」两行的档位阶梯——**两行统一紧凑**版（#13 六轮，2026-11-06 用户拍板）。
+     *
+     * 用户真机拍板：两行都用"色条 + 课名 + 「地点(左，省略)｜时间段(右)」"**紧凑两行式**
+     * （就像此前 2×2 里"222/南222 · 时间"那行）；竖排三行的满档只留给拉高的
+     * 2×3+。这样 2×2 的总需求从 ~146dp 降到 ~100dp，全部已知机型的 2×2 画布
+     * （Meizu 165 / HyperOS ~150）都装得下两节——阶梯的临界点从"贴边 1dp"挪到
+     * "宽裕十几 dp"，判档不再翻车。
+     *
+     *  · 高度读不到（≤0）→ **画满**（两行都满档竖排、自然高不撑）：options 首次回调
+     *    前的空档不能表现为"课没了"；行是自然高，画满也不会行内裁字；
+     *  · 从 [满/满, 紧凑/紧凑, 紧凑/单行, 单行/单行] 里取**第一个"两行自然高之和
+     *    ≤ 可用−缓冲"的组合**——注意紧凑档是**两行都**一起转，不做"一行竖排一行紧凑"
+     *    的混搭（用户拍的统一版式优先于逐行信息最大）；
+     *  · 全都超预算 → 单行/单行兜底——最低档任何合法盒子都放得下，
+     *    **两节课在任何情况下都至少以最低档存在**。
+     *
+     * @param availDp 可用高度（画布 − 固定开销）；≤0 = 读不到尺寸 → 画满
+     */
+    fun nextClassRowPair(
+        availDp: Int,
+        n: NextClassRowNaturals,
+    ): Pair<NextClassPreviewStyle, NextClassPreviewStyle> {
+        if (availDp <= 0) return NextClassPreviewStyle.STACKED to NextClassPreviewStyle.STACKED
+        val budget = availDp - NEXT_CLASS_LADDER_BUFFER_DP
+        val ladder = listOf(
+            NextClassPreviewStyle.STACKED to NextClassPreviewStyle.STACKED,
+            NextClassPreviewStyle.COMPACT to NextClassPreviewStyle.COMPACT,
+            NextClassPreviewStyle.COMPACT to NextClassPreviewStyle.MINI,
+            NextClassPreviewStyle.MINI to NextClassPreviewStyle.MINI,
+        )
+        for ((first, second) in ladder) {
+            val sum = nextClassRowNatDp(n, first, first = true) +
+                nextClassRowNatDp(n, second, first = false)
+            if (sum <= budget) return first to second
+        }
+        return NextClassPreviewStyle.MINI to NextClassPreviewStyle.MINI
     }
 
     /**
@@ -755,55 +831,6 @@ object WidgetSchedule {
      */
     fun stackedRowNaturalHeightDp(nameLines: Int): Int =
         rowNaturalHeightDp(nameLines) + 15
-
-    /**
-     * 「2×2」第二行（下一节）的档位——**降档，而不是整行蒸发**。
-     *
-     * ⚠️ 旧版是"画 or 不画"二值逻辑：账本（<150 就不画）在 MEIZU 上标定，
-     * HyperOS 的报值口径不同 → 高度一算窄，第二节课整行消失（issue #13 第三轮实证）。
-     * 现在从下往上先降档再收：
-     *
-     *  · 高度读不到（≤0）→ **画满**（两行竖排、自然高不撑）。宁可多画一行完整的课，
-     *    也不能因为一个不可靠的读数把"下一节"整行藏掉——options 回调第一次就位前
-     *    的短暂空档不该表现为"课没了"；
-     *  · 竖排两行（自然高 59×2=118）放得下 → 满档；
-     *  · 放不下但"竖排本节 + 紧凑第二行"放得下 → 第二行降成单行（课名+时间段）；
-     *  · 连紧凑都放不下（可用 < ~103dp）→ 才收成 0（minResizeHeight=110 的画布不会走到）。
-     *
-     * @param firstLines / [secondLines] 两节课名按列宽估的换行数（[nameLineCount]）
-     */
-    fun nextClassSecondRow(
-        heightDp: Int,
-        firstLines: Int,
-        secondLines: Int,
-    ): NextClassPreviewStyle = nextClassSecondRowAvail(
-        availDp = nextClassAvailableDp(heightDp),
-        firstNatDp = stackedRowNaturalHeightDp(firstLines),
-        secondStackedNatDp = stackedRowNaturalHeightDp(secondLines),
-        secondCompactNatDp = COURSE_ROW_HEIGHT_DP,
-    )
-
-    /**
-     * 阶梯判档的核心，按**各档自然高**判断（2026-11-05 #13 四轮拆出来的纯函数）。
-     *
-     * 旧签名按"行数 + 魔数"在函数里现算自然高 —— 那套魔数按 Meizu/Roboto 标定，
-     * HyperOS 的 MiSans 更高，判档说"放得下"、实际放不下，显式行高把字裁掉。
-     * 渲染层（NextClassWidget.build）现在用 Paint 实测各档自然高喂进来；
-     * 魔数签名保留作账本口径（单测与"拿不到 Paint 的场景"用）。
-     *
-     * @param availDp 可用高度（画布 − 固定开销）；≤0 = 读不到尺寸 → 画满
-     */
-    fun nextClassSecondRowAvail(
-        availDp: Int,
-        firstNatDp: Int,
-        secondStackedNatDp: Int,
-        secondCompactNatDp: Int,
-    ): NextClassPreviewStyle {
-        if (availDp <= 0) return NextClassPreviewStyle.STACKED
-        if (firstNatDp + secondStackedNatDp <= availDp) return NextClassPreviewStyle.STACKED
-        if (firstNatDp + secondCompactNatDp <= availDp) return NextClassPreviewStyle.COMPACT
-        return NextClassPreviewStyle.HIDE
-    }
 
     /**
      * 「2×2」按盒子高度决定显示到哪一行。

@@ -159,11 +159,16 @@ object Widgets {
         subSizeDp: Int,
         naturalHeightDp: Int = NATURAL_COURSE_ROW_HEIGHT_DP,
         stacked: Boolean = false,
+        mini: Boolean = false,
         nameMaxLines: Int = 2,
     ): RemoteViews {
         val rv = RemoteViews(
             context.packageName,
-            if (stacked) R.layout.widget_course_row_stacked else R.layout.widget_course_row,
+            when {
+                mini -> R.layout.widget_course_row_mini
+                stacked -> R.layout.widget_course_row_stacked
+                else -> R.layout.widget_course_row
+            },
         )
         rv.setTextViewText(R.id.row_name, row.course.name)
         rv.setTextViewText(R.id.row_place, row.place)
@@ -276,15 +281,39 @@ object Widgets {
      */
     fun sizeDp(mgr: AppWidgetManager, appWidgetId: Int): Pair<Int, Int> {
         val o = runCatching { mgr.getAppWidgetOptions(appWidgetId) }.getOrNull()
+        // ① Android 12+ 的 SIZES 通道：**注意它在 Meizu 上被证伪**——上报值与 MIN/MAX
+        //    一样虚高 30dp（2026-11-06 用户真机实测：SIZES 163x195，真实画布 163x165，
+        //    uiautomator 视图树核对）。所以 SIZES 只当"另一个来源"，**同样过 −30 修正**，
+        //    不再"优先拿真值"；它仍有价值（部分启动器 MIN/MAX 粒度粗、SIZES 精细）。
+        @Suppress("DEPRECATION")
+        val sizes = runCatching {
+            o?.getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+        }.getOrNull()
+        if (!sizes.isNullOrEmpty()) {
+            val s = sizes[0]
+            val w = s.width.toInt()
+            val h = (s.height.toInt() - HEIGHT_OVERREPORT_DP).coerceAtLeast(1)
+            if (w > 0 && h > 0) {
+                Log.i(
+                    TAG,
+                    "组件 id=$appWidgetId 画布(SIZES−$HEIGHT_OVERREPORT_DP) ${w}x${h}dp（SIZES 原值 ${s.width}x${s.height}，共 ${sizes.size} 项）",
+                )
+                return w to h
+            }
+        }
+        // ② 兜底：MIN/MAX − Meizu 标定的高报修正
         val w = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0
         val rawH = o?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) ?: 0
         val h = if (rawH > 0) (rawH - HEIGHT_OVERREPORT_DP).coerceAtLeast(1) else 0
-        Log.i(TAG, "组件 id=$appWidgetId 画布 ${w}x${h}dp（options 报的是 ${w}x${rawH}，高度多报 $HEIGHT_OVERREPORT_DP）")
+        Log.i(
+            TAG,
+            "组件 id=$appWidgetId 画布(MIN/MAX−$HEIGHT_OVERREPORT_DP) ${w}x${h}dp（options 报的是 ${w}x$rawH；SIZES 未提供）",
+        )
         return w to h
     }
 
-    /** `AppWidgetManager` 报的高度比真实画布多出来的部分（实测值，见 [sizeDp]） */
-    private const val HEIGHT_OVERREPORT_DP = 30
+    /** `AppWidgetManager` 报的高度比真实画布多出来的部分（实测值，见 [sizeDp]）——诊断页与日志共用 */
+    const val HEIGHT_OVERREPORT_DP = 30
 
     /**
      * 点组件打开 App，并落到指定页面。

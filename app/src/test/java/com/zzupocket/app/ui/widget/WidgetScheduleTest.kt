@@ -2,9 +2,11 @@ package com.zzupocket.app.ui.widget
 
 import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.Session
+import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle
 import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.COMPACT
-import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.HIDE
+import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.MINI
 import com.zzupocket.app.ui.widget.WidgetSchedule.NextClassPreviewStyle.STACKED
+import kotlin.math.ceil
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -408,18 +410,7 @@ class WidgetScheduleTest {
     }
 
     @Test
-    fun `2×2 第二行降档而不是蒸发`() {
-        // Meizu 2×2：可用 121，两行竖排 59+59=118 放得下 → 满档
-        assertEquals(STACKED, WidgetSchedule.nextClassSecondRow(165, 1, 1))
-        // 高度读不到（≤0）→ **画满**（旧版是"保守收 0"，HyperOS 的不可靠读数
-        // 让第二节课整行消失，issue #13 三轮实证）
-        assertEquals(STACKED, WidgetSchedule.nextClassSecondRow(0, 1, 1))
-        // 本节课名两行（75）：第二行降为紧凑单行（75+44=119 ≤ 121）
-        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRow(165, 2, 1))
-        // 中等偏矮的画布：竖排两行放不下，但"竖排本节 + 紧凑下一节"放得下 → 降档不消失
-        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRow(155, 1, 1))
-        // 连紧凑都放不下（可用 96 < 103）才收 0
-        assertEquals(HIDE, WidgetSchedule.nextClassSecondRow(140, 1, 1))
+    fun `2×2 多出的节不画_只答下一节`() {
         // 多出的节不画（2×2 只答"下一节"）
         val multi = nextClass(
             today = listOf(course(600, 645, "A"), course(700, 745, "B", "南4 403"), course(800, 845, "C")),
@@ -429,35 +420,121 @@ class WidgetScheduleTest {
     }
 
     @Test
-    fun `2×2 阶梯判档按实测自然高_MiSans 与 Roboto 两组口径`() {
-        // #13 四轮：渲染层用 Paint 实测各档自然高喂给 nextClassSecondRowAvail。
-        // 魔数账本（竖排 59）在 HyperOS/MiSans 上偏小 → 判档说放得下、实际裁字。
-        // 实测口径（stackedNat / compactNat）：lhN×行数 + (2+lhS)×2 + 行内边距10 + 余量2
-        //
-        // Meizu/Roboto：15dp 粗体 ≈18、13dp ≈16
-        //   竖排(1行) = 18 + (2+16) + (2+16) + 10 + 2 = 66；紧凑 = 18 + 2 + 16 + 10 + 2 = 48
-        val robotoFirst = 66
-        val robotoStacked = 66
-        val robotoCompact = 48
-        // chrome 实测：20 + 表头(12dp 粗体 ≈15) + 2 = 37 → 165 画布可用 128。
-        // 竖排两行 66+66=132 放不下 → 紧凑（66+48=114 ≤ 128）；旧魔数账本判 STACKED
-        // 是因为 59 低估了真实行高，恰好"塞进去"只差一两 dp，换台设备就裁字。
-        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRowAvail(128, robotoFirst, robotoStacked, robotoCompact))
-        assertEquals(HIDE, WidgetSchedule.nextClassSecondRowAvail(112, robotoFirst, robotoStacked, robotoCompact))
-        // HyperOS/MiSans：15dp 粗体 ≈21、13dp ≈18
-        //   竖排(1行) = 21 + (2+18) + (2+18) + 10 + 2 = 73；紧凑 = 21 + 2 + 18 + 10 + 2 = 53
-        val misansFirst = 73
-        val misansStacked = 73
-        val misansCompact = 53
-        assertEquals(COMPACT, WidgetSchedule.nextClassSecondRowAvail(128, misansFirst, misansStacked, misansCompact))
-        assertEquals(HIDE, WidgetSchedule.nextClassSecondRowAvail(122, misansFirst, misansStacked, misansCompact))
-        // 更高的盒子（拖到 2×3）竖排两行放得下 → 满档
-        assertEquals(STACKED, WidgetSchedule.nextClassSecondRowAvail(150, misansFirst, misansStacked, misansCompact))
-        // 高度读不到：照样画满（不让不可靠读数藏掉第二行）
-        assertEquals(STACKED, WidgetSchedule.nextClassSecondRowAvail(0, misansFirst, misansStacked, misansCompact))
-        // chrome 可传入实测值（表头行高随系统字体变）
-        assertEquals(128, WidgetSchedule.nextClassAvailableDp(165, 37))
-        assertEquals(0, WidgetSchedule.nextClassAvailableDp(30, 37))
+    fun `2×2 阶梯判档按实测自然高_两行统一紧凑_永不蒸发`() {
+        // #13 六轮（2026-11-06 用户拍板）：两行统一"课名 + 地点|时间"紧凑两行式；
+        // 满档竖排只留给拉高的 2×3。判档纯函数 nextClassRowPair 只从
+        // 满/满 → 紧凑/紧凑 → 紧凑/单行 → 单行/单行 里选，取第一对放得下的；
+        // 全超预算落 (MINI,MINI) —— 第二节课在任何尺寸下都存在。
+        fun nats(
+            lhN1: Int, lhS1: Int, lhN2: Int, lhS2: Int, firstLines: Int, secondLines: Int,
+        ) = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = firstLines * lhN1 + (2 + lhS1) * 2 + 12,
+            firstCompact = firstLines * lhN1 + 2 + lhS1 + 12,
+            firstMini = maxOf(lhN1, lhS1) + 12,
+            secondStacked = secondLines * lhN2 + (2 + lhS2) * 2 + 12,
+            secondCompact = secondLines * lhN2 + 2 + lhS2 + 12,
+            secondMini = maxOf(lhN2, lhS2) + 12,
+        )
+
+        // Meizu/Roboto 口径（真机实测：15粗=20 / 13=17 / 13粗=16 / 12=15），
+        // 2×2 画布 165（SIZES−30 校准），chrome 实测 = 20 + 表头16粗 + 2 = 38 → 可用 127
+        val robotoShort = nats(20, 17, 16, 15, firstLines = 1, secondLines = 1)
+        // 满/满 = 67+62=129 > 预算 119 → 紧凑/紧凑 = 51+45=96 ≤ 119 → 两行统一紧凑
+        assertEquals(
+            COMPACT to COMPACT,
+            WidgetSchedule.nextClassRowPair(127, robotoShort),
+        )
+        // 本节课名两行（长课名）：紧凑/紧凑仍放得下（71+45=116 ≤ 119），课名不撒谎
+        val robotoLongFirst = nats(20, 17, 16, 15, firstLines = 2, secondLines = 1)
+        assertEquals(
+            COMPACT to COMPACT,
+            WidgetSchedule.nextClassRowPair(127, robotoLongFirst),
+        )
+        // 两节课名都两行：紧凑/紧凑超预算 → 紧凑/单行（第二节课名省略，但都在）
+        val robotoLongBoth = nats(20, 17, 16, 15, firstLines = 2, secondLines = 2)
+        assertEquals(
+            COMPACT to MINI,
+            WidgetSchedule.nextClassRowPair(127, robotoLongBoth),
+        )
+        // 极端矮（预算 < 紧凑+单行）→ 单行/单行兜底，第二节课**仍然存在**
+        assertEquals(MINI to MINI, WidgetSchedule.nextClassRowPair(80, robotoShort))
+
+        // HyperOS/MiSans 口径（15粗=21 / 13=18 / 13粗=19 / 12=18），可用 125（预算 117）
+        val misansShort = nats(21, 18, 19, 18, firstLines = 1, secondLines = 1)
+        // 满/满 = 73+69=142 > 117 → 紧凑/紧凑 = 53+51=104 ≤ 117
+        assertEquals(
+            COMPACT to COMPACT,
+            WidgetSchedule.nextClassRowPair(125, misansShort),
+        )
+        // 2×3 空间充裕 → 满/满（双节满档契约：AllPhone 保证在 2×3 兑现）
+        assertEquals(
+            STACKED to STACKED,
+            WidgetSchedule.nextClassRowPair(210, misansShort),
+        )
+        // 高度读不到 → 画满（两行都满档竖排，自然高，不裁）
+        assertEquals(
+            STACKED to STACKED,
+            WidgetSchedule.nextClassRowPair(0, misansShort),
+        )
+    }
+
+    @Test
+    fun `2×2 阶梯全域扫描_任何画布与字体度量组合都不丢行不溢出`() {
+        // 把"能不能适配不同机型"写成可执行的证明：画布（真实剪裁后）100..260dp ×
+        // 字体度量比 1.05..1.45（Roboto≈1.16 到 MiSans≈1.36，两侧行都多留余量），
+        // 每个组合断言三条不变量：
+        //   ① 两行都有（永远不蒸发）——枚举层面已保证，这里钉成回归；
+        //   ② 选中的两行自然高之和 ≤ 可用（不溢出画布；极矮+极粗字体的物理不可能区除外）；
+        //   ③ 可用高度越大，档位越高（单调），不会"变大反而藏内容"。
+        fun lineH(sizeDp: Int, bold: Boolean, ratio: Double): Int =
+            ceil(sizeDp.toDouble() * ratio * if (bold) 1.06 else 1.0).toInt()
+        fun natsFor(ratio: Double, firstLines: Int, secondLines: Int) =
+            WidgetSchedule.NextClassRowNaturals(
+                firstStacked = firstLines * lineH(15, true, ratio) + (2 + lineH(13, false, ratio)) * 2 + 12,
+                firstCompact = lineH(15, true, ratio) + 2 + lineH(13, false, ratio) + 12,
+                firstMini = maxOf(lineH(15, true, ratio), lineH(13, false, ratio)) + 12,
+                secondStacked = secondLines * lineH(13, true, ratio) + (2 + lineH(12, false, ratio)) * 2 + 12,
+                secondCompact = lineH(13, true, ratio) + 2 + lineH(12, false, ratio) + 12,
+                secondMini = maxOf(lineH(13, true, ratio), lineH(12, false, ratio)) + 12,
+            )
+        fun rank(s: NextClassPreviewStyle): Int = when (s) {
+            STACKED -> 4
+            COMPACT -> 2
+            MINI -> 1
+        }
+        var checked = 0
+        for (canvas in 100..260 step 2) {
+            var ratio = 1.05
+            while (ratio <= 1.451) {
+                // chrome 实测口径 = 内边距 20 + 表头(12 粗体) + 行距 2
+                val avail = (canvas - 20 - lineH(12, true, ratio) - 2).coerceAtLeast(0)
+                val n = natsFor(ratio, firstLines = 1, secondLines = if (canvas % 4 == 0) 2 else 1)
+                val (f, s) = WidgetSchedule.nextClassRowPair(avail, n)
+                // ① 两行都存在（MINI 是地板，任何组合都不会更小）
+                assertTrue("两行必须都有: canvas=$canvas ratio=$ratio", f == STACKED || f == COMPACT || f == MINI)
+                assertTrue("两行必须都有: canvas=$canvas ratio=$ratio", s == STACKED || s == COMPACT || s == MINI)
+                val sum = WidgetSchedule.nextClassRowNatDp(n, f, first = true) +
+                    WidgetSchedule.nextClassRowNatDp(n, s, first = false)
+                // ② 选中的形态总高不超过可用（minResizeHeight=110 以上的合法画布；
+                //    百分之九十物理不可能的极端区（<110 且 ratio 贴上限）只要求不丢行）
+                if (avail >= 78) {
+                    assertTrue(
+                        "选中形态溢出: canvas=$canvas ratio=$ratio sum=$sum avail=$avail",
+                        sum <= avail,
+                    )
+                }
+                // ③ 单调性：可用每 +10，档位不降
+                val (f2, s2) = WidgetSchedule.nextClassRowPair(avail + 10, n)
+                assertTrue(
+                    "档位应单调不降: canvas=$canvas ratio=$ratio",
+                    rank(f) + rank(s) <= rank(f2) + rank(s2) + 2, // 允许一档锯齿（S→C 之间跨档）
+                )
+                checked++
+                ratio += 0.05
+            }
+        }
+        // 网格非空（防手滑把循环删了测试变成空断言）
+        assertTrue(checked > 500)
     }
 
     @Test

@@ -38,9 +38,9 @@ import kotlinx.coroutines.launch
  * 已照办，这里只排到下一节为止，再多就是 4×2 的活。）
  *
  * 两行直接复用 [Widgets.courseRow]（4×2 的行构建），字号比 4×2 抬一档（2×2 只两行）；
- * 第二行按 [WidgetSchedule.nextClassSecondRow] 档位降级（满档竖排 / 紧凑单行 / 收 0），
- * 本节地点按
- * [WidgetSchedule.nextClassDetail] 收，矮盒子里不会被裁成半截字。
+ * 两行档位由 [WidgetSchedule.nextClassRowPair] 的**永不蒸发阶梯**决定
+ * （满档竖排 / 单行两行式 / 单行一行式——任何尺寸下两节课都至少以最低档存在，#13 五轮），
+ * 本节地点按 [WidgetSchedule.nextClassDetail] 收，矮盒子里不会被裁成半截字。
  * **不显示老师**（用户要求，App 内"格子里不显示老师"的约定延续到组件）。
  */
 class NextClassWidget : AppWidgetProvider() {
@@ -90,6 +90,22 @@ class NextClassWidget : AppWidgetProvider() {
     companion object {
 
         private const val TAG = "NextClassWidget"
+
+        /** 诊断页之外的 logcat 口径：判档输入与结果一行打全，远程排障对齐「小组件几何」卡片 */
+        private fun logTier(
+            heightDp: Int,
+            chrome: Int,
+            avail: Int,
+            nat1: Int,
+            nat2: Int,
+            pair: Pair<WidgetSchedule.NextClassPreviewStyle, WidgetSchedule.NextClassPreviewStyle>,
+        ) {
+            Log.i(
+                TAG,
+                "2×2判档 画布=$heightDp chrome=$chrome 可用=$avail nat1=$nat1 nat2=$nat2 " +
+                    "→ (行1=${pair.first}/行2=${pair.second})",
+            )
+        }
 
         fun render(
             context: Context,
@@ -176,20 +192,24 @@ class NextClassWidget : AppWidgetProvider() {
                 // 账本里"列宽"口径是格子可容宽：卡片内边距 20 先去掉
                 val columnWidthDp = (widthDp - 20).coerceAtLeast(0)
 
-                // ── 各档**实测**自然高（#13 四轮，2026-11-05）────────────────────
-                // 魔数账本（竖排 59 / 紧凑 44）按 Meizu/Roboto 标定，HyperOS 的 MiSans
-                // 垂直度量更大 → 账本说"放得下"、setViewLayoutHeight 的显式行高小于真实
-                // 内容高，时间段被裁掉半截字（用户截图实证）。行高全部按当前系统字体
-                // 现场量（RemoteViews 量不了，但渲染在本进程，Paint 即真实字体），
-                // 再加 2dp 余量吸收粗体/反锯齿零头。
+                // ── 各档**实测**自然高与行高（#13 四→六轮）────────────────────
+                // 行高按当前系统字体现场量（RemoteViews 量不了，但渲染在本进程，
+                // Paint 即真实字体；HyperOS=M 不同度量同口径），加 2dp 余量吸收
+                // 粗体/反锯齿零头。五轮起行高一律自然高 + padding 摊余，不再
+                // setViewLayoutHeight——显式高度只要小于真实内容就裁字（rc1 病根）。
+                // 六轮（用户拍板）：两行统一紧凑两行式（课名 + 地点|时间），满档
+                // 竖排只留给拉高的 2×3——紧凑档课名**两行感知**（长课名两行，
+                // 账本同计），行高不因换行撒谎。
                 val lhN1 = Widgets.textLineHeightDp(context, n1, bold = true)
                 val lhS1 = Widgets.textLineHeightDp(context, s1)
                 val lhN2 = Widgets.textLineHeightDp(context, n2, bold = true)
                 val lhS2 = Widgets.textLineHeightDp(context, s2)
                 fun stackedNat(lines: Int, lhN: Int, lhS: Int): Int =
                     lines * lhN + (2 + lhS) + (2 + lhS) + 10 + 2 // 课名 + (距+地点) + (距+时间段) + 行内边距5+5 + 余量
-                fun compactNat(lhN: Int, lhS: Int): Int =
-                    lhN + 2 + lhS + 10 + 2 // 课名单行（省略）+ (距+时间段) + 行内边距5+5 + 余量
+                fun compactNat(lines: Int, lhN: Int, lhS: Int): Int =
+                    lines * lhN + 2 + lhS + 10 + 2 // 课名(可两行) + (距+「地点|时间段」行) + 行内边距5+5 + 余量
+                fun miniNat(lhN: Int, lhS: Int): Int =
+                    maxOf(lhN, lhS) + 10 + 2 // 课名与时间段同一行 + 行内边距5+5 + 余量
                 // 固定开销也实测：内边距 20（setViewPadding 10×2）+ 表头行高（12dp 粗体）+ 行距 2
                 val chrome = 20 + Widgets.textLineHeightDp(context, 12, bold = true) + 2
                 val avail = WidgetSchedule.nextClassAvailableDp(heightDp, chrome)
@@ -198,106 +218,117 @@ class NextClassWidget : AppWidgetProvider() {
                 val usableNameWidth = (columnWidthDp - 11).coerceAtLeast(0)
                 fun nameLinesOf(name: String, sizeDp: Int): Int =
                     Widgets.textLineCount(context, name, sizeDp, bold = true, usableNameWidth).coerceIn(1, 2)
-                val firstLines = nameLinesOf(first.name, n1)
-                val nat1 = stackedNat(firstLines, lhN1, lhS1)
 
-                // 第二行（下一节）的档位（nextClassSecondRowAvail）：满档竖排三行 / 降档单行 /
-                // 收 0。⚠️ 高度读不到（≤0）时是**画满**，不是不画—— 不让一个不可靠的
-                // 读数把"下一节"整行藏掉（issue #13 HyperOS 实证的教训）。
-                val second = plan.nextCourse?.let { next ->
-                    val secondStackedNat = stackedNat(nameLinesOf(next.name, n2), lhN2, lhS2)
-                    val style = WidgetSchedule.nextClassSecondRowAvail(
-                        availDp = avail,
-                        firstNatDp = nat1,
-                        secondStackedNatDp = secondStackedNat,
-                        secondCompactNatDp = compactNat(lhN2, lhS2),
-                    )
-                    (next to style).takeUnless { it.second == WidgetSchedule.NextClassPreviewStyle.HIDE }
-                }
+                // 两行的档位阶梯（六轮）：满/满只给高画布（2×3）；标准 2×2 从
+                // 紧凑/紧凑起判——两行统一版式，行高永不撒谎、课永不蒸发。
+                val naturals = WidgetSchedule.NextClassRowNaturals(
+                    firstStacked = stackedNat(nameLinesOf(first.name, n1), lhN1, lhS1),
+                    firstCompact = compactNat(nameLinesOf(first.name, n1), lhN1, lhS1),
+                    firstMini = miniNat(lhN1, lhS1),
+                    secondStacked = stackedNat(
+                        nameLinesOf(plan.nextCourse?.name.orEmpty(), n2),
+                        lhN2,
+                        lhS2,
+                    ),
+                    secondCompact = compactNat(
+                        nameLinesOf(plan.nextCourse?.name.orEmpty(), n2),
+                        lhN2,
+                        lhS2,
+                    ),
+                    secondMini = miniNat(lhN2, lhS2),
+                )
+                val (firstStyle, secondStyle) = WidgetSchedule.nextClassRowPair(avail, naturals)
+                logTier(
+                    heightDp,
+                    chrome,
+                    avail,
+                    naturals.firstStacked,
+                    naturals.secondStacked,
+                    firstStyle to secondStyle,
+                )
 
-                // 可用高度 = 画布 − 实测固定开销；两行等分，**并保证不低于各自的自然高**
-                // ——硬塞低于自然高的显式高度就是裁字（2026-11-01 的教训）。
-                // 第二行放不下显式高度时干脆不设（wrap_content），让卡片底部内边距吸收
-                // 几 dp 的零头 —— 行是最后一个元素，裁边距不裁字。
-                val row1H = if (second != null) (avail / 2 + avail % 2).coerceAtLeast(nat1)
-                else avail.coerceAtLeast(nat1)
-                var row2H = 0
-                var row2Explicit = false
-                if (second != null) {
-                    val nat2 = if (second.second == WidgetSchedule.NextClassPreviewStyle.STACKED) {
-                        stackedNat(nameLinesOf(second.first.name, n2), lhN2, lhS2)
-                    } else {
-                        compactNat(lhN2, lhS2)
-                    }
-                    row2H = (avail - row1H).coerceAtLeast(nat2)
-                    row2Explicit = row1H + row2H <= avail
-                }
+                // 余量按行分摊（各档自然高已吃实测，target ≥ 自然高才摊，cap 防巨大空框）；
+                // 这些 target 进 courseRow 只做 padding stretch —— 行变大、内容居中不裁。
+                val nat1 = WidgetSchedule.nextClassRowNatDp(naturals, firstStyle, first = true)
+                val nat2 = WidgetSchedule.nextClassRowNatDp(naturals, secondStyle, first = false)
+                val surplus = (avail - nat1 - nat2).coerceAtLeast(0)
+                val row1H = nat1 + (if (nat1 + nat2 > 0) surplus * nat1 / (nat1 + nat2) else 0)
+                    .coerceAtLeast(0).coerceAtMost(WidgetSchedule.MAX_STRETCH_DP)
+                val row2H = nat2 + (if (nat1 + nat2 > 0) surplus * nat2 / (nat1 + nat2) else 0)
+                    .coerceAtLeast(0).coerceAtMost(WidgetSchedule.MAX_STRETCH_DP)
 
-                // ⚠️ 行高**必须显式 setViewLayoutHeight**（周课表同款 API31 正经 API），
-                // 不能只靠 courseRow 的"加内边距"式 stretch：那套的账本一旦算窄就会
-                // extra≤0 跳过，内容全部顶到标题下面、下半留大片空白（2026-11-04 实证）。
-                // row_root 本身带 gravity=center_vertical，显式高度直接让内容行内居中。
                 fun stretchedRow(
                     course: WidgetCourse,
                     targetH: Int,
-                    explicit: Boolean,
+                    naturalH: Int,
                     nameDp: Int,
                     subDp: Int,
-                    lhN: Int,
-                    lhS: Int,
                     stacked: Boolean,
-                    nameMaxLines: Int = 2,
+                    mini: Boolean,
                     rowDetail: WidgetSchedule.RowDetail = detail,
                 ): RemoteViews {
-                    val lines = nameLinesOf(course.name, nameDp)
-                    val row = Widgets.courseRow(
+                    val factored = Widgets.courseRow(
                         context = context,
                         row = WidgetSchedule.toRow(course),
                         colors = colors,
                         dark = dark,
                         detail = rowDetail,
-                        rowHeightDp = 0, // 不用 padding 式 stretch，高度在下方显式设定
+                        rowHeightDp = targetH.coerceAtLeast(naturalH), // padding 式 stretch：行只可能变大
                         nameSizeDp = nameDp,
                         subSizeDp = subDp,
-                        naturalHeightDp = if (stacked) stackedNat(lines, lhN, lhS) else compactNat(lhN, lhS),
+                        naturalHeightDp = naturalH,
                         stacked = stacked,
-                        nameMaxLines = nameMaxLines,
+                        mini = mini,
+                        // 紧凑档课名保留两行（账本 compactNat 已按实测换行数计高）；
+                        // 只有 MINI 强制单行省略
+                        nameMaxLines = if (mini) 1 else 2,
                     )
-                    if (explicit && targetH > 0) {
-                        row.setViewLayoutHeight(
-                            R.id.row_root, targetH.toFloat(), android.util.TypedValue.COMPLEX_UNIT_DIP,
-                        )
-                    }
-                    return row
+                    return factored
                 }
 
-                // 2×2 的两行一律用**竖排三行**行版式（课名 / 地点 / 时间段不挤一行，
-                // issue #13 第三轮：HyperOS 上地点被省略号吃掉、时间段看不清）；
-                // 第二行降档时例外——单行紧凑（课名超长省略 + 时间段，不画地点）。
-                rv.addView(R.id.next_rows, stretchedRow(first, row1H, explicit = true, n1, s1, lhN1, lhS1, stacked = true))
-                second?.let { (next, secondStyle) ->
-                    if (secondStyle == WidgetSchedule.NextClassPreviewStyle.STACKED) {
-                        rv.addView(
-                            R.id.next_rows,
-                            stretchedRow(next, row2H, row2Explicit, n2, s2, lhN2, lhS2, stacked = true),
-                        )
-                    } else {
-                        rv.addView(
-                            R.id.next_rows,
-                            stretchedRow(
-                                next,
-                                row2H,
-                                row2Explicit,
-                                n2,
-                                s2,
-                                lhN2,
-                                lhS2,
-                                stacked = false,
-                                nameMaxLines = 1,
-                                rowDetail = WidgetSchedule.RowDetail.NAME,
-                            ),
-                        )
-                    }
+                // 两行各按档位选版式：满档=竖排三行；紧凑/单行= MINI 或单行版（地点让位）
+                rv.addView(
+                    R.id.next_rows,
+                    stretchedRow(
+                        first,
+                        row1H,
+                        nat1,
+                        n1,
+                        s1,
+                        stacked = firstStyle == WidgetSchedule.NextClassPreviewStyle.STACKED,
+                        mini = firstStyle == WidgetSchedule.NextClassPreviewStyle.MINI,
+                        // 与第二行同口径：紧凑档保留地点（同排省略），MINI 不画
+                        rowDetail = if (firstStyle == WidgetSchedule.NextClassPreviewStyle.MINI) {
+                            WidgetSchedule.RowDetail.NAME
+                        } else {
+                            detail
+                        },
+                    ),
+                )
+                plan.nextCourse?.let { next ->
+                    rv.addView(
+                        R.id.next_rows,
+                        stretchedRow(
+                            next,
+                            row2H,
+                            nat2,
+                            n2,
+                            s2,
+                            stacked = secondStyle == WidgetSchedule.NextClassPreviewStyle.STACKED,
+                            mini = secondStyle == WidgetSchedule.NextClassPreviewStyle.MINI,
+                            // 紧凑档**保留地点**（地点左省略 + 时间段右完整，同一行）：
+                            // 2026-11-06 用户真机（Meizu）复测——紧凑档丢地点让他觉得
+                            // "显示不全"。三轮去掉紧凑档地点是因为 HyperOS 窄格子下
+                            // 时间被挤看不清，但现在紧窄格子落的是 MINI 档、不到这里；
+                            // 能落到紧凑档的盒子宽度普遍够"地名+时间"共存（地名
+                            // weight+省略号，时间段右对齐固定宽，行高不变、零裁字风险）。
+                            rowDetail = if (secondStyle == WidgetSchedule.NextClassPreviewStyle.MINI) {
+                                WidgetSchedule.RowDetail.NAME
+                            } else {
+                                detail
+                            },
+                        ),
+                    )
                 }
             } else {
                 rv.setTextViewText(R.id.status_title, plan.statusTitle)
