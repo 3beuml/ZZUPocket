@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -61,6 +62,7 @@ import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
 import com.zzupocket.app.ui.about.AboutScreen
 import com.zzupocket.app.ui.theme.rememberEffectiveDark
+import com.zzupocket.app.ui.components.LocalShowDescriptions
 import com.zzupocket.app.ui.campus.CampusScreen
 import com.zzupocket.app.ui.campus.CardScreen
 import com.zzupocket.app.ui.campus.ElectricityScreen
@@ -198,6 +200,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val mutedVersion by UpdateCenter.mutedVersion.collectAsState(initial = null)
     val hasUpdate = AppUpdate.shouldShowDot(currentVersion, remoteRelease?.version, mutedVersion)
 
+    // 「显示描述」下发到整棵 Compose 树（含各页面自己的 AlertDialog）：
+    // 开关一拨 → prefs 发新值 → 这里重组 → 所有 DescriptionText 立刻随之出现/消失。
+    CompositionLocalProvider(LocalShowDescriptions provides prefs.showDescriptions) {
     Box(
         Modifier
             .fillMaxSize()
@@ -459,6 +464,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
             }
         }
     }
+    } // CompositionLocalProvider
 }
 
 /**

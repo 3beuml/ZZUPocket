@@ -30,7 +30,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.DescriptionText
 import com.zzupocket.app.ui.components.GlassCard
+import com.zzupocket.app.ui.components.HintText
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -67,10 +69,6 @@ private fun differentBuildings(lightId: String?, acId: String?): Pair<String, St
     val ac = decodeRoomId(acId) ?: return null
     return if (light.area == ac.area && light.building == ac.building) null else light.id to ac.id
 }
-
-/** 卡片上的房间名；没有就退回房间 ID，至少让人知道查的是哪一间 */
-private fun lightLabelOf(meter: MeterUi?): String =
-    meter?.let { if (it.roomLabel.isNotBlank()) it.roomLabel else it.roomId.ifBlank { "未设置" } }.orEmpty()
 
 /**
  * 只有一路表计时显示哪一张卡：**哪一路设了房间号就用哪一路**（亿达填的是照明那一路）。
@@ -154,42 +152,38 @@ fun ElectricityScreen(
                 )
             }
 
-            // 「从学校账户读取房间」的结果：成功/失败各一句，不做 toast（用户可能就在看这页）
+            // 读取结果只留一句结论；失败原因 / 例外解释放 detail，由「显示描述」控制。
+            // 不做 toast：用户可能正看着这一页。
             state.roomRead?.let { read ->
-                Text(
-                    text = read.text,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (read.ok) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = read.text,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (read.ok) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
+                        maxLines = 1,
+                    )
+                    DescriptionText(read.detail)
+                }
             }
 
-            // 房间号口径：为什么不是"填一次就完事"，为什么有时要手抄
-            Text(
-                text = if (state.singleMeter) {
-                    // 亿达那种整间一个表：照明/空调那套说法在它这里不适用，别拿来说
-                    "房间号：这栋楼只有一个电表，所以这里只显示一个「电量」，没有照明/空调之分。" +
-                        "房间号从学校电费页复制，或在设置里用「在线选房间」逐层选（房表里没有的楼栋只能这样选）。"
+            // 提示只留一行；原理、例外、补救入口压成一行放进「显示描述」
+            HintText(
+                if (state.singleMeter) "房间号：这栋楼只有一个电表" else "房间号：照明 / 空调各一套表"
+            )
+            DescriptionText(
+                if (state.singleMeter) {
+                    "房号可从学校电费页复制，或用齿轮里的「在线选房间」逐层选"
                 } else {
-                    "房间号：照明与空调是两套独立电表（余额不能互抵），不同楼栋的房号规律也不一样 —— " +
-                        "App 按每栋楼的真实规律带出空调号（不是只有加 8 那一种），" +
-                        "个别楼带不准（如荷园部分楼一间房有多个空调户、每人一个表），请以学校电费页显示的编号为准。" +
-                        "房表里没有的楼栋（如亿达学生公寓）点齿轮进设置，用「从学校账户读取」或「在线选房间」。"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    "余额不能互抵；房号以学校电费页为准，表里没有的楼栋用「从学校账户读取」"
+                }
             )
 
-            // 口径说明：学校不给历史用电量，这里全是本机采样推出来的
-            Text(
-                text = "学校不提供历史用电量，以下数据由本机采样推算" +
-                    "（打开 App 时自动采一次，另外约每 4 小时一次）。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            HintText("以下数据由本机采样推算")
+            DescriptionText("学校不提供历史用电量；开 App 时自动采一次，约每 4 小时再采一次")
             state.lastSampleAt?.let {
                 Text(
                     text = "最近一次采样：${RelativeTime.ago(it)}（共 ${state.sampleCount} 条读数）",
@@ -216,16 +210,13 @@ fun ElectricityScreen(
                 }
             }
 
-            // 两路指向不同楼栋时说清楚 —— 这是允许的（换校区试查就是这样），
-            // 但不说的话很容易看成"怎么查都显示我自己的寝室"
+            // 两路指向不同楼栋时给一句警告；具体编号属于描述，放开关后面
             differentBuildings(state.light?.roomId, state.ac?.roomId)?.let { (light, ac) ->
-                Text(
-                    text = "⚠️ 这两路现在不在同一栋楼：照明 ${lightLabelOf(state.light)}（$light），" +
-                        "空调 ${lightLabelOf(state.ac)}（$ac）。如果只是查一下没问题；" +
-                        "要改成自己宿舍，点右上角齿轮重选一次。",
-                    style = MaterialTheme.typography.labelSmall,
+                HintText(
+                    "⚠️ 照明 / 空调不在同一栋楼，点齿轮可重选",
                     color = MaterialTheme.colorScheme.error,
                 )
+                DescriptionText("当前照明 $light、空调 $ac；只是查一下不影响")
             }
 
             GlassCard(Modifier.fillMaxWidth()) {
@@ -254,11 +245,7 @@ fun ElectricityScreen(
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    Text(
-                        text = "电价 %.3f 元/度（可在右上角改）".format(state.price),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    HintText("电价 %.3f 元/度 · 右上角可改".format(state.price))
                 }
             }
 
@@ -289,11 +276,7 @@ fun ElectricityScreen(
                             LegendItem("空调", MaterialTheme.colorScheme.tertiary)
                         }
                         Spacer(Modifier.weight(1f))
-                        Text(
-                            text = "柱顶 = 当天总量",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        HintText("柱顶 = 当天总量")
                     }
                     StackedUsageBarChart(
                         bars = state.bars,
@@ -334,12 +317,8 @@ fun ElectricityScreen(
                             )
                         }
                     }
-                    Text(
-                        text = "虚线柱 = 那天只有跨天或间隔过长的采样，数值是推算的；" +
-                            "点柱子看当天明细，下面列表里点某天也会选中它。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    // 「点柱子看明细」是可自行发现的交互，不再写出来占一行
+                    HintText("虚线柱 = 估算值")
                 }
             }
 
@@ -356,11 +335,7 @@ fun ElectricityScreen(
                             label = "电量",
                             color = singleMeterColor(state),
                         )
-                        Text(
-                            text = "圆圈 + 竖虚线 = 那天余额往上跳，也就是充值。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        HintText("圆圈 = 充值")
                     } else {
                         MeterBalanceChart(
                             series = state.lightBalance,
@@ -372,12 +347,8 @@ fun ElectricityScreen(
                             label = "空调",
                             color = MaterialTheme.colorScheme.tertiary,
                         )
-                        Text(
-                            text = "两张图各自量纲（照明和空调差不多差 80 度，画在一起会把波动压平）。" +
-                                "圆圈 + 竖虚线 = 那天余额往上跳，也就是充值。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        // 「两张图各自量纲」是纯实现细节，用户不需要知道 —— 直接删掉
+                        HintText("圆圈 = 充值")
                     }
                 }
             }
@@ -386,7 +357,7 @@ fun ElectricityScreen(
                 GlassCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "按日明细（点一行可在上图高亮）",
+                            text = "按日明细",
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -514,9 +485,7 @@ private fun MeterCard(
             }
             meter.daysLeft?.let {
                 Text(
-                    // 把口径写出来：桌面小组件上那句「可用约 N 天」是同一个数的取整，
-                    // 而上面那张卡片的「日均」是**合计**用量（含更长的统计窗口），两者不是一回事
-                    text = "按最近 ${EnergyStats.DAYS_LEFT_WINDOW_DAYS} 天用量还能用 %.1f 天".format(it),
+                    text = "还能用 %.1f 天".format(it),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -558,8 +527,7 @@ private fun MeterRoomCard(meter: MeterUi?, modifier: Modifier = Modifier) {
             )
             meter?.daysLeft?.let {
                 Text(
-                    // 与左卡同一个口径（最近 N 天日均），只是这里没有数字干扰
-                    text = "按最近 ${EnergyStats.DAYS_LEFT_WINDOW_DAYS} 天用量还能用 %.1f 天".format(it),
+                    text = "还能用 %.1f 天".format(it),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -617,13 +585,8 @@ private fun RoomSetupCard(
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("还没有设置宿舍房间", style = MaterialTheme.typography.titleSmall)
-            Text(
-                text = "电费是按房间查的，每个人不一样，所以需要你选一次：\n" +
-                    "① 最省事：从学校账户读取（就是学校电费页上显示的那个房间）；\n" +
-                    "② 或者选宿舍楼 → 选你的房号（如 101），照明和空调两套表计会自动带出来。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            HintText("电费按房间查，先选一次")
+            DescriptionText("可读取账户绑定房间，或选楼栋 → 房号（自动带出照明 / 空调）")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onReadFromSchool, enabled = !reading) {
                     Text(if (reading) "读取中…" else "从学校账户读取")
@@ -656,13 +619,8 @@ private fun PriceDialog(current: Double, onDismiss: () -> Unit, onConfirm: (Doub
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    text = "默认 0.568 元/度（河南居民合表电价）。学校的接口虽然有个" +
-                        "\"电费单价\"字段，但实测值是空的，所以只能手填 —— " +
-                        "填错只会影响\"折合多少钱\"，不影响度数统计。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                HintText("默认 0.568 元/度")
+                DescriptionText("学校接口电价字段为空，只能手填；填错只影响折合金额")
             }
         },
         confirmButton = {

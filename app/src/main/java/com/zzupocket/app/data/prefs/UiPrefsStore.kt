@@ -117,6 +117,11 @@ data class UiPrefs(
      */
     val darkTinted: Boolean = false,
     /**
+     * 「显示描述」（默认开）。关掉后界面只留一行短提示，隐藏原理、例外、错误原因
+     * 这类补充信息。空态、错误、数值、状态不属于描述，任何情况下都不受它影响。
+     */
+    val showDescriptions: Boolean = true,
+    /**
      * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
      *
      * ⚠️ 为什么要分开存：照明与空调是两套独立表计，**可以是两个不同的房间** ——
@@ -192,6 +197,8 @@ class UiPrefsStore(context: Context) {
             darkContrast = p[KEY_DARK_CONTRAST]?.let { runCatching { DarkContrast.valueOf(it) }.getOrNull() }
                 ?: DarkContrast.STANDARD,
             darkTinted = p[KEY_DARK_TINTED] ?: false,
+            // 老用户的 DataStore 里没有这个键 → 默认 true，不需要迁移
+            showDescriptions = p[KEY_SHOW_DESCRIPTIONS] ?: true,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
@@ -240,6 +247,9 @@ class UiPrefsStore(context: Context) {
     suspend fun setDarkContrast(v: DarkContrast) = store.edit { p -> p[KEY_DARK_CONTRAST] = v.name }
 
     suspend fun setDarkTinted(v: Boolean) = store.edit { p -> p[KEY_DARK_TINTED] = v }
+
+    /** 「更多 → 界面 → 显示描述」；写入后 AppNav 根部的 CompositionLocal 立刻全树重组 */
+    suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
 
     /**
      * 写**其中一路**的房间可读名。
@@ -355,6 +365,7 @@ class UiPrefsStore(context: Context) {
         val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
         val KEY_DARK_CONTRAST = stringPreferencesKey("dark_contrast")
         val KEY_DARK_TINTED = booleanPreferencesKey("dark_tinted")
+        val KEY_SHOW_DESCRIPTIONS = booleanPreferencesKey("show_descriptions")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
