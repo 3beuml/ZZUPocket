@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2×2「下一节课」的紧凑三行式课程行：课名 / 地点 / 时间段各占一行，地点永不被时间挤掉。
+
+  · 地点恒 maxLines=1：过长文案由 WidgetSchedule.fitPlaceText 在运行期先缩字号（下限 9dp），
+    仍放不下就裁左边、保留尾部教室号，这里不再用 ellipsize 去抢尾部。
+  · view id 与 widget_course_row(.xml/_stacked.xml/_mini.xml) 完全一致，
+    Widgets.courseRow 四套布局共用一段渲染代码；4×2 不用本布局。
+  · ⚠️ 上下内边距 2dp、行距 0：与 WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP 和
+    NextClassWidget.compactNat 的自然高账本是同一本账，改这里必须同步改那两处。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:baselineAligned="false"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
+
+    <TextView
+        android:id="@+id/row_bar"
+        android:layout_width="@dimen/widget_bar_w"
+        android:layout_height="@dimen/widget_bar_h"
+        android:background="@drawable/widget_bar" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/widget_gap"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/row_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_class1_name"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_row_name"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/row_place"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_place"
+            android:textColor="@color/widget_text_hint"
+            android:textSize="@dimen/widget_row_sub" />
+
+        <TextView
+            android:id="@+id/row_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_range"
+            android:textColor="@color/widget_text_dim"
+            android:textSize="@dimen/widget_row_sub" />
+    </LinearLayout>
+</LinearLayout>
