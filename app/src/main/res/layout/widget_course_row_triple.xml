@@ -2,12 +2,19 @@
 <!--
   2×2「下一节课」的紧凑三行式课程行：课名 / 地点 / 时间段各占一行，地点永不被时间挤掉。
 
-  · 地点恒 maxLines=1：过长文案由 WidgetSchedule.fitPlaceText 在运行期先缩字号（下限 9dp），
-    仍放不下就裁左边、保留尾部教室号，这里不再用 ellipsize 去抢尾部。
+  · 字号层级 课名 > 地点 > 时间（本节 14/13/11、下一节 13/12/10，运行期由
+    Widgets.courseRow 用 setTextViewTextSize 覆盖；下面的值只是默认档基线）。
+  · 地点恒 maxLines=1：过长文案由 WidgetSchedule.fitPlaceText 在运行期先缩字号（下限 11dp），
+    仍放不下就裁左边、保留尾部教室号，这里不再用 ellipsize 去抢尾部。时间字号独立、不跟着缩。
+  · 色条固定 42dp：比旧的 26dp 长、略短于三行文字自然高，形成"竖线托住整块内容"的观感。
   · view id 与 widget_course_row(.xml/_stacked.xml/_mini.xml) 完全一致，
     Widgets.courseRow 四套布局共用一段渲染代码；4×2 不用本布局。
-  · ⚠️ 上下内边距 2dp、行距 0：与 WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP 和
-    NextClassWidget.compactNat 的自然高账本是同一本账，改这里必须同步改那两处。
+  · 行距 2dp（@dimen/widget_triple_line_gap）：与
+    WidgetSchedule.NEXT_CLASS_TRIPLE_LINE_GAP_DP 是同一个数，账本在
+    WidgetSchedule.nextClassSpacedRowsDp 里折算；改这里必须同步改那两处。
+  · ⚠️ 上下内边距 0dp：与 WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP 和
+    NextClassWidget.compactNat 的自然高账本是同一本账；课间隔与留白由
+    Widgets.stretch 摊 surplus 时补回来，不是真的贴边。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/row_root"
@@ -16,13 +23,13 @@
     android:baselineAligned="false"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingTop="2dp"
-    android:paddingBottom="2dp">
+    android:paddingTop="0dp"
+    android:paddingBottom="0dp">
 
     <TextView
         android:id="@+id/row_bar"
         android:layout_width="@dimen/widget_bar_w"
-        android:layout_height="@dimen/widget_bar_h"
+        android:layout_height="@dimen/widget_bar_h_triple"
         android:background="@drawable/widget_bar" />
 
     <LinearLayout
@@ -41,29 +48,31 @@
             android:maxLines="1"
             android:text="@string/widget_preview_class1_name"
             android:textColor="@color/widget_text"
-            android:textSize="@dimen/widget_row_name"
+            android:textSize="14dp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/row_place"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_triple_line_gap"
             android:ellipsize="end"
             android:includeFontPadding="false"
             android:maxLines="1"
             android:text="@string/widget_preview_place"
             android:textColor="@color/widget_text_hint"
-            android:textSize="@dimen/widget_row_sub" />
+            android:textSize="13dp" />
 
         <TextView
             android:id="@+id/row_time"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/widget_triple_line_gap"
             android:ellipsize="end"
             android:includeFontPadding="false"
             android:maxLines="1"
             android:text="@string/widget_preview_range"
             android:textColor="@color/widget_text_dim"
-            android:textSize="@dimen/widget_row_sub" />
+            android:textSize="11dp" />
     </LinearLayout>
 </LinearLayout>

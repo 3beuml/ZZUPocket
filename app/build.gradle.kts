@@ -50,6 +50,7 @@ android {
 
     buildTypes {
         debug {
+            applicationIdSuffix = ".debug"
             if (hasReleaseSigning) signingConfig = signingConfigs.getByName("zzupocket")
         }
         release {

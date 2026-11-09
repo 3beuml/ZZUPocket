@@ -142,7 +142,7 @@ object Widgets {
         return paint.measureText(text) / context.resources.displayMetrics.density
     }
 
-    /** 紧凑三行档的附加配置：地点可用宽度与最小字号；非空即启用 widget_course_row_triple.xml */
+    /** 紧凑三行档的附加配置：地点可用宽度与最小字号（11dp）；非空即启用 widget_course_row_triple.xml */
     data class CourseRowTriple(val usableWidthDp: Int, val minSizeDp: Int)
 
     /**
@@ -162,6 +162,8 @@ object Widgets {
      * @param naturalHeightDp 这一行**不撑时**的自然高 —— 两行课名的行比单行的高 16dp
      *   （换行感知账本，见 [WidgetSchedule.rowNaturalHeightDp]）；传错就会把内容裁掉。
      * @param triple 非空时启用紧凑三行并做地点自适应；4×2 不传
+     * @param placeSizeDp / [timeSizeDp] 三行档的地点、时间各自字号（不传则都沿用 [subSizeDp]）。
+     *   八轮起三行字号分层，时间不随地点缩字号联动，层级才不会塌。
      */
     fun courseRow(
         context: Context,
@@ -177,17 +179,22 @@ object Widgets {
         mini: Boolean = false,
         nameMaxLines: Int = 2,
         triple: CourseRowTriple? = null,
+        placeSizeDp: Int? = null,
+        timeSizeDp: Int? = null,
     ): RemoteViews {
-        // 紧凑三行档：地点先缩字号、仍放不下裁左边；地点与时间段共用缩小后的字号保持对齐
+        // 紧凑三行档：地点先缩字号（下限 11dp）、仍放不下裁左边；
+        // 时间保持自己的字号，不跟地点一起缩，保证「课名 > 地点 > 时间」的层级。
+        val placeMaxDp = placeSizeDp ?: subSizeDp
+        val timeDp = timeSizeDp ?: subSizeDp
         val placeFit = triple?.let {
             WidgetSchedule.fitPlaceText(
                 place = row.place,
                 usableWidthDp = it.usableWidthDp,
-                maxSizeDp = subSizeDp,
+                maxSizeDp = placeMaxDp,
                 minSizeDp = it.minSizeDp,
             ) { text, size -> measureTextWidthDp(context, text, size) }
         }
-        val shownSubDp = placeFit?.sizeDp ?: subSizeDp
+        val shownPlaceDp = placeFit?.sizeDp ?: placeMaxDp
         val rv = RemoteViews(
             context.packageName,
             when {
@@ -202,8 +209,8 @@ object Widgets {
         rv.setTextViewText(R.id.row_time, row.timeRange)
         // 字号按画布分档动态设（XML 里是标准档基线；矮盒子用紧凑档防裁字）
         rv.setTextViewTextSize(R.id.row_name, android.util.TypedValue.COMPLEX_UNIT_DIP, nameSizeDp.toFloat())
-        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, shownSubDp.toFloat())
-        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, shownSubDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, shownPlaceDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, timeDp.toFloat())
         // 2×2 紧凑档把课名收到单行省略：长课名换两行的话单行高度装不下，
         // 显式行高会把时间段裁没（#13 四轮）。setMaxLines 带 @RemotableViewMethod，可反射调。
         if (nameMaxLines != 2) {

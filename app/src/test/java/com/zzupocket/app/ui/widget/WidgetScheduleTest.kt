@@ -420,60 +420,149 @@ class WidgetScheduleTest {
     }
 
     @Test
-    fun `地点恒一行_先缩字号再裁左边保留教室号`() {
+    fun `地点恒一行_从13缩到11再裁左边保留教室号`() {
         val width = 130
-        // 短地点：11dp 原样放下
-        val short = WidgetSchedule.fitPlaceText("南3 101", width, 11, 9)
-        assertEquals("南3 101", short.text)
-        assertEquals(11, short.sizeDp)
-        // 中等：11dp 放不下，缩到 10dp 就完整显示，一个字都不裁
-        val mid = WidgetSchedule.fitPlaceText("南校区综合教学楼 3 层 305", width, 11, 9)
-        assertEquals("南校区综合教学楼 3 层 305", mid.text)
-        assertEquals(10, mid.sizeDp)
-        // 超长：缩到下限 9dp 仍放不下 → 裁左边，保留尾部教室细节
-        val origin = "北校区实验实训中心 B 区 2 层 205 计算机机房（东）"
-        val long = WidgetSchedule.fitPlaceText(origin, width, 11, 9)
-        assertEquals(9, long.sizeDp)
+        // 每个字约 0.9em 宽：把「13 放不下 / 12 完整 / 11 仍放不下」三档钉成确定值
+        val measure: (String, Int) -> Float = { text, size -> text.length * size * 0.9f }
+        // 短地点：13dp 原样放下
+        val short = WidgetSchedule.fitPlaceText("南3 101 附楼", width, 13, 11, measure)
+        assertEquals("南3 101 附楼", short.text)
+        assertEquals(13, short.sizeDp)
+        // 中等：13dp 放不下，缩到 12dp 完整显示，一个字都不裁
+        val mid = WidgetSchedule.fitPlaceText("南校区教学楼 3层305", width, 13, 11, measure)
+        assertEquals("南校区教学楼 3层305", mid.text)
+        assertEquals(12, mid.sizeDp)
+        // 超长：缩到下限 11dp 仍放不下 → 裁左边，保留尾部教室细节
+        val origin = "北校区实验实训中心B区2层205机房东"
+        val long = WidgetSchedule.fitPlaceText(origin, width, 13, 11, measure)
+        assertEquals(11, long.sizeDp)
         assertTrue(long.text.startsWith("…"))
-        assertTrue(long.text.endsWith("（东）"))
+        assertTrue(long.text.endsWith("东"))
         assertTrue(long.text.length < origin.length)
+        // 缩字号下限与时间同号，层级不会塌成「地点比时间还小」
+        assertEquals(WidgetSchedule.NEXT_CLASS_PLACE_MIN_DP, 11)
     }
 
     @Test
     fun `地点适配可以接入安卓Paint实测宽度`() {
         // 渲染层传的 lambda（这里用一个字固定 10dp 宽代替 Paint）
-        val fit = WidgetSchedule.fitPlaceText("南3 101", 60, 11, 9) { text, _ -> text.length * 10f }
+        val fit = WidgetSchedule.fitPlaceText("南3 101", 60, 13, 11) { text, _ -> text.length * 10f }
         assertEquals("南3 101", fit.text)
-        assertEquals(11, fit.sizeDp)
-        val cut = WidgetSchedule.fitPlaceText("南3 101", 40, 11, 9) { text, _ -> text.length * 10f }
-        assertEquals(9, cut.sizeDp)
+        assertEquals(13, fit.sizeDp)
+        val cut = WidgetSchedule.fitPlaceText("南3 101", 40, 13, 11) { text, _ -> text.length * 10f }
+        assertEquals(11, cut.sizeDp)
         assertEquals("…101", cut.text)
     }
 
+    /** 三行档账本：课名 / 地点 / 时间各自实测行高，行高函数由调用方给（模拟不同系统字体） */
+    private fun tierNaturals(
+        tier: WidgetSchedule.CompactFontTier,
+        lineH: (Int) -> Int,
+    ) = WidgetSchedule.NextClassRowNaturals(
+        firstStacked = 200,
+        firstCompact = lineH(tier.n1) + lineH(tier.p1) + lineH(tier.t1) +
+            WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1,
+        firstMini = 30,
+        secondStacked = 200,
+        secondCompact = lineH(tier.n2) + lineH(tier.p2) + lineH(tier.t2) +
+            WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1,
+        secondMini = 28,
+    )
+
     @Test
-    fun `2×2 紧凑三行在150dp画布留出安全垫且不降级`() {
-        fun compactNat(lhN: Int, lhS: Int) =
-            lhN + lhS * 2 + WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1
-        // Paint 实测的代表值：13 粗≈16 / 11≈13 / 12 粗≈15 / 10≈12
-        val first = compactNat(16, 13)
-        val second = compactNat(15, 12)
-        val avail = WidgetSchedule.nextClassAvailableDp(150)   // 106（账本 chrome=44，比渲染实测更保守）
-        val budget = avail - WidgetSchedule.NEXT_CLASS_LADDER_BUFFER_DP   // 98
+    fun `2×2 大字档在真机147dp画布不降级且留安全垫`() {
+        // 真机 logcat 实测行高(dp)：11=15 / 12=16 / 13=18 / 14=19（HyperOS MiSans）
+        fun compactNat(lhN: Int, lhP: Int, lhT: Int) =
+            lhN + lhP + lhT + WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1
+        // 大字档：本节 14/13/11、下一节 13/12/10
+        val first = compactNat(19, 18, 15)   // 53
+        val second = compactNat(18, 16, 14)  // 49
+        // 真机 2×2：SIZES 157x177 − 30 = 157x147，chrome 实测 = 内边距 20 + 表头 16 + 行距 2
+        val avail = WidgetSchedule.nextClassAvailableDp(147, 38)   // 109
+        val budget = avail - WidgetSchedule.NEXT_CLASS_LADDER_BUFFER_DP   // 104
         assertTrue(
-            "150dp 画布至少要留 6dp 安全垫: sum=${first + second} budget=$budget",
-            budget - (first + second) >= 6,
+            "147dp 画布至少要留 2dp 安全垫: sum=${first + second} budget=$budget",
+            budget - (first + second) >= 2,
         )
         val n = WidgetSchedule.NextClassRowNaturals(
             firstStacked = 66, firstCompact = first, firstMini = 30,
             secondStacked = 62, secondCompact = second, secondMini = 28,
         )
         assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(avail, n))
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(avail + 3, n)) // 150dp 也不降级
+    }
+
+    @Test
+    fun `2×2 字号档位按实测行高选档_地点永不因放大字号被砍`() {
+        val avail = 109   // 真机 147dp 画布、chrome 38
+        // 真机 MiSans 实测行高（logcat 2026-11-09）：9=12 10=14 11=15 12=16 13=18 14=19 15=20
+        val misans = mapOf(9 to 12, 10 to 14, 11 to 15, 12 to 16, 13 to 18, 14 to 19, 15 to 20)
+        fun bigFont(t: WidgetSchedule.CompactFontTier) = tierNaturals(t) { misans.getValue(it) }
+        // 这台设备上大字档刚好放得下 → 必须真的按用户拍板的 14/13/11 渲染
+        val real = WidgetSchedule.chooseCompactTier(avail) { bigFont(it) }
+        assertEquals("大字14/13/11", real.label)
+        assertEquals(14, real.n1)
+        assertEquals(13, real.p1)
+        assertEquals(11, real.t1)
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(avail, bigFont(real)))
+
+        // 更矮的画布（可用 100dp）：大字档会把第二节压成 MINI，此时应整组降字号，
+        // 而不是降级形态把地点藏起来
+        val shortAvail = 100
+        val fallback = WidgetSchedule.chooseCompactTier(shortAvail) { bigFont(it) }
+        assertTrue("放不下时应回退字号: ${fallback.label}", fallback.n1 < 14)
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(shortAvail, bigFont(fallback)))
+        // 任何档位都保持「课名 > 地点 ≥ 时间」的层级
+        WidgetSchedule.NEXT_CLASS_COMPACT_TIERS.forEach { tier ->
+            assertTrue(tier.n1 > tier.p1 && tier.p1 >= tier.t1)
+            assertTrue(tier.n2 > tier.p2 && tier.p2 >= tier.t2)
+        }
+    }
+
+    @Test
+    fun `2×2 行距与课间隔折算成padding_不触碰判档账本`() {
+        // 真机 147dp 保守画布可用 109；排版补回 24dp → 133（见常量里的视图树依据）
+        val availTier = WidgetSchedule.nextClassAvailableDp(147, 38)
+        val avail = WidgetSchedule.nextClassAvailableDp(
+            147 + WidgetSchedule.NEXT_CLASS_2X2_LAYOUT_BONUS_DP, 38,
+        )
+        assertEquals(109, availTier)
+        assertEquals(133, avail)
+        // 大字档两行文字自然高（MiSans 实测行高账本）：53 / 49
+        val (r1, r2) = WidgetSchedule.nextClassSpacedRowsDp(
+            availDp = avail, nat1 = 53, nat2 = 49, compact1 = true, compact2 = true,
+        )
+        // 内容自然高 = 文字 + 两处行距；目标高再叠课间隔与富余，由 stretch 上下各摊一半
+        assertEquals(53 + 2 * WidgetSchedule.NEXT_CLASS_TRIPLE_LINE_GAP_DP, r1.contentHeightDp)
+        assertEquals(49 + 2 * WidgetSchedule.NEXT_CLASS_TRIPLE_LINE_GAP_DP, r2.contentHeightDp)
+        assertTrue(r1.targetHeightDp > r1.contentHeightDp)
+        assertTrue(r2.targetHeightDp > r2.contentHeightDp)
+        val gapBetweenRows = (r1.targetHeightDp - r1.contentHeightDp) / 2 +
+            (r2.targetHeightDp - r2.contentHeightDp) / 2
+        assertTrue("课间隔应明显大于旧的 2dp: $gapBetweenRows", gapBetweenRows >= 8)
+        // 两行总高不超出排版可用高度，也不小于内容自然高之和（不会裁字）
+        val total = r1.targetHeightDp + r2.targetHeightDp
+        assertTrue("排版总高=$total 可用=$avail", total <= avail)
+        assertTrue(total >= r1.contentHeightDp + r2.contentHeightDp)
+        // 判档仍走保守可用：与间距彻底解耦，大字档 + COMPACT/COMPACT 一个都不变
+        val n = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 200, firstCompact = 53, firstMini = 30,
+            secondStacked = 200, secondCompact = 49, secondMini = 28,
+        )
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(availTier, n))
+
+        // STACKED / MINI 版式不加行距与课间隔
+        val plain = WidgetSchedule.nextClassSpacedRowsDp(
+            availDp = avail, nat1 = 53, nat2 = 49, compact1 = false, compact2 = false,
+        )
+        assertEquals(53, plain.first.contentHeightDp)
+        assertEquals(49, plain.second.contentHeightDp)
     }
 
     @Test
     fun `2×2 阶梯判档按实测自然高_两行统一紧凑_永不蒸发`() {
         // 判档纯函数的契约测试：下面构造的 naturals 沿用六轮口径，只验证「阶梯怎么选」，
-        // 不代表七轮渲染层的真实行高（真实值由上面的 150dp 安全垫测试覆盖）。
+        // 不代表八轮渲染层的真实行高（真实值由上面的 147dp 安全垫测试覆盖）。
         // 满档竖排只留给拉高的 2×3。nextClassRowPair 只从
         // 满/满 → 紧凑/紧凑 → 紧凑/单行 → 单行/单行 里选，取第一对放得下的；
         // 全超预算落 (MINI,MINI) —— 第二节课在任何尺寸下都存在。
@@ -491,12 +580,12 @@ class WidgetScheduleTest {
         // Meizu/Roboto 口径（真机实测：15粗=20 / 13=17 / 13粗=16 / 12=15），
         // 2×2 画布 165（SIZES−30 校准），chrome 实测 = 20 + 表头16粗 + 2 = 38 → 可用 127
         val robotoShort = nats(20, 17, 16, 15, firstLines = 1, secondLines = 1)
-        // 满/满 = 67+62=129 > 预算 119 → 紧凑/紧凑 = 51+45=96 ≤ 119 → 两行统一紧凑
+        // 满/满 = 67+62=129 > 预算 122 → 紧凑/紧凑 = 51+45=96 ≤ 122 → 两行统一紧凑
         assertEquals(
             COMPACT to COMPACT,
             WidgetSchedule.nextClassRowPair(127, robotoShort),
         )
-        // 本节课名两行（长课名）：紧凑/紧凑仍放得下（71+45=116 ≤ 119），课名不撒谎
+        // 本节课名两行（长课名）：紧凑/紧凑仍放得下（71+45=116 ≤ 122），课名不撒谎
         val robotoLongFirst = nats(20, 17, 16, 15, firstLines = 2, secondLines = 1)
         assertEquals(
             COMPACT to COMPACT,
@@ -511,9 +600,9 @@ class WidgetScheduleTest {
         // 极端矮（预算 < 紧凑+单行）→ 单行/单行兜底，第二节课**仍然存在**
         assertEquals(MINI to MINI, WidgetSchedule.nextClassRowPair(80, robotoShort))
 
-        // HyperOS/MiSans 口径（15粗=21 / 13=18 / 13粗=19 / 12=18），可用 125（预算 117）
+        // HyperOS/MiSans 口径（15粗=21 / 13=18 / 13粗=19 / 12=18），可用 125（预算 120）
         val misansShort = nats(21, 18, 19, 18, firstLines = 1, secondLines = 1)
-        // 满/满 = 73+69=142 > 117 → 紧凑/紧凑 = 53+51=104 ≤ 117
+        // 满/满 = 73+69=142 > 120 → 紧凑/紧凑 = 53+51=104 ≤ 120
         assertEquals(
             COMPACT to COMPACT,
             WidgetSchedule.nextClassRowPair(125, misansShort),

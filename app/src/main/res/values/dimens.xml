@@ -58,5 +58,9 @@
     <!-- 课程色条 / 块色条 -->
     <dimen name="widget_bar_w">3dp</dimen>
     <dimen name="widget_bar_h">26dp</dimen>     <!-- 课程块：贴着课名与副行 -->
+    <dimen name="widget_bar_h_triple">42dp</dimen> <!-- 2×2 紧凑三行档：比默认 26dp 长，略短于三行文字 -->
     <dimen name="widget_bar_h_sm">16dp</dimen>  <!-- 数据块：贴着块名 -->
+    <!-- 2×2 紧凑三行档的行内行距（课名/地点/时间段之间）；与
+         WidgetSchedule.NEXT_CLASS_TRIPLE_LINE_GAP_DP 是同一个数，改一处必须同步另一处 -->
+    <dimen name="widget_triple_line_gap">2dp</dimen>
 </resources>
