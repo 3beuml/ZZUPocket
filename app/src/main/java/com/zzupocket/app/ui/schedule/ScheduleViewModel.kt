@@ -16,6 +16,10 @@ import com.zzupocket.app.data.gms.GradLesson
 import com.zzupocket.app.data.prefs.UiPrefsStore
 import com.zzupocket.app.data.repo.ScheduleRepository
 import com.zzupocket.app.domain.Course
+import com.zzupocket.app.domain.ConflictDisplayChoice
+import com.zzupocket.app.domain.ScheduleBlock
+import com.zzupocket.app.domain.conflictDisplayKey
+import com.zzupocket.app.domain.scheduleBlocks
 import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.Plan
 import com.zzupocket.app.domain.PlanSpec
@@ -134,6 +138,11 @@ data class ScheduleUiState(
     val detailCourse: Course? = null,
     /** detailCourse 的显示覆盖（名称 + 各时段教室）；null = 没查到/没有 */
     val detailOverrides: DisplayOverridesView? = null,
+    val conflictChoices: List<ConflictDisplayChoice> = emptyList(),
+    val detailConflict: ConflictDetails? = null,
+    val conflictSaving: Boolean = false,
+    val conflictError: String? = null,
+    val conflictNotice: String? = null,
 ) {
     /** 该学期有哪些教学周（升序） */
     val weeks: List<Int> get() = selectedSemester?.weekIndices.orEmpty()
@@ -155,6 +164,15 @@ data class DisplayOverridesView(
     val rooms: Map<String, String> = emptyMap(),
 ) {
     val any: Boolean get() = name != null || rooms.isNotEmpty()
+}
+
+data class ConflictDetails(
+    val block: ScheduleBlock,
+    val matchingBlocks: List<ScheduleBlock>,
+) {
+    val weeks: List<Int> get() = matchingBlocks.map { it.weekIndex }.distinct().sorted()
+    val editable: Boolean
+        get() = block.sessions.none { it.source == GmsScheduleSource.SOURCE } || !block.scopeKey.isNullOrBlank()
 }
 
 class ScheduleViewModel : ViewModel() {
@@ -308,6 +326,8 @@ class ScheduleViewModel : ViewModel() {
         val weeks = sessions.map { it.weekIndex }.distinct().sorted()
         val courses = runCatching { repo.courses(GmsScheduleMapper.GRAD_SEMESTER_ID) }
             .getOrDefault(emptyList())
+        val choices = repo.conflictDisplayChoices(GmsScheduleMapper.GRAD_SEMESTER_ID)
+        val scope = repo.timetableScope(GmsScheduleSource.SOURCE, GmsScheduleMapper.GRAD_SEMESTER_ID)
         val periods = _state.value.periods.ifEmpty { GmsScheduleMapper.defaultPeriods() }
         val start = settings.weekOneStart
         val week = start?.let { WeekMath.weekIndexAt(it, today) }
@@ -318,7 +338,9 @@ class ScheduleViewModel : ViewModel() {
                 gmsBusy = false,
                 gmsError = null,
                 gmsSessions = sessions,
+                gmsTermValue = scope,
                 gmsCourses = courses,
+                conflictChoices = it.conflictChoices.filterNot { choice -> choice.semesterId == GmsScheduleMapper.GRAD_SEMESTER_ID } + choices,
                 gmsPeriods = periods,
                 periods = periods,
                 gmsWeekIndex = week,
@@ -387,6 +409,7 @@ class ScheduleViewModel : ViewModel() {
                 }
             }
             result.onSuccess { (term, entries, current) ->
+                val choices = repo.conflictDisplayChoices(GmsScheduleMapper.GRAD_SEMESTER_ID)
                 if (entries.isEmpty()) {
                     _state.update {
                         it.copy(gmsBusy = false, gmsError = "研究生系统没有返回本学期课表数据")
@@ -442,6 +465,7 @@ class ScheduleViewModel : ViewModel() {
                         gmsSemester = semester,
                         gmsSessions = sessions,
                         gmsCourses = courses,
+                        conflictChoices = it.conflictChoices.filterNot { choice -> choice.semesterId == GmsScheduleMapper.GRAD_SEMESTER_ID } + choices,
                         gmsWeekIndex = week,
                         gmsPeriods = periods,
                         gmsWeekResolvedOn = today,
@@ -472,6 +496,7 @@ class ScheduleViewModel : ViewModel() {
                         semesterId = GmsScheduleMapper.GRAD_SEMESTER_ID,
                         sessions = sessions,
                         courses = courses,
+                        scopeKey = term.value,
                     )
                 }
             }.onFailure { e ->
@@ -726,6 +751,7 @@ cacheNoticeNeedsLogin = expired,
         val sessions = repo.sessionsOfSemester(semester.id)
         val courses = repo.courses(semester.id)
         val plans = repo.customPlans(semester.id)
+        val choices = repo.conflictDisplayChoices(semester.id)
         _state.update {
             it.copy(
                 loading = false,
@@ -737,6 +763,7 @@ cacheNoticeNeedsLogin = expired,
                 allSessions = sessions,
                 courses = courses,
                 plans = plans,
+                conflictChoices = it.conflictChoices.filterNot { choice -> choice.semesterId == semester.id } + choices,
                 weekStart = settings.weekOneStart,
                 weekStartDay = settings.startDay,
                 weekTotal = settings.totalWeeks,
@@ -878,6 +905,74 @@ cacheNoticeNeedsLogin = expired,
                 _state.value.courses
             }
             pool.firstOrNull { it.code == session.courseCode }?.let(::openDetail)
+        }
+    }
+
+    /** 选定显示课程后仍保留冲突入口，其他课程始终可以从详情顶部找到。 */
+    fun onBlockClick(block: ScheduleBlock) {
+        if (!block.isConflict) {
+            onSessionClick(block.displaySession)
+            return
+        }
+        showDetail(courseForSession(block.displaySession), conflictDetails(block, _state.value))
+    }
+
+    fun selectConflictCourse(session: Session) {
+        val conflict = _state.value.detailConflict ?: return
+        if (_state.value.conflictSaving || session !in conflict.block.sessions) return
+        showDetail(courseForSession(session), conflict)
+    }
+
+    private fun courseForSession(session: Session): Course {
+        val s = _state.value
+        val pool = if (session.source == GmsScheduleSource.SOURCE) s.gmsCourses else s.courses
+        if (session.source != ScheduleRepository.SOURCE_CUSTOM) {
+            pool.firstOrNull { it.semesterId == session.semesterId && it.code == session.courseCode }?.let { return it }
+        }
+        val all = if (session.source == GmsScheduleSource.SOURCE) s.gmsSessions else s.allSessions
+        val rows = all.filter { it.semesterId == session.semesterId && it.source == session.source && it.courseCode == session.courseCode }
+        return Course(
+            key = "${session.semesterId}:${session.courseCode}", semesterId = session.semesterId,
+            code = session.courseCode, nameZh = session.courseName, credits = 0.0, openDepartment = null,
+            teachers = rows.mapNotNull { it.teacherName }.distinct(), sessions = rows.ifEmpty { listOf(session) },
+        )
+    }
+
+    private fun conflictDetails(block: ScheduleBlock, state: ScheduleUiState): ConflictDetails {
+        val all = if (block.sessions.first().source == GmsScheduleSource.SOURCE) state.gmsSessions else state.allSessions
+        val matching = scheduleBlocks(all, state.conflictChoices, scopeKey = block.scopeKey)
+            .filter { it.isConflict && it.conflictKey == block.conflictKey }
+        return ConflictDetails(
+            block = matching.firstOrNull { it.weekIndex == block.weekIndex } ?: block,
+            matchingBlocks = matching.ifEmpty { listOf(block) },
+        )
+    }
+
+    fun saveConflictDisplay(sessionKey: String?, weeks: Set<Int>) {
+        val detail = _state.value.detailConflict ?: return
+        if (_state.value.conflictSaving || !detail.editable || weeks.isEmpty() || !detail.weeks.containsAll(weeks)) return
+        if (sessionKey != null && detail.block.sessions.none { it.conflictDisplayKey() == sessionKey }) return
+        _state.update { it.copy(conflictSaving = true, conflictError = null, conflictNotice = null) }
+        viewModelScope.launch {
+            try {
+                repo.saveConflictDisplay(detail.block, weeks, sessionKey)
+                val choices = repo.conflictDisplayChoices(detail.block.semesterId)
+                _state.update { current ->
+                    val next = current.copy(
+                        conflictChoices = current.conflictChoices.filterNot { it.semesterId == detail.block.semesterId } + choices,
+                    )
+                    if (current.detailConflict?.block?.conflictKey == detail.block.conflictKey) {
+                        next.copy(
+                            detailConflict = conflictDetails(detail.block, next), conflictSaving = false,
+                            conflictNotice = "已保存第 ${ScheduleText.compressWeeks(weeks.sorted())}的显示 · 仅保存在本机",
+                        )
+                    } else next.copy(conflictSaving = false)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update { it.copy(conflictSaving = false, conflictError = e.toUserMessage()) }
+            }
         }
     }
 
@@ -1097,7 +1192,9 @@ cacheNoticeNeedsLogin = expired,
         }
     }
 
-    fun openDetail(course: Course) {
+    fun openDetail(course: Course) = showDetail(course, null)
+
+    private fun showDetail(course: Course, conflict: ConflictDetails?) {
         viewModelScope.launch {
             val ovs = runCatching {
                 repo.displayOverrides(course.semesterId).filter { it.courseCode == course.code }
@@ -1105,6 +1202,9 @@ cacheNoticeNeedsLogin = expired,
             _state.update {
                 it.copy(
                     detailCourse = course,
+                    detailConflict = conflict,
+                    conflictError = null,
+                    conflictNotice = null,
                     detailOverrides = DisplayOverridesView(
                         name = ovs.firstOrNull { it.kind == ScheduleRepository.KIND_NAME }?.value,
                         rooms = ovs
@@ -1119,7 +1219,9 @@ cacheNoticeNeedsLogin = expired,
         }
     }
 
-    fun closeDetail() = _state.update { it.copy(detailCourse = null, detailOverrides = null) }
+    fun closeDetail() = _state.update {
+        it.copy(detailCourse = null, detailOverrides = null, detailConflict = null, conflictError = null, conflictNotice = null)
+    }
 
     /**
      * 保存显示覆盖（issue #6 保底）：名称整门课；教室按时段，键 "weekday|startUnit"
@@ -1154,6 +1256,7 @@ cacheNoticeNeedsLogin = expired,
     }
 
     private suspend fun reloadAfterDisplayEdit(old: Course) {
+        val conflict = _state.value.detailConflict
         val semester = _state.value.selectedSemester
         if (semester != null) {
             loadSemester(semester, auth.isLoggedIn(), forceSync = false)
@@ -1174,7 +1277,7 @@ cacheNoticeNeedsLogin = expired,
         val fresh = _state.value.courses.firstOrNull { it.key == old.key }
             ?: _state.value.gmsCourses.firstOrNull { it.key == old.key }
             ?: old
-        openDetail(fresh)
+        showDetail(fresh, conflict?.let { conflictDetails(it.block, _state.value) })
 
         // 小组件此刻还挂着改前的旧画面：它的重画只在「打开 App / 课程边界闹钟」两处
         // 定时发生，而用户刚编辑完就去桌面是最常见的路径 —— 必须在保存点主动推一遍。

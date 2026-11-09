@@ -7,6 +7,7 @@ import com.zzupocket.app.data.db.AppDatabase
 import com.zzupocket.app.data.db.CourseEntity
 import com.zzupocket.app.data.db.CourseSessionEntity
 import com.zzupocket.app.data.db.DisplayOverrideEntity
+import com.zzupocket.app.data.db.KvCacheEntity
 import com.zzupocket.app.data.db.PeriodEntity
 import com.zzupocket.app.data.db.SemesterEntity
 import com.zzupocket.app.data.db.RoomOccupancyEntity
@@ -14,6 +15,9 @@ import com.zzupocket.app.data.db.TimetableSyncEntity
 import com.zzupocket.app.domain.RoomOccupation
 import com.zzupocket.app.data.eas.EasClient
 import com.zzupocket.app.domain.Course
+import com.zzupocket.app.domain.ConflictDisplayChoice
+import com.zzupocket.app.domain.ScheduleBlock
+import com.zzupocket.app.domain.conflictDisplayKey
 import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.Plan
 import com.zzupocket.app.domain.PlanSpec
@@ -91,7 +95,7 @@ class ScheduleRepository(
             CourseSessionEntity(
                 // 主键带上日期：同一门课在同一周同一天同一节的**补课**不能覆盖正常那节课，
                 // 两条都得留（以前 id 不含日期，后写的一条会把前一条顶掉）
-                id = sessionIdOf(semesterId, s.courseCode, weekIndex, weekday, s.startUnit, s.date),
+                id = sessionIdOf(semesterId, s.courseCode, weekIndex, weekday, s.startUnit, s.date, s.experiment),
                 courseKey = courseKeyOf(semesterId, s.courseCode),
                 semesterId = semesterId,
                 source = SOURCE_EAS,
@@ -305,9 +309,8 @@ class ScheduleRepository(
     /**
      * 诊断：**同一个 (周, 星期, 起始节次) 上有多门课**的格子有多少个（`ScheduleGrid` 标签）。
      *
-     * 为什么要记：课表页一个格子只会画**第一门**匹配的课（`ScheduleScreen` 里是 `firstOrNull`），
-     * 而且被跨节大块覆盖的格子会被整段跳过 —— 学校新加的**补课**如果正好落在已有课的格子，
-     * 在网格里就是看不见的。只记格子坐标与条数，**不含课程名/教室**。
+     * 用于核对接口/入库记录；网格现在显示冲突占位，并允许用户按周选择显示课程。
+     * 这里只统计同起始节次，不作为 UI 的冲突判断。只记坐标与条数，不含课程名/教室。
      */
     private fun logGridCollisions(rows: List<CourseSessionEntity>) {
         runCatching {
@@ -327,7 +330,7 @@ class ScheduleRepository(
                 TAG_GRID,
                 "课表入库：${rows.size} 条，日期 ${dates.size} 天（${dates.joinToString(",")}）；" +
                     "星期分布($weekdayCounts)；" +
-                    "同格多门课（网格只会画第一门）的格子 ${collisions.size} 个：" +
+                    "同起始节次多门课的格子 ${collisions.size} 个：" +
                     collisions.entries.take(12).joinToString(" ") { (k, v) ->
                         "第${k.first}周${k.second}/${k.third}节×${v.map { it.courseKey }.distinct().size}"
                     },
@@ -448,6 +451,7 @@ class ScheduleRepository(
         sessions: List<Session>,
         courses: List<Course>,
         fetchedAt: Long = System.currentTimeMillis(),
+        scopeKey: String? = null,
     ): Boolean {
         val hash = timetableHash(sessions)
         val existing = db.timetableSyncDao().get(source, semesterId)
@@ -491,6 +495,10 @@ class ScheduleRepository(
             db.courseDao().deleteBySemester(semesterId)
             db.courseDao().upsertAll(courseEntities)
             db.courseSessionDao().upsertAll(sessionEntities)
+            if (scopeKey != null) {
+                // 研究生共用合成 semesterId，缓存实际 term value，避免显示选择跨学期串用。
+                db.kvCacheDao().put(KvCacheEntity(timetableScopeKey(source, semesterId), scopeKey, fetchedAt, 0L))
+            }
             db.timetableSyncDao().upsert(
                 TimetableSyncEntity(
                     source = source,
@@ -553,6 +561,12 @@ class ScheduleRepository(
     fun observeTimetableSync(source: String, semesterId: Int): Flow<TimetableSyncEntity?> =
         db.timetableSyncDao().observe(source, semesterId)
 
+    /** 与课表缓存同生命周期的学期标识；元数据不使用通用缓存的 TTL。 */
+    suspend fun timetableScope(source: String, semesterId: Int): String? =
+        db.kvCacheDao().get(timetableScopeKey(source, semesterId))?.payload
+
+    private fun timetableScopeKey(source: String, semesterId: Int) = "timetable-scope:$source:$semesterId"
+
     /**
      * 清掉某个来源的缓存（退出登录时用）。
      *
@@ -563,6 +577,7 @@ class ScheduleRepository(
             db.courseSessionDao().deleteBySemesterAndSource(semesterId, source)
             db.courseDao().deleteBySemester(semesterId)
             db.timetableSyncDao().clearBySource(source)
+            db.kvCacheDao().remove(timetableScopeKey(source, semesterId))
             // 显示覆盖跟课表同生命周期：按账号抓的数据退出后不该留在设备上
             if (source != SOURCE_CUSTOM) db.displayOverrideDao().deleteBySemester(semesterId)
         }
@@ -573,6 +588,34 @@ class ScheduleRepository(
     /** 某学期全部显示覆盖（详情页编辑用） */
     suspend fun displayOverrides(semesterId: Int): List<DisplayOverrideEntity> =
         db.displayOverrideDao().bySemester(semesterId)
+
+    suspend fun conflictDisplayChoices(semesterId: Int): List<ConflictDisplayChoice> =
+        readConflictDisplayChoices(displayOverrides(semesterId))
+
+    /**
+     * 冲突选择复用本地显示覆盖表；一周一条，改部分周不会清掉其他周的选择。
+     * null = 恢复冲突占位。课程同步只改课表表，不触碰这些记录。
+     */
+    suspend fun saveConflictDisplay(block: ScheduleBlock, weeks: Set<Int>, sessionKey: String?) {
+        require(block.isConflict && weeks.isNotEmpty() && weeks.all { it > 0 })
+        require(sessionKey == null || block.sessions.any { it.conflictDisplayKey() == sessionKey })
+        db.withTransaction {
+            weeks.forEach { week ->
+                val id = "${block.semesterId}|$KIND_CONFLICT|${block.conflictKey}|$week"
+                if (sessionKey == null) {
+                    db.displayOverrideDao().deleteById(id)
+                } else {
+                    db.displayOverrideDao().upsert(
+                        DisplayOverrideEntity(
+                            id = id, semesterId = block.semesterId, courseCode = block.conflictKey,
+                            kind = KIND_CONFLICT, weekday = block.weekday, startUnit = block.startUnit,
+                            weeks = week.toString(), value = sessionKey, updatedAt = System.currentTimeMillis(),
+                        ),
+                    )
+                }
+            }
+        }
+    }
 
     /**
      * 保存/清除课程名覆盖。[value] 空白 = 清除（恢复教务原名）。
@@ -763,6 +806,13 @@ class ScheduleRepository(
         /** 显示覆盖的类型：课程名（整门课）/ 教室（单时段） */
         const val KIND_NAME = "name"
         const val KIND_ROOM = "room"
+        const val KIND_CONFLICT = "conflict"
+
+        internal fun readConflictDisplayChoices(rows: List<DisplayOverrideEntity>): List<ConflictDisplayChoice> =
+            rows.filter { it.kind == KIND_CONFLICT }.mapNotNull { row ->
+                val week = row.weeks?.toIntOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+                ConflictDisplayChoice(row.semesterId, row.courseCode, week, row.value)
+            }
 
         /**
          * 把显示覆盖应用到 Session 列表（纯函数，单测见 DisplayOverrideTest）。
@@ -810,7 +860,8 @@ class ScheduleRepository(
          * 升版本的效果：`lastFetchedAt` 视为无缓存 → 立即触发一次后台刷新；
          * 旧缓存仍先显示（内容哈希没变的界面纹丝不动，变了才更新）。
          */
-        const val CACHE_VERSION = 3
+        // v4：同课程同时间的理论/实验使用不同主键，重拉一次恢复旧版本被覆盖的记录。
+        const val CACHE_VERSION = 4
 
         /** 空教室快照保留天数（今天 + 往后 6 天） */
         const val ROOM_KEEP_DAYS = 7
@@ -833,7 +884,9 @@ class ScheduleRepository(
             weekday: Int,
             startUnit: Int,
             date: String? = null,
-        ) = "$semesterId:$courseCode:$weekIndex:$weekday:$startUnit:${date.orEmpty()}"
+            experiment: Boolean = false,
+        ) = "$semesterId:$courseCode:$weekIndex:$weekday:$startUnit:${date.orEmpty()}" +
+            if (experiment) ":experiment" else ""
 
         /** code 前缀记类型：C = 手动补录的课程，P = 普通日程（老数据全是 P） */
         fun newPlanCode(kind: com.zzupocket.app.domain.PlanKind = com.zzupocket.app.domain.PlanKind.EVENT): String =
