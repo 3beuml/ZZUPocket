@@ -2,18 +2,14 @@
 
 郑州大学校园助手（Android）
 
-[![License](https://img.shields.io/github/license/Voya-rina/ZZUPocket.svg?style=flat)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/Voya-rina/ZZUPocket?style=flat&label=release)](../../releases)
+[![License](https://img.shields.io/github/license/3beuml/ZZUPocket.svg?style=flat)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/3beuml/ZZUPocket?style=flat&label=release)](../../releases)
 [![Android](https://img.shields.io/badge/Android-12%2B-3ddc84?style=flat&logo=android&logoColor=white)](#构建)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7f52ff?style=flat&logo=kotlin&logoColor=white)](#技术栈)
 [![Tests](https://img.shields.io/badge/unit%20tests-223-brightgreen?style=flat)](#参与贡献)
 
 > ⚠️ 本项目是非官方项目。
 > 接口来自公开网页的协议整理与社区项目经验，**随时可能失效或被学校调整**；
->
-> **本项目为基于 [3beuml/ZZUPocket](https://github.com/3beuml/ZZUPocket) 的开发版，原项目 Github 连接：https://github.com/3beuml/ZZUPocket**
-> 开发版仓库（dev 分支）：https://github.com/Voya-rina/ZZUPocket/tree/dev
-> 应用内「检测更新」连接的是这个开发版仓库的 Releases；本分支为**开发版**，功能与接口可能随时调整。
 
 
 
@@ -44,9 +40,8 @@
 
 ## 更新记录
 
-**0.35.50（2026-11-10，开发版）**
+**0.35.50（2026-11-10）**
 
-- **Fork 说明与更新源**：本仓库是基于 [3beuml/ZZUPocket](https://github.com/3beuml/ZZUPocket) 的开发版；「关于」页与检测更新改连 [Voya-rina/ZZUPocket](https://github.com/Voya-rina/ZZUPocket/tree/dev)（dev 分支），界面标注「开发版」
 - **深色可读性**：修好课表页课名、节次序号、周次文字在深色模式下仍是黑字的问题（外壳 `Scaffold` 的 `contentColor` 钉到 `onSurface`，关键文字补显式颜色）
 - **「显示描述」补齐**：首页快速入口副标题、课程表设置里的一整批提示、电费页说明都随开关收起；电费页说明集中到页底「说明」卡，顶部只留更新时间；电费卡里的宿舍名随开关隐藏，去掉所有 `≈` 号
 - **「更多」→「设置」**：新增「首页内容」页（图书馆 / 空教室查询 / 宿舍电量 / 校园卡 开关 + 长按拖动排序）与「底栏显示专注」开关；「今天」→「首页」
@@ -93,7 +88,7 @@
 
 ## 下载安装
 
-到 [Releases](../../releases) 下载最新的 `ZZUPocket-0.35.50.apk`（**开发版**），在手机上安装即可
+到 [Releases](../../releases) 下载最新的 `ZZUPocket-0.35.50.apk`，在手机上安装即可
 （Android 12 / API 31 及以上）。
 
 - 装在手机上会走系统的"未知来源应用"授权；Flyme / MIUI 这类系统还需要在

@@ -26,13 +26,10 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import com.zzupocket.app.BuildConfig
 
-/** 上游原项目 */
-private const val ORIGIN_REPO_URL = "https://github.com/3beuml/ZZUPocket"
+/** ⚠️ 发布前把这里改成你自己的仓库地址 */
+private const val REPO_URL = "https://github.com/3beuml/ZZUPocket"
 
-/** 本开发版（dev 分支） */
-private const val DEV_REPO_URL = "https://github.com/Voya-rina/ZZUPocket/tree/dev"
-
-/** 原作者主页 */
+/** 作者主页 */
 private const val AUTHOR_URL = "https://github.com/3beuml"
 
 /**
@@ -96,20 +93,6 @@ fun AboutScreen(onBack: () -> Unit) {
                 Bullet("图书馆座位：内嵌学校原版网页。")
             }
 
-            AboutCard("开发版说明") {
-                Text(
-                    text = "本项目为基于 3beuml/ZZUPocket 的开发版，原项目 Github 连接：$ORIGIN_REPO_URL",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text = "开发版仓库（dev 分支）：$DEV_REPO_URL",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                TextButton(onClick = { uriHandler.openUri(DEV_REPO_URL) }) {
-                    Text("开发版仓库（dev）")
-                }
-            }
-
             AboutCard("开源与致谢") {
                 Text(
                     text = "本项目以 MIT 许可证开源，接口协议参考/对齐了以下社区项目：",
@@ -126,12 +109,12 @@ fun AboutScreen(onBack: () -> Unit) {
                     "https://github.com/rimrose/ZZU-Dorm-Electricity-Balance-Base",
                     uriHandler,
                 )
-                TextButton(onClick = { uriHandler.openUri(AUTHOR_URL) }) { Text("原作者主页（GitHub）") }
-                TextButton(onClick = { uriHandler.openUri(ORIGIN_REPO_URL) }) { Text("原项目仓库") }
+                TextButton(onClick = { uriHandler.openUri(AUTHOR_URL) }) { Text("作者主页（GitHub）") }
+                TextButton(onClick = { uriHandler.openUri(REPO_URL) }) { Text("项目仓库") }
             }
 
             Text(
-                text = "版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）· 开发版",
+                text = "版本 ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 24.dp),
