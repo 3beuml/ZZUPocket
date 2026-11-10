@@ -109,7 +109,7 @@ data class WidgetTwoDayPlan(
  * 「2×2」组件的内容 —— 只回答一个问题：**我下一节是什么**。
  *
  * ```
- *   今天 · 第 4 周
+ *   今日   |   第 4 周   周二
  *  ▌大学物理                 ← 行样式（4×2 同款）：色条 + 课名 + 地点/时间段
  *    10:00 - 11:35
  *    南3 101
@@ -124,8 +124,10 @@ data class WidgetTwoDayPlan(
  * 就是现在的两行形态。⚠️ "别改成整周多行列表"仍成立：这里只排到下一节为止。
  */
 data class WidgetNextClassPlan(
-    /** 「今天 · 第 4 周」/「明日预告 · 第 4 周」；状态态下为空 */
+    /** 「今日   |   第 4 周」/「明日   |   第 4 周」；状态态下为空 */
     val header: String,
+    /** 表头最右边的周几（「周三」）；状态态下为空 */
+    val headerWeekday: String = "",
     /** 这节课以及之后还有几节（含本节），拾光口径；圆气泡已下线，字段留作数据 */
     val remaining: Int,
     /** 本节（或下一节），完整信息——渲染层用 [WidgetSchedule.toRow] 排成 4×2 同款行 */
@@ -151,7 +153,7 @@ data class WidgetNextClassPlan(
  *  3. 4×2 右列明天 = 明天**全部**（不看钟点）→ footer「共有 N 节」；
  *  4. 某列没有课 → 整列居中「无课程」；假期 / 还没同步 → 整块盖住（见 [twoDayPlan]）；
  *  5. 2×2 = **两行 4×2 同款行样式（本节 + 下一节）**（[nextClassPlan]）：今天还有课就用今天
- *     还没下课的头两节；今天没了但明天有 → 明天的头两节（表头「明日预告」）；今明都没有 → 「无课程」。
+ *     还没下课的头两节；今天没了但明天有 → 明天的头两节（表头「明日」）；今明都没有 → 「无课程」。
  *
  * 列头日期是「今天 9.29 周二」这种写法（拾光用 `M.dd`），只用在 4×2 的两列上。
  */
@@ -535,8 +537,8 @@ object WidgetSchedule {
      * 「2×2」的内容。
      *
      * 取数顺序：
-     *  1. 今天还有没下课的课 → 头两节排两行，表头「今天 · 第 N 周」；
-     *  2. 今天上完了 / 今天本来没课，但**明天有** → 明天的头两节，表头「明日预告 · 第 N 周」。
+     *  1. 今天还有没下课的课 → 头两节排两行，表头「今日   |   第 N 周」+ 右边周几；
+     *  2. 今天上完了 / 今天本来没课，但**明天有** → 明天的头两节，表头「明日   |   第 N 周」+ 右边周几。
      *     组件空着最没用，而且这正是用户这次报的场景（今晚课上完、明天国庆没课，
      *     旧版只剩一句状态，看着像坏了）；
      *  3. 今明都没有 → 一句「无课程」。
@@ -547,10 +549,16 @@ object WidgetSchedule {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse>,
         nowMin: Int,
+        todayDate: LocalDate = LocalDate.now(),
+        tomorrowDate: LocalDate = todayDate.plusDays(1),
     ): WidgetNextClassPlan {
         val courses = today.sortedBy { it.startMin }
         val st = state(hasSchedule, week, courses, nowMin)
-        val weekSuffix = weekLabel(week).let { if (it.isBlank()) "" else " · $it" }
+        val weekText = weekLabel(week)
+        fun headerFor(prefix: String, date: LocalDate): Pair<String, String> {
+            val left = if (weekText.isBlank()) prefix else "$prefix   |   $weekText"
+            return left to weekdayName(date.dayOfWeek.value)
+        }
 
         if (st == WidgetCourseState.NOT_SYNCED || st == WidgetCourseState.VACATION) {
             return WidgetNextClassPlan(
@@ -561,11 +569,15 @@ object WidgetSchedule {
         }
 
         val remain = remainingToday(courses, nowMin)
-        if (remain.isNotEmpty()) return nextClassOf(remain, "今天$weekSuffix")
+        if (remain.isNotEmpty()) {
+            val (header, weekday) = headerFor("今日", todayDate)
+            return nextClassOf(remain, header, weekday)
+        }
 
         val tomorrowCourses = tomorrow.sortedBy { it.startMin }
         if (tomorrowCourses.isNotEmpty()) {
-            return nextClassOf(tomorrowCourses, "明日预告$weekSuffix")
+            val (header, weekday) = headerFor("明日", tomorrowDate)
+            return nextClassOf(tomorrowCourses, header, weekday)
         }
 
         return WidgetNextClassPlan(
@@ -577,10 +589,12 @@ object WidgetSchedule {
     private fun nextClassOf(
         courses: List<WidgetCourse>,
         header: String,
+        weekday: String,
     ): WidgetNextClassPlan {
         val first = courses.first()
         return WidgetNextClassPlan(
             header = header,
+            headerWeekday = weekday,
             // 这节课以及之后还有几节（含本节）—— 拾光口径；气泡已下线，字段留作数据
             remaining = courses.size,
             firstCourse = first,

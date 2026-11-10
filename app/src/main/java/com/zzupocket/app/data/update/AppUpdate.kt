@@ -103,8 +103,10 @@ object AppUpdate {
 /** GitHub Releases 的只读拉取。公开仓不需要 token；访问 `api.github.com` 即可，`github.com` 被校园网拦也不影响检测。 */
 object AppReleaseClient {
 
+    // 本开发版的更新源是 fork 仓库；dev 分支页面在「关于」/README 里给出。
+    // GitHub 只有按仓库的 releases 接口能返回版本号，接口本身不区分分支。
     private const val RELEASES_URL =
-        "https://api.github.com/repos/3beuml/ZZUPocket/releases/latest"
+        "https://api.github.com/repos/Voya-rina/ZZUPocket/releases/latest"
 
     /** 检测只求「问一下」：起连/整次都用短超时，开屏静默场景与手动场景都不该卡很久 */
     private val http = OkHttpClient.Builder()
@@ -133,7 +135,7 @@ object AppReleaseClient {
                     version = version.removePrefix("v").removePrefix("V"),
                     notes = root["body"]?.jsonPrimitive?.content.orEmpty(),
                     pageUrl = root["html_url"]?.jsonPrimitive?.content
-                        ?: "https://github.com/3beuml/ZZUPocket/releases/latest",
+                        ?: "https://github.com/Voya-rina/ZZUPocket/releases/latest",
                     downloadUrl = apk?.get("browser_download_url")?.jsonPrimitive?.content,
                 )
             }

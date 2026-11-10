@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import com.zzupocket.app.ui.components.DescriptionText
 import com.zzupocket.app.ui.components.GlassCard
 import com.zzupocket.app.ui.components.HintText
+import com.zzupocket.app.ui.components.LocalShowDescriptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -152,41 +153,25 @@ fun ElectricityScreen(
                 )
             }
 
-            // 读取结果只留一句结论；失败原因 / 例外解释放 detail，由「显示描述」控制。
+            // 读取结果只留一句结论；失败原因 / 例外解释统一挪到页底「说明」卡。
             // 不做 toast：用户可能正看着这一页。
             state.roomRead?.let { read ->
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = read.text,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (read.ok) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.error
-                        },
-                        maxLines = 1,
-                    )
-                    DescriptionText(read.detail)
-                }
+                Text(
+                    text = read.text,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (read.ok) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    maxLines = 1,
+                )
             }
 
-            // 提示只留一行；原理、例外、补救入口压成一行放进「显示描述」
-            HintText(
-                if (state.singleMeter) "房间号：这栋楼只有一个电表" else "房间号：照明 / 空调各一套表"
-            )
-            DescriptionText(
-                if (state.singleMeter) {
-                    "房号可从学校电费页复制，或用齿轮里的「在线选房间」逐层选"
-                } else {
-                    "余额不能互抵；房号以学校电费页为准，表里没有的楼栋用「从学校账户读取」"
-                }
-            )
-
-            HintText("以下数据由本机采样推算")
-            DescriptionText("学校不提供历史用电量；开 App 时自动采一次，约每 4 小时再采一次")
+            // 更新时间留在最上面，其余说明全部收进页底
             state.lastSampleAt?.let {
                 Text(
-                    text = "最近一次采样：${RelativeTime.ago(it)}（共 ${state.sampleCount} 条读数）",
+                    text = "最近更新：${RelativeTime.ago(it)}（共 ${state.sampleCount} 条读数）",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -210,13 +195,12 @@ fun ElectricityScreen(
                 }
             }
 
-            // 两路指向不同楼栋时给一句警告；具体编号属于描述，放开关后面
-            differentBuildings(state.light?.roomId, state.ac?.roomId)?.let { (light, ac) ->
+            // 两路指向不同楼栋时给一句警告；具体编号属于描述，收进页底
+            if (differentBuildings(state.light?.roomId, state.ac?.roomId) != null) {
                 HintText(
                     "⚠️ 照明 / 空调不在同一栋楼，点齿轮可重选",
                     color = MaterialTheme.colorScheme.error,
                 )
-                DescriptionText("当前照明 $light、空调 $ac；只是查一下不影响")
             }
 
             GlassCard(Modifier.fillMaxWidth()) {
@@ -225,27 +209,26 @@ fun ElectricityScreen(
                         BigStat(
                             label = "昨日消耗",
                             value = "%.2f 度".format(state.yesterday.total),
-                            hint = "≈ %.2f 元".format(EnergyStats.cost(state.yesterday.total, state.price)),
+                            hint = "%.2f 元".format(EnergyStats.cost(state.yesterday.total, state.price)),
                             modifier = Modifier.weight(1f),
                         )
                         BigStat(
                             label = "今日（截至现在）",
                             value = "%.2f 度".format(state.today.total),
-                            hint = "≈ %.2f 元".format(state.todayCost),
+                            hint = "%.2f 元".format(state.todayCost),
                             modifier = Modifier.weight(1f),
                         )
                         BigStat(
                             label = "日均",
                             value = "%.2f 度".format(state.avgDaily),
                             hint = if (state.avgDaily > 0) {
-                                "≈ %.2f 元/天".format(EnergyStats.cost(state.avgDaily, state.price))
+                                "%.2f 元/天".format(EnergyStats.cost(state.avgDaily, state.price))
                             } else {
                                 "—"
                             },
                             modifier = Modifier.weight(1f),
                         )
                     }
-                    HintText("电价 %.3f 元/度 · 右上角可改".format(state.price))
                 }
             }
 
@@ -276,7 +259,6 @@ fun ElectricityScreen(
                             LegendItem("空调", MaterialTheme.colorScheme.tertiary)
                         }
                         Spacer(Modifier.weight(1f))
-                        HintText("柱顶 = 当天总量")
                     }
                     StackedUsageBarChart(
                         bars = state.bars,
@@ -317,8 +299,6 @@ fun ElectricityScreen(
                             )
                         }
                     }
-                    // 「点柱子看明细」是可自行发现的交互，不再写出来占一行
-                    HintText("虚线柱 = 估算值")
                 }
             }
 
@@ -335,7 +315,6 @@ fun ElectricityScreen(
                             label = "电量",
                             color = singleMeterColor(state),
                         )
-                        HintText("圆圈 = 充值")
                     } else {
                         MeterBalanceChart(
                             series = state.lightBalance,
@@ -347,8 +326,6 @@ fun ElectricityScreen(
                             label = "空调",
                             color = MaterialTheme.colorScheme.tertiary,
                         )
-                        // 「两张图各自量纲」是纯实现细节，用户不需要知道 —— 直接删掉
-                        HintText("圆圈 = 充值")
                     }
                 }
             }
@@ -400,7 +377,7 @@ fun ElectricityScreen(
                                     fontWeight = FontWeight.Medium,
                                 )
                                 Text(
-                                    text = "  ≈%.2f 元".format(row.cost),
+                                    text = "  %.2f 元".format(row.cost),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -408,6 +385,10 @@ fun ElectricityScreen(
                         }
                     }
                 }
+            }
+
+            if (LocalShowDescriptions.current) {
+                ElectricityNotesCard(state)
             }
 
             Spacer(Modifier.height(24.dp))
@@ -478,7 +459,7 @@ private fun MeterCard(
             )
             meter.kwh?.let {
                 Text(
-                    text = "≈ %.2f 元".format(EnergyStats.cost(it, price)),
+                    text = "%.2f 元".format(EnergyStats.cost(it, price)),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -490,16 +471,18 @@ private fun MeterCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Text(
-                text = when {
-                    // 用**这一路自己**的房间名，别拿两路共用的（见 MeterUi.roomLabel 的说明）
-                    meter.roomLabel.isNotBlank() -> meter.roomLabel
-                    meter.roomId.isBlank() -> "未设置房间"
-                    else -> "房间 ${meter.roomId}"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (LocalShowDescriptions.current) {
+                Text(
+                    text = when {
+                        // 用**这一路自己**的房间名，别拿两路共用的（见 MeterUi.roomLabel 的说明）
+                        meter.roomLabel.isNotBlank() -> meter.roomLabel
+                        meter.roomId.isBlank() -> "未设置房间"
+                        else -> "房间 ${meter.roomId}"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -519,12 +502,14 @@ private fun MeterRoomCard(meter: MeterUi?, modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text(
-                text = meter?.roomLabel?.takeIf { it.isNotBlank() }
-                    ?: meter?.roomId?.takeIf { it.isNotBlank() }
-                    ?: "未设置",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            if (LocalShowDescriptions.current) {
+                Text(
+                    text = meter?.roomLabel?.takeIf { it.isNotBlank() }
+                        ?: meter?.roomId?.takeIf { it.isNotBlank() }
+                        ?: "未设置",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             meter?.daysLeft?.let {
                 Text(
                     text = "还能用 %.1f 天".format(it),
@@ -539,6 +524,34 @@ private fun MeterRoomCard(meter: MeterUi?, modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/** 页底统一说明；「显示描述」关掉时整张卡不进组合树，顶部只留更新时间与数据 */
+@Composable
+private fun ElectricityNotesCard(state: ElectricityUiState) {
+    GlassCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("说明", style = MaterialTheme.typography.titleSmall)
+            state.roomRead?.detail?.takeIf { it.isNotBlank() }?.let { DescriptionText(it) }
+            DescriptionText(
+                if (state.singleMeter) "房间号：这栋楼只有一个电表" else "房间号：照明 / 空调各一套表"
+            )
+            DescriptionText(
+                if (state.singleMeter) {
+                    "房号可从学校电费页复制，或用齿轮里的「在线选房间」逐层选"
+                } else {
+                    "余额不能互抵；房号以学校电费页为准，表里没有的楼栋用「从学校账户读取」"
+                }
+            )
+            DescriptionText("以下数据由本机采样推算")
+            DescriptionText("学校不提供历史用电量；开 App 时自动采一次，约每 4 小时再采一次")
+            DescriptionText("电价 %.3f 元/度 · 右上角可改".format(state.price))
+            differentBuildings(state.light?.roomId, state.ac?.roomId)?.let { (light, ac) ->
+                DescriptionText("当前照明 $light、空调 $ac；只是查一下不影响")
+            }
+            DescriptionText("柱顶 = 当天总量 · 虚线柱 = 估算值 · 圆圈 = 充值")
         }
     }
 }

@@ -4,7 +4,7 @@
   它只回答一个问题：**我下一节是什么**。
 
   ┌──────────────────────────────┐
-  │ 今天 · 第 4 周               │ ← 表头
+  │ 今日   |   第 4 周        周三  │ ← 表头
   │ ▌大学物理                    │ ← 本节行 = 紧凑三行（课名 / 地点 /
   │   南3 101                    │    时间段各占一行，地点恒单行）
   │   10:00-11:35                │    13/11，字号大一号
@@ -16,8 +16,8 @@
   由 nextClassRowPair 决定，高度读不到默认画满。
 
   形态判定全在 `WidgetSchedule.nextClassPlan`（纯函数、有单测）：
-    1. 今天还有没下课的课 → 头两节排两行，表头「今天 · 第 N 周」；
-    2. 今天上完了 / 今天本来没课，但明天有 → 明天的头两节，表头「明日预告 · 第 N 周」；
+    1. 今天还有没下课的课 → 头两节排两行，表头「今日   |   第 N 周」+ 右侧周几；
+    2. 今天上完了 / 今天本来没课，但明天有 → 明天的头两节，表头「明日   |   第 N 周」+ 右侧周几；
     3. 今明都没有 → `@id/container_status` 居中一句「无课程」。
   假期 / 还没同步过课表 → 「假期中」「还没有课表数据」，同样走 container_status
   （另外 `@id/container_overlay` 只给假期用：整块盖住，连表头一起换掉）。
@@ -69,7 +69,7 @@
         android:orientation="vertical"
         android:padding="@dimen/widget_pad">
 
-        <!-- 表头行：左「今天 · 第 N 周」 -->
+        <!-- 表头行：左「今日   |   第 N 周」，右「周三」 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -86,6 +86,17 @@
                 android:includeFontPadding="false"
                 android:maxLines="1"
                 android:text="@string/widget_preview_next_header"
+                android:textColor="@color/widget_text"
+                android:textSize="@dimen/widget_col_header"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/header_weekday"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_weekday"
                 android:textColor="@color/widget_text"
                 android:textSize="@dimen/widget_col_header"
                 android:textStyle="bold" />

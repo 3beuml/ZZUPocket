@@ -33,7 +33,8 @@
     <string name="widget_preview_footer_today">剩余 2 节</string>
     <string name="widget_preview_footer_tomorrow">共有 3 节</string>
     <!-- 2×2「下一节课」的表头与预告（真实内容是运行期填的） -->
-    <string name="widget_preview_next_header">今天 · 第 5 周</string>
+    <!-- 引号包住整串，避免 aapt 把竖线两侧的三个空格压成一个 -->
+    <string name="widget_preview_next_header">"今日   |   第 5 周"</string>
     <string name="widget_preview_next_preview">→ 14:00 程序设计基础</string>
     <string name="widget_preview_no_course">无课程</string>
     <string name="widget_preview_vacation">假期中</string>

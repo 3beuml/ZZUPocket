@@ -34,15 +34,34 @@
     android:orientation="vertical"
     android:padding="10dp">
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:includeFontPadding="false"
-        android:maxLines="1"
-        android:text="@string/widget_preview_next_header"
-        android:textColor="@color/widget_text"
-        android:textSize="@dimen/widget_col_header"
-        android:textStyle="bold" />
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_next_header"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_col_header"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_weekday"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_col_header"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <!-- 本节行：紧凑三行式 = 色条 + 课名 / 地点 / 时间段各一行（14/13/11） -->
     <LinearLayout

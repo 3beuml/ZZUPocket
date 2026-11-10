@@ -55,6 +55,8 @@ data class WidgetScheduleBundle(
         today = today,
         tomorrow = tomorrow,
         nowMin = nowMin,
+        todayDate = todayDate,
+        tomorrowDate = tomorrowDate,
     )
 }
 

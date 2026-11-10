@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
  * 「下一节课」桌面组件（2×2）—— 只回答一个问题：**我下一节是什么**。
  *
  * ```
- *   今天 · 第 4 周
+ *   今日   |   第 4 周        周二
  *  ▌大学物理                    ← 本节行（课名 14 / 地点 13 / 时间 11）
  *    南3 101                     ← 地点独立成行、一眼可见，过长先缩到 11dp 再裁左
  *    10:00-11:35
@@ -29,8 +29,8 @@ import kotlinx.coroutines.launch
  * ```
  *
  * 三种形态（判断全在 [WidgetSchedule.nextClassPlan]，纯函数、有单测）：
- *  1. 今天还有没下课的课 → 头两节排两行 + 「今天 · 第 N 周」；
- *  2. 今天上完了 / 今天本来没课，但明天有 → 明天的头两节，表头「明日预告 · 第 N 周」；
+ *  1. 今天还有没下课的课 → 头两节排两行 + 「今日   |   第 N 周」+ 右侧周几；
+ *  2. 今天上完了 / 今天本来没课，但明天有 → 明天的头两节，表头「明日   |   第 N 周」+ 右侧周几；
  *  3. 今明都没有 → 居中一句「无课程」；假期 / 还没同步分别是「假期中」「还没有课表数据」。
  *
  * ⚠️ **别把它改成"整周多行列表"**：中间那版那么做过，真机上被否掉 ——
@@ -167,11 +167,17 @@ class NextClassWidget : AppWidgetProvider() {
             rv.setOnClickPendingIntent(R.id.widget_root, click)
 
             rv.setTextColor(R.id.header, colors.text)
+            rv.setTextColor(R.id.header_weekday, colors.text)
             rv.setTextColor(R.id.status_title, colors.text)
             rv.setTextColor(R.id.status_message, colors.dim)
 
             rv.setTextViewText(R.id.header, plan.header)
             rv.setViewVisibility(R.id.header, if (plan.header.isBlank()) View.GONE else View.VISIBLE)
+            rv.setTextViewText(R.id.header_weekday, plan.headerWeekday)
+            rv.setViewVisibility(
+                R.id.header_weekday,
+                if (plan.headerWeekday.isBlank()) View.GONE else View.VISIBLE,
+            )
 
             // 假期：整块盖住（连表头一起换掉）
             rv.setViewVisibility(R.id.card, if (plan.isVacation) View.GONE else View.VISIBLE)

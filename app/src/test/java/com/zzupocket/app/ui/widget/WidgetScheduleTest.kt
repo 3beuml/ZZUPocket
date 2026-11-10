@@ -22,7 +22,7 @@ import java.time.LocalDate
  *   · 「还没下课的课」= `end_time > now`（正在上的那节算在内，左闭右开）；
  *   · 4×2 左列今天只列还没下课的 → footer「剩余 N 节」；右列明天列全部 → footer「共有 N 节」；
  *   · 某列没课 → 整列「无课程」；假期 → 整块「假期中」；
- *   · 2×2：今天还有课就列今天的；今天没了但明天有 → 表头「明日预告」；
+ *   · 2×2：今天还有课就列今天的；今天没了但明天有 → 表头「明日」+ 右侧周几；
  *     今明都没课 → 「今天没有课程」/「今日课程已结束」；
  *   · 一块 = 课名 + （地点／时间段），**不带老师**。
  */
@@ -333,12 +333,16 @@ class WidgetScheduleTest {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse> = emptyList(),
         nowMin: Int,
+        todayDate: LocalDate = LocalDate.of(2026, 9, 29),
+        tomorrowDate: LocalDate = todayDate.plusDays(1),
     ) = WidgetSchedule.nextClassPlan(
         hasSchedule = hasSchedule,
         week = week,
         today = today,
         tomorrow = tomorrow,
         nowMin = nowMin,
+        todayDate = todayDate,
+        tomorrowDate = tomorrowDate,
     )
 
     @Test
@@ -348,7 +352,8 @@ class WidgetScheduleTest {
             tomorrow = listOf(course(480, 525, "编译原理实验")),
             nowMin = 500,
         )
-        assertEquals("今天 · 第 5 周", p.header)
+        assertEquals("今日   |   第 5 周", p.header)
+        assertEquals("周二", p.headerWeekday)
         assertEquals("大学物理", p.firstCourse?.name)
         assertEquals("南3 101", p.firstCourse?.place)
         // 第二行 = 下一节，完整课程对象（渲染层排成 4×2 同款行）
@@ -378,7 +383,8 @@ class WidgetScheduleTest {
             tomorrow = listOf(course(480, 525, "编译原理实验", "中2414"), course(610, 650, "编译原理", "北3 201")),
             nowMin = 700,
         )
-        assertEquals("明日预告 · 第 5 周", p.header)
+        assertEquals("明日   |   第 5 周", p.header)
+        assertEquals("周三", p.headerWeekday)
         assertEquals("编译原理实验", p.firstCourse?.name)
         assertEquals(2, p.remaining)
         assertEquals("编译原理", p.nextCourse?.name)
@@ -391,6 +397,8 @@ class WidgetScheduleTest {
         assertTrue(blank.isStatus)
         assertEquals("无课程", blank.statusTitle)
         assertEquals("", blank.statusMessage)
+        assertTrue(blank.header.isBlank())
+        assertTrue(blank.headerWeekday.isBlank())
         assertTrue(!blank.hasCourse)
 
         val finished = nextClass(today = listOf(course(480, 525)), tomorrow = emptyList(), nowMin = 700)

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.EventSeat
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MeetingRoom
@@ -85,6 +86,7 @@ fun CampusScreen(
     onOpenLibrary: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
+    onOpenHomeModules: () -> Unit = {},
 ) {
     var loggedIn by remember { mutableStateOf(AppGraph.authRepository.isLoggedIn()) }
     // 从登录页返回时重新读一次：这一页没有自己的 ViewModel，否则会一直显示"登录 / 切换账号"
@@ -104,7 +106,7 @@ fun CampusScreen(
     var showUpdateDialog by remember { mutableStateOf(false) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("更多") }) },
+        topBar = { TopAppBar(title = { Text("设置") }) },
     ) { padding ->
         Column(
             modifier = Modifier
@@ -166,6 +168,28 @@ fun CampusScreen(
                         )
                     },
                 )
+                ListItem(
+                    headlineContent = { Text("底栏显示「专注」") },
+                    supportingContent = if (prefs.showDescriptions) {
+                        { DescriptionText("关掉后 dock 只留首页、课表、设置") }
+                    } else {
+                        null
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = prefs.showFocusInDock,
+                            onCheckedChange = {
+                                scope.launch { AppGraph.uiPrefsStore.setShowFocusInDock(it) }
+                            },
+                        )
+                    },
+                )
+                Entry(
+                    Icons.Filled.Dashboard,
+                    "首页内容",
+                    "显示哪些卡片、按住拖动排序",
+                    onOpenHomeModules,
+                )
             }
 
             GroupTitle("系统")
@@ -177,7 +201,7 @@ fun CampusScreen(
                     if (showDot) {
                         "发现新版本 v${remoteRelease?.version} · 点击查看"
                     } else {
-                        "当前 v$currentVersion · 点这里手动检查"
+                        "当前 v$currentVersion（开发版）· 点这里手动检查"
                     },
                     { showUpdateDialog = true },
                     // 版本号 / 有无新版是状态，不是描述
@@ -324,11 +348,17 @@ private fun UpdateCheckDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
+                Text(
+                    "开发版 · 更新源 Voya-rina/ZZUPocket（dev 分支）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.height(8.dp))
                 when {
                     hasNew && release != null -> {
                         val r = release!!
                         Text(
-                            text = "当前 v$current → 最新 v${r.version}",
+                            text = "当前 v$current（开发版）→ 最新 v${r.version}",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.primary,
                         )
@@ -357,7 +387,7 @@ private fun UpdateCheckDialog(
                     release != null -> {
                         // 查到了但不是更新（比当前版本旧/等）
                         Text(
-                            "当前已是最新版本 v$current",
+                            "当前已是最新版本 v$current（开发版）",
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Spacer(Modifier.height(24.dp))

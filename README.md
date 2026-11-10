@@ -2,14 +2,18 @@
 
 郑州大学校园助手（Android）
 
-[![License](https://img.shields.io/github/license/3beuml/ZZUPocket.svg?style=flat)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/3beuml/ZZUPocket?style=flat&label=release)](../../releases)
+[![License](https://img.shields.io/github/license/Voya-rina/ZZUPocket.svg?style=flat)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Voya-rina/ZZUPocket?style=flat&label=release)](../../releases)
 [![Android](https://img.shields.io/badge/Android-12%2B-3ddc84?style=flat&logo=android&logoColor=white)](#构建)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7f52ff?style=flat&logo=kotlin&logoColor=white)](#技术栈)
 [![Tests](https://img.shields.io/badge/unit%20tests-223-brightgreen?style=flat)](#参与贡献)
 
 > ⚠️ 本项目是非官方项目。
 > 接口来自公开网页的协议整理与社区项目经验，**随时可能失效或被学校调整**；
+>
+> **本项目为基于 [3beuml/ZZUPocket](https://github.com/3beuml/ZZUPocket) 的开发版，原项目 Github 连接：https://github.com/3beuml/ZZUPocket**
+> 开发版仓库（dev 分支）：https://github.com/Voya-rina/ZZUPocket/tree/dev
+> 应用内「检测更新」连接的是这个开发版仓库的 Releases；本分支为**开发版**，功能与接口可能随时调整。
 
 
 
@@ -19,7 +23,7 @@
 
 - **课表**：学期 / 教学周切换，周次表头带日期（`09-30`，今天高亮）、自定义日程（可与教务课混排、撞课提醒）、
   课程总览、自定义课表背景图（含模糊与浓淡调节）、格子内容与密度可调
-- **今天**：一条时间轴看"我这一天长什么样"——上课、已完成的专注；外加宿舍电量、校园卡余额与今日消费
+- **首页**：一条时间轴看"我这一天长什么样"——上课、已完成的专注（今天的课上完后会补一条横线展示明天第一节课）；下方可在「设置 → 界面 → 首页内容」里开关并拖动排序：图书馆、空教室查询、宿舍电量、校园卡
 - **专注（番茄钟）**：计时引擎 + 前台服务 + 常驻通知，标签管理，周 / 月 / 年统计与热力图
 - **教室占用**：按楼筛选，每间教室哪几节有课（数据来自教务系统）
 
@@ -39,6 +43,17 @@
 
 
 ## 更新记录
+
+**0.35.50（2026-11-10，开发版）**
+
+- **Fork 说明与更新源**：本仓库是基于 [3beuml/ZZUPocket](https://github.com/3beuml/ZZUPocket) 的开发版；「关于」页与检测更新改连 [Voya-rina/ZZUPocket](https://github.com/Voya-rina/ZZUPocket/tree/dev)（dev 分支），界面标注「开发版」
+- **深色可读性**：修好课表页课名、节次序号、周次文字在深色模式下仍是黑字的问题（外壳 `Scaffold` 的 `contentColor` 钉到 `onSurface`，关键文字补显式颜色）
+- **「显示描述」补齐**：首页快速入口副标题、课程表设置里的一整批提示、电费页说明都随开关收起；电费页说明集中到页底「说明」卡，顶部只留更新时间；电费卡里的宿舍名随开关隐藏，去掉所有 `≈` 号
+- **「更多」→「设置」**：新增「首页内容」页（图书馆 / 空教室查询 / 宿舍电量 / 校园卡 开关 + 长按拖动排序）与「底栏显示专注」开关；「今天」→「首页」
+- **首页课程**：今天的课全上完后，横线下方用同一套时间轴行样式展示明天第一节课
+- **首页电量卡片**：只留照明 / 空调余量与「最近平均每天」，删掉迷你趋势图与 7 天摘要
+- **2×2 小组件**：表头改为「今日   |   第 N 周」「明日   |   第 N 周」（竖线两侧各 3 个空格），最右侧加周几
+- **调试选项**：「小组件几何」移入折叠区，区名由「自检工具」改为「调试选项」
 
 **0.35.2（2026-11-06）**
 
@@ -78,7 +93,7 @@
 
 ## 下载安装
 
-到 [Releases](../../releases) 下载最新的 `ZZUPocket-0.35.2.apk`，在手机上安装即可
+到 [Releases](../../releases) 下载最新的 `ZZUPocket-0.35.50.apk`（**开发版**），在手机上安装即可
 （Android 12 / API 31 及以上）。
 
 - 装在手机上会走系统的"未知来源应用"授权；Flyme / MIUI 这类系统还需要在
@@ -88,10 +103,10 @@
 
 ## 首次使用
 
-1. **登录**：更多 → 登录 / 切换账号，走学校统一身份认证（CAS）。**App 不保存密码**，只保存加密后的登录令牌。
+1. **登录**：设置 → 登录 / 切换账号，走学校统一身份认证（CAS）。**App 不保存密码**，只保存加密后的登录令牌。
    首次登录会让手机上的「豫见郑大」下线一次（学校统一认证机制导致），之后不会；
    建议登录后到统一认证的「安全中心」把本设备设为可信设备，以后就不需要短信验证码了。
-2. **设置宿舍房间号**：电费按房间号查，每个人不一样，所以没有默认值。进「更多 → 电费」，两条路：
+2. **设置宿舍房间号**：电费按房间号查，每个人不一样，所以没有默认值。进「设置 → 电费」，两条路：
    - **从学校账户读取**（省事）：读一次你账号当前绑定的房间，直接填进来（只填对应那一路，
      另一路不动）。**内置房间表里没有的楼栋（例如亿达学生公寓）只能这样设**，或者手动填房间号。
    - **选校区 → 选楼栋 → 选房号**：内置房间表覆盖主校区、北校区、东校区、南校区、护理学院、

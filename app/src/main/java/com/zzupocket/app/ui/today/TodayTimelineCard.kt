@@ -72,8 +72,8 @@ data class TodayTimelineUi(
     val nextHint: String? = null,
     /** 今天一节课也没有时："明天 08:00《…》" —— 空态也能回答"那我下节课是啥" */
     val tomorrowHint: String? = null,
-    /** 有课日子的脚注："明天 3 节 · 第一节 08:00《…》" */
-    val tomorrowSummary: String? = null,
+    /** 今天的课全上完后，横线下面用同一套行样式展示的明天第一节课 */
+    val tomorrowFirst: TimelineEntry? = null,
     /** 今天**自己加的**日程（课表里的自定义日程），单独列一张卡，不和教务课程混在一起 */
     val customEntries: List<TimelineEntry> = emptyList(),
 )
@@ -129,7 +129,7 @@ class TodayTimelineViewModel : ViewModel() {
             .filter { it.endMin > it.startMin }
             .sortedBy { it.startMin }
 
-        // 明天的课概览：没课的空态给"明天第一节"，有课的日子给"明天 N 节"脚注
+        // 明天的课：没课的空态给一句提示；今天的课全上完了，给第一节课走时间轴同款行样式
         val tomorrowEntries = runCatching {
             com.zzupocket.app.data.repo.TodayTimetable
                 .sessionsOn(scheduleRepo, AppGraph.uiPrefsStore, today.plusDays(1))
@@ -142,13 +142,8 @@ class TodayTimelineViewModel : ViewModel() {
         } else {
             null
         }
-        val tomorrowSummary = if (courseEntries.isNotEmpty()) {
-            tomorrowEntries.takeIf { it.isNotEmpty() }?.let { list ->
-                "明天 ${list.size} 节 · 第一节 ${TodayTimeline.clock(list.first().startMin)}《${list.first().title}》"
-            }
-        } else {
-            null
-        }
+        val allFinished = courseEntries.isNotEmpty() && nowMin >= courseEntries.maxOf { it.endMin }
+        val tomorrowFirst = if (allFinished) tomorrowEntries.firstOrNull() else null
 
         _state.value = TodayTimelineUi(
             loaded = true,
@@ -167,7 +162,7 @@ class TodayTimelineViewModel : ViewModel() {
             focusCount = records.count { it.completed },
             nextHint = nextHint(courseEntries, nowMin),
             tomorrowHint = tomorrowHint,
-            tomorrowSummary = tomorrowSummary,
+            tomorrowFirst = tomorrowFirst,
             customEntries = customEntries,
         )
     }
@@ -322,13 +317,16 @@ fun TodayTimelineCard(
             } else {
                 HorizontalDivider(Modifier.padding(top = 2.dp))
                 TimelineList(state)
-                // 脚注：明天概览（空态的"明天第一节"已经给过了，这里只给有课的日子）
-                state.tomorrowSummary?.let {
+                state.tomorrowFirst?.let { first ->
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     Text(
-                        text = it,
+                        "明天第一节",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(6.dp))
+                    // 传一个当天不可能命中的分钟数，明天的课不会被标成「进行中」
+                    TimelineRow(entry = first, nowMin = 1441)
                 }
             }
         }
