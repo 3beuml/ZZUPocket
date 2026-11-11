@@ -474,30 +474,6 @@ fun DiagnosticsScreen(
                 }
             }
 
-            // ── 小组件几何（所有人可见的自适配排障数据）────────────────────
-            // 桌面组件显示不对时的反馈凭据：报数偏差/字体度量/尺寸通道三类问题，
-            // 这张卡片的截图基本都能定位。ycli：只读几何，无个人信息。
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("小组件几何", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = { vm.refreshWidgets() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                            Text("重新采集", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                    Text(
-                        "桌面小组件显示不正常时，把这整张卡片截图发到反馈里即可（只含尺寸数据，无个人信息）。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        state.widgetReport.ifBlank { "正在采集…" },
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    )
-                }
-            }
-
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -590,20 +566,48 @@ fun DiagnosticsScreen(
                 }
             }
 
-            // ── 自检工具：默认收起，别挡住日常信息（用户反馈：不要太影响使用）──
-            // 只有 debug 包（或显式打开开关）才出现整个入口，正式包里连这行都不显示
-            if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
+            // ── 调试选项：默认收起，别挡住日常信息 ────────────────────────
+            // 小组件几何对所有人可见；下面那批接口自检仍只在 debug 包出现
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { vm.toggleProbes() }.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (state.probesOpen) "收起调试选项" else "调试选项（排障用，点开）",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(if (state.probesOpen) "▲" else "▼", style = MaterialTheme.typography.titleSmall)
+                }
+            }
+
+            if (state.probesOpen) {
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { vm.toggleProbes() }.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "小组件几何",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                            OutlinedButton(
+                                onClick = { vm.refreshWidgets() },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Text("重新采集", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                         Text(
-                            if (state.probesOpen) "收起自检工具" else "自检工具（排障用，点开）",
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.weight(1f),
+                            "桌面小组件显示不正常时，把这整张卡片截图发到反馈里即可（只含尺寸数据，无个人信息）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(if (state.probesOpen) "▲" else "▼", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            state.widgetReport.ifBlank { "正在采集…" },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
                     }
                 }
             }

@@ -561,7 +561,7 @@ class EasClient(
         internal fun authRejectOf(code: Int, what: String): AppError? = when (code) {
             401 -> AppError.ReLoginRequired(
                 "教务未通过鉴权（HTTP 401 · $what）：登录态可能已被服务端吊销，请重新登录；" +
-                    "重登后若依旧，请到「更多 → 登录状态 → 教务鉴权自检」跑一次并把结果发给开发者。",
+                    "重登后若依旧，请到「设置 → 登录状态 → 教务鉴权自检」跑一次并把结果发给开发者。",
             )
             403 -> AppError.Server(
                 403,

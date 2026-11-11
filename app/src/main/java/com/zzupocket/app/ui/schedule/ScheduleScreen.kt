@@ -425,6 +425,7 @@ private fun WeekHeader(
                 Text(
                     text = "第 $week 周 / 共 $total 周",
                     style = MaterialTheme.typography.titleMedium.copy(shadow = shadow),
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -615,6 +616,7 @@ private fun ScheduleGrid(
                             Text(
                                 text = "$unit",
                                 style = MaterialTheme.typography.labelMedium.copy(shadow = labelShadow),
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                             periods.firstOrNull { it.indexNo == unit }?.let {
                                 // 起止放在同一行，避免行高不够时和时间数字叠在一起
@@ -766,6 +768,7 @@ private fun CourseBlock(
                 text = session.courseName,
                 fontSize = nameFont.sp,
                 lineHeight = (nameFont + 2).sp,
+                color = MaterialTheme.colorScheme.onSurface,
                 // 合并后的块更高可以多放几行；单节块 3 行也放得下
                 // （紧凑 34.5dp + 副行 ≈ 44dp < 48dp；标准 39 + 10.5 < 54）
                 maxLines = if (span >= 2) 4 else 3,
@@ -1390,7 +1393,11 @@ private fun WeekPickerDialog(
                                     .clickable { onPick(w) },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text("$w", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "$w",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
                             }
                         }
                     }

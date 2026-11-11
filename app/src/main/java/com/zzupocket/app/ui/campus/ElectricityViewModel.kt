@@ -44,7 +44,13 @@ data class MeterUi(
 )
 
 /** 「从学校账户读取房间」的结果，给界面显示一行反馈 */
-data class RoomReadUi(val ok: Boolean, val text: String)
+/**
+ * 「从学校账户读取房间」等操作的一句话反馈。
+ *
+ * [text] 是结论，永远显示；[detail] 是错误原因 / 例外解释这类补充信息，
+ * 由「更多 → 界面 → 显示描述」控制（UI 层用 DescriptionText 画）。
+ */
+data class RoomReadUi(val ok: Boolean, val text: String, val detail: String = "")
 
 /** 在线房间树里已经走过的一层（面包屑） */
 data class LocationStep(val type: String, val id: String, val name: String)
@@ -239,7 +245,9 @@ class ElectricityViewModel : ViewModel() {
                         roomReading = false,
                         roomRead = RoomReadUi(
                             ok = false,
-                            text = "读取失败：${result.exceptionOrNull()?.toUserMessage() ?: "未知错误"}",
+                            text = "读取失败",
+                            // 错误原因不写进常显文案，放 detail 由「显示描述」控制
+                            detail = result.exceptionOrNull()?.toUserMessage() ?: "未知错误",
                         ),
                     )
                 }
@@ -261,14 +269,12 @@ class ElectricityViewModel : ViewModel() {
                     roomReading = false,
                     roomRead = RoomReadUi(
                         ok = true,
-                        text = "已读取到你的房间：${location.shortName}（${location.levelName}），" +
-                            "已填入「$target」。" +
-                            if (otherBlank) {
-                                "学校只返回这一个绑定房间，另一路要你自己设 —— " +
-                                    "只填这一路也能查（有些楼栋本来就只有一套表）。"
-                            } else {
-                                ""
-                            },
+                        text = "已读取 ${location.shortName}，填入「$target」",
+                        detail = if (otherBlank) {
+                            "学校只返回一个绑定房间，另一路可自己设；只填一路也能查（${location.levelName}）"
+                        } else {
+                            location.levelName
+                        },
                     ),
                 )
             }
@@ -381,13 +387,12 @@ class ElectricityViewModel : ViewModel() {
                 online = null,
                 roomRead = RoomReadUi(
                     ok = true,
-                    text = "已选中：$label，已填入「$target」（$roomId）。" +
-                        if (!namedMeter) {
-                            "这一层不是照明/空调分类（这类楼多半整间一个表），所以填在主表计那一行。"
-                        } else {
-                            ""
-                        } +
-                        if (otherBlank) "另一路还没设，需要的话再选一次那个层级（如「空调房间」）。" else "",
+                    text = "已选中 $label，填入「$target」",
+                    detail = listOfNotNull(
+                        if (!namedMeter) "这一层整间一个表，填在主表计" else null,
+                        if (otherBlank) "另一路还没设，可再选一次" else null,
+                        roomId,
+                    ).joinToString(" · "),
                 ),
             )
         }

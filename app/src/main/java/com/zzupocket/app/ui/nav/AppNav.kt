@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -61,6 +62,7 @@ import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
 import com.zzupocket.app.ui.about.AboutScreen
 import com.zzupocket.app.ui.theme.rememberEffectiveDark
+import com.zzupocket.app.ui.components.LocalShowDescriptions
 import com.zzupocket.app.ui.campus.CampusScreen
 import com.zzupocket.app.ui.campus.CardScreen
 import com.zzupocket.app.ui.campus.ElectricityScreen
@@ -76,6 +78,7 @@ import com.zzupocket.app.ui.schedule.CourseOverviewScreen
 import com.zzupocket.app.ui.schedule.DisplaySettingsScreen
 import com.zzupocket.app.ui.schedule.ScheduleScreen
 import com.zzupocket.app.ui.settings.AppearanceScreen
+import com.zzupocket.app.ui.settings.HomeModulesScreen
 import com.zzupocket.app.ui.schedule.WallpaperLayers
 import com.zzupocket.app.ui.schedule.rememberScheduleBackground
 import com.zzupocket.app.ui.today.TodayScreen
@@ -87,10 +90,10 @@ enum class Destination(
     /** 未选中态用线性版本（M3 惯例：outlined ↔ filled 区分选中），悬浮胶囊 dock 用 */
     val outlinedIcon: ImageVector,
 ) {
-    TODAY(AppRoutes.TODAY, "今天", Icons.Filled.Today, Icons.Outlined.Today),
+    TODAY(AppRoutes.TODAY, "首页", Icons.Filled.Today, Icons.Outlined.Today),
     SCHEDULE(AppRoutes.SCHEDULE, "课表", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     FOCUS(AppRoutes.FOCUS, "专注", Icons.Filled.Timer, Icons.Outlined.Timer),
-    CAMPUS(AppRoutes.CAMPUS, "更多", Icons.Filled.Apps, Icons.Outlined.Apps),
+    CAMPUS(AppRoutes.CAMPUS, "设置", Icons.Filled.Apps, Icons.Outlined.Apps),
 }
 
 /** 非 tab 的全屏页面：这些路由下不显示底部导航栏 */
@@ -110,6 +113,7 @@ private const val ROUTE_LIBRARY = "library_web"
 private const val ROUTE_LIB_RECORDS = "library_records"
 private const val ROUTE_ABOUT = "about"
 private const val ROUTE_APPEARANCE = "appearance"
+private const val ROUTE_HOME_MODULES = "home_modules"
 
 /** "重新裁剪"时用这个占位值代替相册 URI */
 private const val CROP_SOURCE_SAVED = "saved"
@@ -119,7 +123,13 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = Destination.entries.any { it.route == currentRoute }
+    val context = LocalContext.current
+    val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
+    // 「专注」可以从 dock 里摘掉；隐藏后当前页若正是专注，底栏也随之收起
+    val dockDestinations = Destination.entries.filter {
+        it != Destination.FOCUS || prefs.showFocusInDock
+    }
+    val showBottomBar = dockDestinations.any { it.route == currentRoute }
 
     /**
      * 切到某个 tab。
@@ -159,9 +169,6 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
         }
     }
 
-    val context = LocalContext.current
-    val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
-
     // 壁纸只认「课表」这一页；切到别的 tab 就不画
     val wallpaperActive = currentRoute == Destination.SCHEDULE.route &&
         prefs.backgroundPath != null
@@ -198,6 +205,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val mutedVersion by UpdateCenter.mutedVersion.collectAsState(initial = null)
     val hasUpdate = AppUpdate.shouldShowDot(currentVersion, remoteRelease?.version, mutedVersion)
 
+    // 「显示描述」下发到整棵 Compose 树（含各页面自己的 AlertDialog）：
+    // 开关一拨 → prefs 发新值 → 这里重组 → 所有 DescriptionText 立刻随之出现/消失。
+    CompositionLocalProvider(LocalShowDescriptions provides prefs.showDescriptions) {
     Box(
         Modifier
             .fillMaxSize()
@@ -219,6 +229,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
             // 底部由覆盖层自己的 navigationBarsPadding 处理。
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             containerColor = Color.Transparent,
+            // 透明底的 contentColorFor 会回落到 LocalContentColor 的默认值黑色；
+            // 不钉成 onSurface，深色下裸 Text（课表课名/节次序号等）全是黑字
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ) { innerPadding ->
             Box(Modifier.fillMaxSize().padding(innerPadding)) {
                 NavHost(
@@ -258,10 +271,14 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
                         onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                         onOpenAppearance = { navController.navigate(ROUTE_APPEARANCE) },
+                        onOpenHomeModules = { navController.navigate(ROUTE_HOME_MODULES) },
                     )
                 }
                 composable(ROUTE_APPEARANCE) {
                     AppearanceScreen(onBack = { navController.popBackStack() })
+                }
+                composable(ROUTE_HOME_MODULES) {
+                    HomeModulesScreen(onBack = { navController.popBackStack() })
                 }
                 composable(ROUTE_ABOUT) {
                     AboutScreen(onBack = { navController.popBackStack() })
@@ -400,7 +417,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                 Modifier.fillMaxSize(),
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                             ) {
-                                Destination.entries.forEach { destination ->
+                                dockDestinations.forEach { destination ->
                                     val selected = currentRoute == destination.route
                                     Box(
                                         modifier = Modifier
@@ -459,6 +476,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
             }
         }
     }
+    } // CompositionLocalProvider
 }
 
 /**

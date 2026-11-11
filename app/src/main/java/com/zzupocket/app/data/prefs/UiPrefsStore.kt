@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.zzupocket.app.core.WeekSettings
 import com.zzupocket.app.core.WeekSource
@@ -43,6 +44,14 @@ enum class BlockBorder { NONE, SOLID, DASHED }
 
 /** 深浅色：跟随系统 / 始终浅色 / 始终深色 */
 enum class DarkMode { SYSTEM, LIGHT, DARK }
+
+/** 首页里可以由用户开关、拖动的四张卡片 */
+enum class HomeModule(val label: String) {
+    LIBRARY("图书馆 · 座位预约"),
+    ROOMS("空教室查询"),
+    ELECTRICITY("宿舍电量"),
+    CARD("校园卡"),
+}
 
 /**
  * 深色对比度：标准 / 中 / 高。
@@ -117,6 +126,11 @@ data class UiPrefs(
      */
     val darkTinted: Boolean = false,
     /**
+     * 「显示描述」（默认开）。关掉后界面只留一行短提示，隐藏原理、例外、错误原因
+     * 这类补充信息。空态、错误、数值、状态不属于描述，任何情况下都不受它影响。
+     */
+    val showDescriptions: Boolean = true,
+    /**
      * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
      *
      * ⚠️ 为什么要分开存：照明与空调是两套独立表计，**可以是两个不同的房间** ——
@@ -131,6 +145,12 @@ data class UiPrefs(
     val acRoomLabel: String? = null,
     /** 检测更新里被用户「不再提醒」的版本号（如 "0.33.0"）；null = 没屏蔽过任何版本 */
     val updateMutedVersion: String? = null,
+    /** dock 上是否保留「专注」这一格 */
+    val showFocusInDock: Boolean = true,
+    /** 首页卡片的显示顺序，永远包含全部模块 */
+    val homeModuleOrder: List<HomeModule> = HomeModule.entries.toList(),
+    /** 被用户关掉的首页卡片 */
+    val homeModulesHidden: Set<HomeModule> = emptySet(),
 ) {
     val dayCount: Int get() = if (showWeekend) 7 else 5
 
@@ -192,10 +212,36 @@ class UiPrefsStore(context: Context) {
             darkContrast = p[KEY_DARK_CONTRAST]?.let { runCatching { DarkContrast.valueOf(it) }.getOrNull() }
                 ?: DarkContrast.STANDARD,
             darkTinted = p[KEY_DARK_TINTED] ?: false,
+            // 老用户的 DataStore 里没有这个键 → 默认 true，不需要迁移
+            showDescriptions = p[KEY_SHOW_DESCRIPTIONS] ?: true,
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
+            showFocusInDock = p[KEY_SHOW_FOCUS_IN_DOCK] ?: true,
+            homeModuleOrder = parseHomeModuleOrder(p[KEY_HOME_MODULE_ORDER]),
+            homeModulesHidden = parseHomeModulesHidden(p[KEY_HOME_MODULES_HIDDEN]),
         )
+    }
+
+    suspend fun setShowFocusInDock(v: Boolean) = store.edit { p ->
+        p[KEY_SHOW_FOCUS_IN_DOCK] = v
+    }
+
+    /** 存拖动后的顺序；缺的模块自动补在末尾，保证以后新增卡片时老用户也能看到 */
+    suspend fun setHomeModuleOrder(order: List<HomeModule>) = store.edit { p ->
+        p[KEY_HOME_MODULE_ORDER] = (order.distinct() + HomeModule.entries.filter { it !in order })
+            .joinToString(",") { it.name }
+    }
+
+    suspend fun setHomeModuleVisible(module: HomeModule, visible: Boolean) = store.edit { p ->
+        val hidden = p[KEY_HOME_MODULES_HIDDEN].orEmpty().toMutableSet()
+        if (visible) hidden.remove(module.name) else hidden.add(module.name)
+        p[KEY_HOME_MODULES_HIDDEN] = hidden
+    }
+
+    suspend fun resetHomeModules() = store.edit { p ->
+        p.remove(KEY_HOME_MODULE_ORDER)
+        p.remove(KEY_HOME_MODULES_HIDDEN)
     }
 
     /** 「不再提醒」该版本的红点；传 null 清掉全部屏蔽（给设置里未来可能的"重新开启提醒"用） */
@@ -240,6 +286,9 @@ class UiPrefsStore(context: Context) {
     suspend fun setDarkContrast(v: DarkContrast) = store.edit { p -> p[KEY_DARK_CONTRAST] = v.name }
 
     suspend fun setDarkTinted(v: Boolean) = store.edit { p -> p[KEY_DARK_TINTED] = v }
+
+    /** 「设置 → 界面 → 显示描述」；写入后 AppNav 根部的 CompositionLocal 立刻全树重组 */
+    suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
 
     /**
      * 写**其中一路**的房间可读名。
@@ -355,11 +404,27 @@ class UiPrefsStore(context: Context) {
         val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
         val KEY_DARK_CONTRAST = stringPreferencesKey("dark_contrast")
         val KEY_DARK_TINTED = booleanPreferencesKey("dark_tinted")
+        val KEY_SHOW_DESCRIPTIONS = booleanPreferencesKey("show_descriptions")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
         val KEY_AC_ROOM_LABEL = stringPreferencesKey("ac_room_label")
         val KEY_UPDATE_MUTED = stringPreferencesKey("update_muted_version")
+        val KEY_SHOW_FOCUS_IN_DOCK = booleanPreferencesKey("show_focus_in_dock")
+        val KEY_HOME_MODULE_ORDER = stringPreferencesKey("home_module_order")
+        val KEY_HOME_MODULES_HIDDEN = stringSetPreferencesKey("home_modules_hidden")
+
+        fun parseHomeModuleOrder(raw: String?): List<HomeModule> {
+            val parsed = raw.orEmpty().split(',')
+                .mapNotNull { name -> runCatching { HomeModule.valueOf(name.trim()) }.getOrNull() }
+                .distinct()
+            return parsed + HomeModule.entries.filter { it !in parsed }
+        }
+
+        fun parseHomeModulesHidden(raw: Set<String>?): Set<HomeModule> =
+            raw.orEmpty()
+                .mapNotNull { name -> runCatching { HomeModule.valueOf(name) }.getOrNull() }
+                .toSet()
 
         /** 旧版（0.31.6 及以前）研究生周次锚点：只保留键名用于一次性清理 */
         val KEY_GMS_WEEK_ONE = androidx.datastore.preferences.core.longPreferencesKey("gms_week_one_epoch_day")

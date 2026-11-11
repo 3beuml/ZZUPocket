@@ -15,7 +15,7 @@ object AppRoutes {
     const val FOCUS = "focus"
     const val CAMPUS = "campus"
 
-    /** 「更多」里的子页（不是 tab，进去之后底部导航栏会隐藏） */
+    /** 「设置」里的子页（不是 tab，进去之后底部导航栏会隐藏） */
     const val ELECTRICITY = "electricity"
     const val CARD = "campus_card"
 

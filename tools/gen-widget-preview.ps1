@@ -200,11 +200,14 @@ Write-Host "写入 $out1"
 
 # ════════════════════════════════════════════════════════════════════════════
 # 2) 「下一节课」2×2 = 163×195dp
-#    形态（#13 六轮，2026-11-06 用户拍板）：表头 + 两行**统一紧凑两行式**
-#    （色条 + 课名（可两行）+ 「地点(左，省略)｜时间段(右)」同行；本节 15/13、
-#    下一节 13/12）。满档竖排只给拉高的 2×3；更矮的盒子落单行一行式
-#    （widget_course_row_mini.xml）。行高按系统字体实测（不写死）；
-#    卡片内边距渲染层 14→10，这里按 10 同步。
+#    形态（#13 七轮，2026-11-06 用户拍板）：表头 + 两行**统一紧凑三行式**
+#    （色条 42dp + 课名 / 地点 / 时间段各占一行，均单行；字号层级
+#     本节 14/13/11、下一节 13/12/10，课名 > 地点 > 时间）。
+#    地点恒一行，过长由渲染层先缩字号（下限 11dp）再裁左边保留尾部教室号；
+#    三行之间行距 2dp（$lineGap，与 WidgetSchedule.NEXT_CLASS_TRIPLE_LINE_GAP_DP
+#    及 @dimen/widget_triple_line_gap 同一个数）；两行均分剩余高度、文字垂直居中，
+#    对应真机上由 padding 摊出来的课间隔。满档竖排只给拉高的 2×3，
+#    更矮的盒子落单行一行式（widget_course_row_mini.xml）。卡片内边距渲染层 14→10，这里按 10 同步。
 #    与 res/layout/widget_next_class_preview.xml 一一对应；改 res 布局时同步改这里再重跑本脚本。
 # ════════════════════════════════════════════════════════════════════════════
 $w = 163; $h = 195
@@ -213,12 +216,14 @@ $g = $c.Graphics
 
 $pad2 = 10
 $fColHead = New-Font 12 $true
-$fRowName = New-Font 15 $true
-$fRowSub = New-Font 13 $false
+$fRowName = New-Font 14 $true
+$fRowPlace = New-Font 13 $false
+$fRowTime = New-Font 11 $false
 $fName2 = New-Font 13 $true
-$fSub2 = New-Font 12 $false
+$fPlace2 = New-Font 12 $false
+$fTime2 = New-Font 10 $false
 
-# 表头行：今天 · 第 5 周（气泡已删，整行给表头）
+# 表头行：今天 · 第 5 周
 $top = $pad2
 Draw-Text $g '今天 · 第 5 周' $fColHead $bText $pad2 $top 22 | Out-Null
 
@@ -227,28 +232,28 @@ $rowsTop = $top + 22 + 2
 $rowsH = $h - $pad2 - $rowsTop
 $row1H = [int]($rowsH / 2) + ($rowsH % 2)
 $row2H = $rowsH - $row1H
-# 行1（本节，大一号）：紧凑两行式 = 色条 + 课名（可两行）+ 「地点/时间段」同行
-# （#13 六轮 2026-11-06 用户拍板：2×2 两行统一紧凑版式，满档竖排只给 2×3）
 $nameX = $pad2 + 3 + 8
-$rowsTop2 = $rowsTop + 2
-$row1H = [int]($rowsH / 2) + ($rowsH % 2)
-$row2H = $rowsH - $row1H
-$natural1 = 19 + 2 + 16
-$y1 = $rowsTop + ($row1H - $natural1) / 2
-Draw-Bar $g $pad2 ($rowsTop + ($row1H - 26) / 2) 3 26 $Bar4
-Draw-Text $g '大学物理' $fRowName $bText $nameX $y1 19 | Out-Null
-Draw-Text $g '南3 101' $fRowSub $bHint $nameX ($y1 + 21) 16 | Out-Null
-Draw-Text $g '10:00-11:35' $fRowSub $bDim 0 ($y1 + 21) 16 'right' ($w - $pad2) | Out-Null
+$barH = 42    # widget_bar_h_triple：比三行文字自然高略短
 
-# 行2（下一节，小一号）：同款紧凑两行式（课名 13 + 「地点|时间段」12）
+$lineGap = 2   # 三行之间的行距，与 WidgetSchedule.NEXT_CLASS_TRIPLE_LINE_GAP_DP 一致
+
+# 行1（本节）：紧凑三行 = 课名 17 / 地点 16 / 时间段 14，行间各留 $lineGap
+$natural1 = 17 + $lineGap + 16 + $lineGap + 14
+$y1 = $rowsTop + ($row1H - $natural1) / 2
+Draw-Bar $g $pad2 ($rowsTop + ($row1H - $barH) / 2) 3 $barH $Bar4
+Draw-Text $g '大学物理' $fRowName $bText $nameX $y1 17 | Out-Null
+Draw-Text $g '南3 101' $fRowPlace $bHint $nameX ($y1 + 17 + $lineGap) 16 | Out-Null
+Draw-Text $g '10:00-11:35' $fRowTime $bDim $nameX ($y1 + 17 + $lineGap + 16 + $lineGap) 14 | Out-Null
+
+# 行2（下一节）：同款紧凑三行（16 / 15 / 12）
 $row2Top = $rowsTop + $row1H
 $Bar5 = [System.Drawing.ColorTranslator]::FromHtml('#C97F5A')
-$natural2 = 17 + 2 + 15
+$natural2 = 16 + $lineGap + 15 + $lineGap + 12
 $y2 = $row2Top + ($row2H - $natural2) / 2
-Draw-Bar $g $pad2 ($row2Top + ($row2H - 26) / 2) 3 26 $Bar5
-Draw-Text $g '程序设计基础' $fName2 $bText $nameX $y2 17 | Out-Null
-Draw-Text $g '南3 202' $fSub2 $bHint $nameX ($y2 + 19) 15 | Out-Null
-Draw-Text $g '14:00-15:40' $fSub2 $bDim 0 ($y2 + 19) 15 'right' ($w - $pad2) | Out-Null
+Draw-Bar $g $pad2 ($row2Top + ($row2H - $barH) / 2) 3 $barH $Bar5
+Draw-Text $g '程序设计基础' $fName2 $bText $nameX $y2 16 | Out-Null
+Draw-Text $g '南3 202' $fPlace2 $bHint $nameX ($y2 + 16 + $lineGap) 15 | Out-Null
+Draw-Text $g '14:00-15:40' $fTime2 $bDim $nameX ($y2 + 16 + $lineGap + 15 + $lineGap) 12 | Out-Null
 
 $out2 = Join-Path $drawable 'widget_preview_next_class.png'
 $c.Bitmap.Save($out2, [System.Drawing.Imaging.ImageFormat]::Png)

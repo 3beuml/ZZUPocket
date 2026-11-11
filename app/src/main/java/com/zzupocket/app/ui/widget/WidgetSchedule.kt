@@ -109,7 +109,7 @@ data class WidgetTwoDayPlan(
  * 「2×2」组件的内容 —— 只回答一个问题：**我下一节是什么**。
  *
  * ```
- *   今天 · 第 4 周
+ *   今日   |   第 4 周   周二
  *  ▌大学物理                 ← 行样式（4×2 同款）：色条 + 课名 + 地点/时间段
  *    10:00 - 11:35
  *    南3 101
@@ -124,8 +124,10 @@ data class WidgetTwoDayPlan(
  * 就是现在的两行形态。⚠️ "别改成整周多行列表"仍成立：这里只排到下一节为止。
  */
 data class WidgetNextClassPlan(
-    /** 「今天 · 第 4 周」/「明日预告 · 第 4 周」；状态态下为空 */
+    /** 「今日   |   第 4 周」/「明日   |   第 4 周」；状态态下为空 */
     val header: String,
+    /** 表头最右边的周几（「周三」）；状态态下为空 */
+    val headerWeekday: String = "",
     /** 这节课以及之后还有几节（含本节），拾光口径；圆气泡已下线，字段留作数据 */
     val remaining: Int,
     /** 本节（或下一节），完整信息——渲染层用 [WidgetSchedule.toRow] 排成 4×2 同款行 */
@@ -151,7 +153,7 @@ data class WidgetNextClassPlan(
  *  3. 4×2 右列明天 = 明天**全部**（不看钟点）→ footer「共有 N 节」；
  *  4. 某列没有课 → 整列居中「无课程」；假期 / 还没同步 → 整块盖住（见 [twoDayPlan]）；
  *  5. 2×2 = **两行 4×2 同款行样式（本节 + 下一节）**（[nextClassPlan]）：今天还有课就用今天
- *     还没下课的头两节；今天没了但明天有 → 明天的头两节（表头「明日预告」）；今明都没有 → 「无课程」。
+ *     还没下课的头两节；今天没了但明天有 → 明天的头两节（表头「明日」）；今明都没有 → 「无课程」。
  *
  * 列头日期是「今天 9.29 周二」这种写法（拾光用 `M.dd`），只用在 4×2 的两列上。
  */
@@ -535,8 +537,8 @@ object WidgetSchedule {
      * 「2×2」的内容。
      *
      * 取数顺序：
-     *  1. 今天还有没下课的课 → 头两节排两行，表头「今天 · 第 N 周」；
-     *  2. 今天上完了 / 今天本来没课，但**明天有** → 明天的头两节，表头「明日预告 · 第 N 周」。
+     *  1. 今天还有没下课的课 → 头两节排两行，表头「今日   |   第 N 周」+ 右边周几；
+     *  2. 今天上完了 / 今天本来没课，但**明天有** → 明天的头两节，表头「明日   |   第 N 周」+ 右边周几。
      *     组件空着最没用，而且这正是用户这次报的场景（今晚课上完、明天国庆没课，
      *     旧版只剩一句状态，看着像坏了）；
      *  3. 今明都没有 → 一句「无课程」。
@@ -547,10 +549,16 @@ object WidgetSchedule {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse>,
         nowMin: Int,
+        todayDate: LocalDate = LocalDate.now(),
+        tomorrowDate: LocalDate = todayDate.plusDays(1),
     ): WidgetNextClassPlan {
         val courses = today.sortedBy { it.startMin }
         val st = state(hasSchedule, week, courses, nowMin)
-        val weekSuffix = weekLabel(week).let { if (it.isBlank()) "" else " · $it" }
+        val weekText = weekLabel(week)
+        fun headerFor(prefix: String, date: LocalDate): Pair<String, String> {
+            val left = if (weekText.isBlank()) prefix else "$prefix   |   $weekText"
+            return left to weekdayName(date.dayOfWeek.value)
+        }
 
         if (st == WidgetCourseState.NOT_SYNCED || st == WidgetCourseState.VACATION) {
             return WidgetNextClassPlan(
@@ -561,11 +569,15 @@ object WidgetSchedule {
         }
 
         val remain = remainingToday(courses, nowMin)
-        if (remain.isNotEmpty()) return nextClassOf(remain, "今天$weekSuffix")
+        if (remain.isNotEmpty()) {
+            val (header, weekday) = headerFor("今日", todayDate)
+            return nextClassOf(remain, header, weekday)
+        }
 
         val tomorrowCourses = tomorrow.sortedBy { it.startMin }
         if (tomorrowCourses.isNotEmpty()) {
-            return nextClassOf(tomorrowCourses, "明日预告$weekSuffix")
+            val (header, weekday) = headerFor("明日", tomorrowDate)
+            return nextClassOf(tomorrowCourses, header, weekday)
         }
 
         return WidgetNextClassPlan(
@@ -577,10 +589,12 @@ object WidgetSchedule {
     private fun nextClassOf(
         courses: List<WidgetCourse>,
         header: String,
+        weekday: String,
     ): WidgetNextClassPlan {
         val first = courses.first()
         return WidgetNextClassPlan(
             header = header,
+            headerWeekday = weekday,
             // 这节课以及之后还有几节（含本节）—— 拾光口径；气泡已下线，字段留作数据
             remaining = courses.size,
             firstCourse = first,
@@ -732,7 +746,7 @@ object WidgetSchedule {
         /** 单行一行式：课名（超长省略）+ 时间段同一行，不画地点。最低档 */
         MINI,
 
-        /** 单行两行式：课名（单行省略）与时间段各占一行，不画地点 */
+        /** 紧凑三行式：课名 / 地点 / 时间段各占一行；地点恒一行，过长先缩字号再裁左边 */
         COMPACT,
 
         /** 满档：竖排三行形态（课名 / 地点 / 时间段各占一行，不挤一行） */
@@ -766,23 +780,140 @@ object WidgetSchedule {
     /**
      * 判档缓冲：宁可早降一档（形态保守、底部略空），也不赌启动器报数是准的。
      * 2026-11-06 rc2 实证：124 与 126 之间 1dp 就差一个"第二节消失"。
+     * 八轮（2026-11-09）：字号回大字档，行内边距 2→0 腾 8dp、缓冲 8→5 再让 3dp。
+     * 真机实测（157×147dp，MiSans 行高 14=19/13=18/11=15）：大字档两行自然高 102dp，
+     * 可用 109 − 缓冲 5 = 104，留 2dp；再叠加账本每行 1dp 余量，实际余量约 4dp。
+     * 且 [chooseCompactTier] 会在放不下时整组降字号，不会把地点砍成 MINI。
      */
-    const val NEXT_CLASS_LADDER_BUFFER_DP = 8
+    const val NEXT_CLASS_LADDER_BUFFER_DP = 5
+
+    /** 紧凑三行档里地点的最小字号（dp）：缩到 11dp 就裁左边，保证「地点 ≥ 时间」的层级不被打破 */
+    const val NEXT_CLASS_PLACE_MIN_DP = 11
 
     /**
-     * 「2×2」两行的档位阶梯——**两行统一紧凑**版（#13 六轮，2026-11-06 用户拍板）。
+     * 紧凑三行档的单边内边距（dp）；XML padding、stretch 基线与 compactNat 账本共用这一个数。
+     * 八轮收到 0：省下的 4dp/行给放大后的三行让路；行并不会真的贴边——
+     * [Widgets.stretch] 会把 surplus 以 padding 摊回去，真机上每行仍有约 1~2dp 上下留白。
+     */
+    const val NEXT_CLASS_TRIPLE_PAD_DP = 0
+
+    /**
+     * 紧凑三行档内「课名→地点→时间段」之间的行距（dp）。九轮（2026-11-09）从 0 加到 2：
+     * 三行原本首尾紧贴（真机视图树实测地点行底 = 时间行顶），看着挤。
+     * 对应 widget_course_row_triple.xml / widget_next_class_preview.xml 里的
+     * `@dimen/widget_triple_line_gap`，改这个数必须同步 [nextClassSpacedRowsDp] 的账本。
+     */
+    const val NEXT_CLASS_TRIPLE_LINE_GAP_DP = 2
+
+    /** 两节课之间的净间距（dp）：由两行各摊一半到自己的上下 padding 合成，只给紧凑三行档 */
+    const val NEXT_CLASS_ROW_GAP_DP = 6
+
+    /**
+     * 2×2 的「排版余量」（dp）：只用来拉行距 / 课间隔，**不参与判档**。
      *
-     * 用户真机拍板：两行都用"色条 + 课名 + 「地点(左，省略)｜时间段(右)」"**紧凑两行式**
-     * （就像此前 2×2 里"222/南222 · 时间"那行）；竖排三行的满档只留给拉高的
-     * 2×3+。这样 2×2 的总需求从 ~146dp 降到 ~100dp，全部已知机型的 2×2 画布
-     * （Meizu 165 / HyperOS ~150）都装得下两节——阶梯的临界点从"贴边 1dp"挪到
-     * "宽裕十几 dp"，判档不再翻车。
+     * 依据 2026-11-09 真机 uiautomator 视图树（480dpi，1dp=3px）：SIZES 上报 157×177dp，
+     * [Widgets.sizeDp] 统一减 [Widgets.HEIGHT_OVERREPORT_DP]=30 得 147dp；但桌面格子的
+     * 实际高度约 177dp（卡片顶≈183px、下方图标标题从 y=713px 起 ⇒ 卡片高≈530px），
+     * 两行课只画到 y=562px，底部空出约 50dp。即 30dp 是 Meizu 标定的值，
+     * 在 HyperOS 的 2×2 上偏保守，导致 stretch 没把空白用起来。
+     *
+     * ⚠️ 只补回 24dp、留 6dp 安全边，且**只在 NextClassWidget 的排版高度里加**：
+     * 判档仍走修正后的保守画布（[NEXT_CLASS_LADDER_BUFFER_DP] 与字号回退逻辑一个字没动），
+     * 4×2 与其它组件完全不受影响。换启动器/机型若发现底部时间行被裁，把它调小或置 0。
+     */
+    const val NEXT_CLASS_2X2_LAYOUT_BONUS_DP = 24
+
+    /**
+     * 紧凑三行档的一套字号：课名 > 地点 > 时间，本节整体比下一节大一号。
+     * 八轮（2026-11-09 用户拍板）默认 14/13/11 + 13/12/10；放不下时按
+     * [NEXT_CLASS_COMPACT_TIERS] 逐级回退，**绝不因为放大字号把地点降级成 MINI 砍掉**。
+     */
+    data class CompactFontTier(
+        val label: String,
+        val n1: Int, val p1: Int, val t1: Int,
+        val n2: Int, val p2: Int, val t2: Int,
+    )
+
+    val NEXT_CLASS_COMPACT_TIERS: List<CompactFontTier> = listOf(
+        CompactFontTier("大字14/13/11", 14, 13, 11, 13, 12, 10),
+        CompactFontTier("中字13/12/11", 13, 12, 11, 12, 11, 10),
+        CompactFontTier("标准13/11/11", 13, 11, 11, 12, 10, 10),
+        CompactFontTier("矮盒12/10/10", 12, 10, 10, 11, 9, 9),
+    )
+
+    /**
+     * 从大字档往下试：取第一档"两行都没掉到 MINI"的字号。
+     * 判档用渲染层传进来的**实测行高**账本（[naturals]），换字体/换启动器都自适应；
+     * 全都不行就落最小档，由 [nextClassRowPair] 自己走 MINI 兜底（课永不蒸发）。
+     */
+    fun chooseCompactTier(
+        availDp: Int,
+        naturals: (CompactFontTier) -> NextClassRowNaturals,
+    ): CompactFontTier {
+        for (tier in NEXT_CLASS_COMPACT_TIERS) {
+            val pair = nextClassRowPair(availDp, naturals(tier))
+            if (pair.first != NextClassPreviewStyle.MINI && pair.second != NextClassPreviewStyle.MINI) {
+                return tier
+            }
+        }
+        return NEXT_CLASS_COMPACT_TIERS.last()
+    }
+
+    /** 地点自适应结果：最终显示的文本与字号（dp） */
+    data class PlaceFit(val text: String, val sizeDp: Int)
+
+    /**
+     * 地点永远只占一行：先把字号从 [maxSizeDp] 逐级缩到 [minSizeDp] 直到完整放下，
+     * 仍放不下就从**左边**裁（"…"+尾部）——教室细节（楼栋之后的房号）在末尾。
+     * 八轮起 [minSizeDp] 固定 11dp（与时间同号）：一眼要看到的地点不允许比时间还小。
+     *
+     * 纯函数：宽度由 [measureWidthDp] 提供，渲染层传 Paint 实测，JVM 单测用默认估算。
+     * 缩字号只会让行变矮，行高账本按 [maxSizeDp] 记属于"多记"，方向安全；
+     * **时间行不跟着缩**（独立字号），否则地点缩到 11dp 时层级会塌成一样大。
+     */
+    fun fitPlaceText(
+        place: String,
+        usableWidthDp: Int,
+        maxSizeDp: Int,
+        minSizeDp: Int,
+        measureWidthDp: (String, Int) -> Float = { text, size -> estimatePlaceWidthDp(text, size) },
+    ): PlaceFit {
+        if (place.isBlank() || usableWidthDp <= 0) return PlaceFit(place, maxSizeDp)
+        val floor = minSizeDp.coerceIn(1, maxSizeDp)
+        for (size in maxSizeDp downTo floor) {
+            if (measureWidthDp(place, size) <= usableWidthDp.toFloat()) {
+                return PlaceFit(place, size)
+            }
+        }
+        val budget = usableWidthDp.toFloat() - measureWidthDp("…", floor)
+        var tail = ""
+        for (ch in place.reversed()) {
+            val candidate = ch + tail
+            if (measureWidthDp(candidate, floor) > budget) break
+            tail = candidate
+        }
+        return PlaceFit("…" + tail, floor)
+    }
+
+    /** 无 Android 依赖的宽度估算：CJK 记 1em、ASCII 记 0.55em（与 nameLineCount 同口径，偏保守） */
+    private fun estimatePlaceWidthDp(text: String, sizeDp: Int): Float =
+        text.sumOf { ch -> (if (ch.code > 0x2E80) 1.0 else 0.55) * sizeDp }.toFloat()
+
+    /**
+     * 「2×2」两行的档位阶梯——紧凑档是**紧凑三行**版（#13 七轮定形、八轮放大字号）。
+     *
+     * 六轮的紧凑两行式把"地点(左，省略)｜时间段(右)"挤在同一行，长教室名会被右边的
+     * 时间段吃掉。七轮把紧凑档换成 `widget_course_row_triple.xml`：课名 / 地点 / 时间段
+     * 各占一行，地点恒单行。八轮（2026-11-09）按用户拍板把三行做成层级
+     * **课名 14 > 地点 13 > 时间 11**（下一节各小一号），并腾出高度：行内边距 0dp（由
+     * stretch 摊回）、判档缓冲 5dp、色条固定 42dp。自然高账本必须按 `lhN + lhPlace + lhTime` 分开记，
+     * 字号放不下时由 [chooseCompactTier] 降级字号而不是降级形态，地点永远不消失。
+     * 满档竖排仍只留给拉高的 2×3+。
      *
      *  · 高度读不到（≤0）→ **画满**（两行都满档竖排、自然高不撑）：options 首次回调
      *    前的空档不能表现为"课没了"；行是自然高，画满也不会行内裁字；
      *  · 从 [满/满, 紧凑/紧凑, 紧凑/单行, 单行/单行] 里取**第一个"两行自然高之和
-     *    ≤ 可用−缓冲"的组合**——注意紧凑档是**两行都**一起转，不做"一行竖排一行紧凑"
-     *    的混搭（用户拍的统一版式优先于逐行信息最大）；
+     *    ≤ 可用−缓冲"的组合**——紧凑档是**两行都**一起转，不做混搭；
      *  · 全都超预算 → 单行/单行兜底——最低档任何合法盒子都放得下，
      *    **两节课在任何情况下都至少以最低档存在**。
      *
@@ -806,6 +937,42 @@ object WidgetSchedule {
             if (sum <= budget) return first to second
         }
         return NextClassPreviewStyle.MINI to NextClassPreviewStyle.MINI
+    }
+
+    /** 一行课的排版结果：目标高（喂给 [Widgets.stretch]）与内容自然高（不含摊开的间距） */
+    data class SpacedRow(val targetHeightDp: Int, val contentHeightDp: Int)
+
+    /**
+     * 把「行距 + 课间隔 + 富余高度」折算成两行的 padding 摊余（九轮，2026-11-09）。
+     *
+     * 与判档**刻意解耦**：[nextClassRowPair] / [chooseCompactTier] 只看文字自然高，
+     * 这里只决定每行该撑到多高；所以加大间距不会把 14/13/11 挤掉档，更不会把地点降级。
+     * 只有紧凑三行档加间距（STACKED 版式自带行距、MINI 只有一行，都不加）。
+     *
+     * 课间隔由两行各摊 [NEXT_CLASS_ROW_GAP_DP] 到自己的上下 padding 合成：
+     * 行1 底 +gap/2、行2 顶 +gap/2 ⇒ 净间隔 gap；卡片上下也各多 gap/2，整体更透气。
+     * surplus 按两行基准高比例分，仍受 [MAX_STRETCH_DP] 封顶，行高永不低于内容自然高。
+     */
+    fun nextClassSpacedRowsDp(
+        availDp: Int,
+        nat1: Int,
+        nat2: Int,
+        compact1: Boolean,
+        compact2: Boolean,
+    ): Pair<SpacedRow, SpacedRow> {
+        val lineExtra1 = if (compact1) NEXT_CLASS_TRIPLE_LINE_GAP_DP * 2 else 0
+        val lineExtra2 = if (compact2) NEXT_CLASS_TRIPLE_LINE_GAP_DP * 2 else 0
+        val gap1 = if (compact1) NEXT_CLASS_ROW_GAP_DP else 0
+        val gap2 = if (compact2) NEXT_CLASS_ROW_GAP_DP else 0
+        val content1 = nat1 + lineExtra1
+        val content2 = nat2 + lineExtra2
+        val base1 = content1 + gap1
+        val base2 = content2 + gap2
+        val total = base1 + base2
+        val surplus = (availDp - total).coerceAtLeast(0)
+        val share1 = (if (total > 0) surplus * base1 / total else 0).coerceAtMost(MAX_STRETCH_DP)
+        val share2 = (surplus - share1).coerceAtLeast(0).coerceAtMost(MAX_STRETCH_DP)
+        return SpacedRow(base1 + share1, content1) to SpacedRow(base2 + share2, content2)
     }
 
     /**

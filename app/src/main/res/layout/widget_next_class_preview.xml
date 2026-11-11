@@ -15,9 +15,12 @@
 
   为什么预览布局不直接用真实布局：真实布局 next_rows 里的行是运行期 addView 的
   （RemoteViews 填内容），拿来预览会是一张空卡。所以这里写一份**填了样例数据**的
-  独立布局：两行都是**紧凑两行式**（色条 + 课名（可两行）+ 「地点/时间段」同行；
-  本节 15/13，下一节 13/12）——#13 六轮（2026-11-06 用户拍板）：2×2 统一紧凑版式，
-  满档竖排只给拉高的 2×3。更矮的盒子才落单行一行式（widget_course_row_mini.xml）。
+  独立布局：两行都是**紧凑三行式**（色条 + 课名 / 地点 / 时间段各占一行，均单行；
+  本节 14/13/11，下一节 13/12/10）——#13 八轮（2026-11-09 用户拍板）：三行字号分层
+  课名 > 地点 > 时间，地点一眼可见；长教室名由渲染层先缩字号（下限 11dp）再裁左边。
+  色条固定 42dp，比三行文字略短；三行之间行距 2dp（@dimen/widget_triple_line_gap），
+  两节课由 layout_weight 均分剩余高度、文字垂直居中，与真机的课间隔观感一致。
+  满档竖排只给拉高的 2×3，更矮的盒子落单行一行式（widget_course_row_mini.xml）。
   免得"选的时候一个样、上桌面一个样"。
   样例一律虚构的课名/教室，不涉及真实个人信息。
   ⚠️ 颜色写死（预览不走 RemoteViews，拿不到主题色的运行期 tint），取 App 默认主题的值。
@@ -31,20 +34,36 @@
     android:orientation="vertical"
     android:padding="10dp">
 
-    <!-- 表头：今天 · 第 N 周（右上圆气泡已下线，2026-11-04） -->
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:includeFontPadding="false"
-        android:maxLines="1"
-        android:text="@string/widget_preview_next_header"
-        android:textColor="@color/widget_text"
-        android:textSize="@dimen/widget_col_header"
-        android:textStyle="bold" />
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-    <!-- 本节行（大一号）：紧凑两行式 = 色条 + 课名（可两行）+ 「地点/时间段」同行
-         —— #13 六轮（2026-11-06 用户拍板）：2×2 两行统一紧凑版式（同「222」那行的样子），
-         满档竖排只给拉高的 2×3 -->
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_next_header"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_col_header"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:includeFontPadding="false"
+            android:maxLines="1"
+            android:text="@string/widget_preview_weekday"
+            android:textColor="@color/widget_text"
+            android:textSize="@dimen/widget_col_header"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 本节行：紧凑三行式 = 色条 + 课名 / 地点 / 时间段各一行（14/13/11） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -56,7 +75,7 @@
 
         <TextView
             android:layout_width="@dimen/widget_bar_w"
-            android:layout_height="@dimen/widget_bar_h"
+            android:layout_height="@dimen/widget_bar_h_triple"
             android:background="#4C7FD6" />
 
         <LinearLayout
@@ -71,44 +90,37 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:includeFontPadding="false"
-                android:maxLines="2"
+                android:maxLines="1"
                 android:text="@string/widget_preview_next_name"
                 android:textColor="@color/widget_text"
-                android:textSize="15dp"
+                android:textSize="14dp"
                 android:textStyle="bold" />
 
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/widget_gap_xs"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:layout_marginTop="@dimen/widget_triple_line_gap"
+                android:text="@string/widget_preview_next_place"
+                android:textColor="@color/widget_text_hint"
+                android:textSize="13dp" />
 
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="@string/widget_preview_next_place"
-                    android:textColor="@color/widget_text_hint"
-                    android:textSize="13dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/widget_gap_xs"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="@string/widget_preview_next_range"
-                    android:textColor="@color/widget_text_dim"
-                    android:textSize="13dp" />
-            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/widget_triple_line_gap"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="@string/widget_preview_next_range"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="11dp" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 下一节行（小一号）：同款紧凑两行式（课名 13 + 「地点|时间段」12） -->
+    <!-- 下一节行：同款紧凑三行式（课名 13 / 地点 12 / 时间段 10） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -119,7 +131,7 @@
 
         <TextView
             android:layout_width="@dimen/widget_bar_w"
-            android:layout_height="@dimen/widget_bar_h"
+            android:layout_height="@dimen/widget_bar_h_triple"
             android:background="#C97F5A" />
 
         <LinearLayout
@@ -134,40 +146,33 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:includeFontPadding="false"
-                android:maxLines="2"
+                android:maxLines="1"
                 android:text="程序设计基础"
                 android:textColor="@color/widget_text"
                 android:textSize="13dp"
                 android:textStyle="bold" />
 
-            <LinearLayout
+            <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/widget_gap_xs"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:layout_marginTop="@dimen/widget_triple_line_gap"
+                android:text="南3 202"
+                android:textColor="@color/widget_text_hint"
+                android:textSize="12dp" />
 
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:ellipsize="end"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="南3 202"
-                    android:textColor="@color/widget_text_hint"
-                    android:textSize="12dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/widget_gap_xs"
-                    android:includeFontPadding="false"
-                    android:maxLines="1"
-                    android:text="14:00-15:40"
-                    android:textColor="@color/widget_text_dim"
-                    android:textSize="12dp" />
-            </LinearLayout>
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/widget_triple_line_gap"
+                android:ellipsize="end"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text="14:00-15:40"
+                android:textColor="@color/widget_text_dim"
+                android:textSize="10dp" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>
