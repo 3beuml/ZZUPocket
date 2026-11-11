@@ -90,10 +90,15 @@ class PomodoroService : Service() {
                         stopSelfSafely()
                         return@collect
                     }
-                    // 引擎每 500ms 发一次状态，但通知只需要在"秒数或运行状态变了"的时候更新 ——
-                    // 否则通知栏每秒被写两次，费电还刷日志。
-                    val fingerprint = "${ui.remainingSeconds}|${ui.running}|${ui.phase}|" +
-                        "${ui.snapshot.tagName}|${ui.snapshot.plannedSeconds}|${ui.snapshot.focusRound}"
+                    // 运行中：通知走系统 chronometer 倒计时（见 PomodoroNotifications），
+                    // 剩余秒数的变化**不再触发通知重写**——只在运行状态/阶段/段落变了才更新一次；
+                    // 暂停时剩余秒数冻结，指纹含秒数（同样只在变化时更新）。
+                    val fingerprint = if (ui.running) {
+                        "run|${ui.phase}|${ui.snapshot.tagName}|${ui.snapshot.plannedSeconds}|${ui.snapshot.focusRound}"
+                    } else {
+                        "pause|${ui.remainingSeconds}|${ui.phase}|" +
+                            "${ui.snapshot.tagName}|${ui.snapshot.plannedSeconds}|${ui.snapshot.focusRound}"
+                    }
                     if (fingerprint == lastRendered) return@collect
                     lastRendered = fingerprint
 

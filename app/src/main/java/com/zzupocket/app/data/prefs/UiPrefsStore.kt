@@ -117,6 +117,36 @@ data class UiPrefs(
      */
     val darkTinted: Boolean = false,
     /**
+     * 「显示描述」（默认开）。关掉后界面只留一行短提示，隐藏原理、例外、错误原因
+     * 这类补充信息。空态、错误、数值、状态不属于描述，任何情况下都不受它影响。
+     */
+    val showDescriptions: Boolean = true,
+    /** 小组件时间显示为节次（「第3-4节」）；false（默认）= 时刻（10:10-11:50） */
+    val widgetTimeAsPeriod: Boolean = false,
+    /**
+     * 「2×2 下一节课」行样式偏好：WidgetSchedule.ROW_MODE_*（auto / compact / mini）。
+     * auto = 按画布高度走「永不蒸发阶梯」；compact = 强制紧凑三行（放不下自动回退阶梯）；
+     * mini = 强制单行。
+     */
+    val widgetRowMode: String = "auto",
+    /** 小组件行内显示地点（2×2 / 4×2 / 周课表通用）；默认开 */
+    val widgetShowPlace: Boolean = true,
+    /** 小组件行内显示时间段；默认开。关掉后只看得到课名（+地点） */
+    val widgetShowTime: Boolean = true,
+    /** 周课表（4×5）格子内显示地点；默认开。关掉只影响周课表 */
+    val widgetWeekShowPlace: Boolean = true,
+    /** 周课表格子内显示开始时刻；默认开 */
+    val widgetWeekShowTime: Boolean = true,
+    /** 周课表底部的周末明细条（周六/日有课时出现）；默认开 */
+    val widgetWeekendStrip: Boolean = true,
+    /**
+     * 4×2 今明课表行样式：WidgetSchedule.ROW_MODE_*（auto / stacked / mini）。
+     * auto = 「地点｜时间」同行（紧凑两行式）；stacked = 课名/地点/时间竖排三行；
+     * mini = 课名 + 时间单行。4×2 列宽是 2×2 的一倍多，紧凑三行（小字号）与
+     * auto 同形，不单设。
+     */
+    val widgetTwoDayStyle: String = "auto",
+    /**
      * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
      *
      * ⚠️ 为什么要分开存：照明与空调是两套独立表计，**可以是两个不同的房间** ——
@@ -192,6 +222,16 @@ class UiPrefsStore(context: Context) {
             darkContrast = p[KEY_DARK_CONTRAST]?.let { runCatching { DarkContrast.valueOf(it) }.getOrNull() }
                 ?: DarkContrast.STANDARD,
             darkTinted = p[KEY_DARK_TINTED] ?: false,
+            // 老用户的 DataStore 里没有这个键 → 默认 true，不需要迁移
+            showDescriptions = p[KEY_SHOW_DESCRIPTIONS] ?: true,
+            widgetTimeAsPeriod = p[KEY_WIDGET_TIME_AS_PERIOD] ?: false,
+            widgetRowMode = p[KEY_WIDGET_ROW_MODE]?.takeIf { it.isNotBlank() } ?: "auto",
+            widgetShowPlace = p[KEY_WIDGET_SHOW_PLACE] ?: true,
+            widgetShowTime = p[KEY_WIDGET_SHOW_TIME] ?: true,
+            widgetWeekShowPlace = p[KEY_WIDGET_WEEK_SHOW_PLACE] ?: true,
+            widgetWeekShowTime = p[KEY_WIDGET_WEEK_SHOW_TIME] ?: true,
+            widgetWeekendStrip = p[KEY_WIDGET_WEEKEND_STRIP] ?: true,
+            widgetTwoDayStyle = p[KEY_WIDGET_TWO_DAY_STYLE]?.takeIf { it.isNotBlank() } ?: "auto",
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
@@ -240,6 +280,33 @@ class UiPrefsStore(context: Context) {
     suspend fun setDarkContrast(v: DarkContrast) = store.edit { p -> p[KEY_DARK_CONTRAST] = v.name }
 
     suspend fun setDarkTinted(v: Boolean) = store.edit { p -> p[KEY_DARK_TINTED] = v }
+
+    /** 小组件时间显示为节次；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetTimeAsPeriod(v: Boolean) = store.edit { p -> p[KEY_WIDGET_TIME_AS_PERIOD] = v }
+
+    /** 「2×2 下一节课」行样式偏好（WidgetSchedule.ROW_MODE_*）；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetRowMode(v: String) = store.edit { p -> p[KEY_WIDGET_ROW_MODE] = v }
+
+    /** 小组件行内显示地点；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetShowPlace(v: Boolean) = store.edit { p -> p[KEY_WIDGET_SHOW_PLACE] = v }
+
+    /** 小组件行内显示时间段；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetShowTime(v: Boolean) = store.edit { p -> p[KEY_WIDGET_SHOW_TIME] = v }
+
+    /** 周课表格子内显示地点；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetWeekShowPlace(v: Boolean) = store.edit { p -> p[KEY_WIDGET_WEEK_SHOW_PLACE] = v }
+
+    /** 周课表格子内显示开始时刻；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetWeekShowTime(v: Boolean) = store.edit { p -> p[KEY_WIDGET_WEEK_SHOW_TIME] = v }
+
+    /** 周课表周末明细条；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetWeekendStrip(v: Boolean) = store.edit { p -> p[KEY_WIDGET_WEEKEND_STRIP] = v }
+
+    /** 4×2 今明课表行样式；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetTwoDayStyle(v: String) = store.edit { p -> p[KEY_WIDGET_TWO_DAY_STYLE] = v }
+
+    /** 「更多 → 界面 → 显示描述」；写入后 AppNav 根部的 CompositionLocal 立刻全树重组 */
+    suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
 
     /**
      * 写**其中一路**的房间可读名。
@@ -355,6 +422,15 @@ class UiPrefsStore(context: Context) {
         val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
         val KEY_DARK_CONTRAST = stringPreferencesKey("dark_contrast")
         val KEY_DARK_TINTED = booleanPreferencesKey("dark_tinted")
+        val KEY_WIDGET_TIME_AS_PERIOD = booleanPreferencesKey("widget_time_as_period")
+        val KEY_WIDGET_ROW_MODE = stringPreferencesKey("widget_row_mode")
+        val KEY_WIDGET_SHOW_PLACE = booleanPreferencesKey("widget_show_place")
+        val KEY_WIDGET_SHOW_TIME = booleanPreferencesKey("widget_show_time")
+        val KEY_WIDGET_WEEK_SHOW_PLACE = booleanPreferencesKey("widget_week_show_place")
+        val KEY_WIDGET_WEEK_SHOW_TIME = booleanPreferencesKey("widget_week_show_time")
+        val KEY_WIDGET_WEEKEND_STRIP = booleanPreferencesKey("widget_weekend_strip")
+        val KEY_WIDGET_TWO_DAY_STYLE = stringPreferencesKey("widget_two_day_style")
+        val KEY_SHOW_DESCRIPTIONS = booleanPreferencesKey("show_descriptions")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")

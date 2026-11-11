@@ -826,7 +826,7 @@ cacheNoticeNeedsLogin = expired,
                     .onFailure { Log.w("ScheduleViewModel", "补录后刷新小组件失败", it) }
             }
             _state.update {
-                it.copy(planNotice = "已保存到课表 · 「今天」页与桌面小组件已同步")
+                it.copy(planNotice = "已保存到课表 · 「首页」与桌面小组件已同步")
             }
         }
         loadSemester(semester, auth.isLoggedIn(), forceSync = false)

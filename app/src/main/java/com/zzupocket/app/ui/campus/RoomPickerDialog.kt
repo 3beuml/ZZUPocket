@@ -34,6 +34,8 @@ import com.zzupocket.app.data.room.RoomBuilding
 import com.zzupocket.app.data.room.RoomCampus
 import com.zzupocket.app.data.room.RoomCatalogData
 import com.zzupocket.app.data.room.decodeRoomId
+import com.zzupocket.app.ui.components.DescriptionText
+import com.zzupocket.app.ui.components.HintText
 
 /**
  * 宿舍房间选择器：**选校区 → 选楼栋 → 选房号 → 确认**，而不是让人手抄 `99-16--31-101`。
@@ -201,21 +203,14 @@ private fun CampusStep(
             if (onPickOnline != null) {
                 TextButton(onClick = onPickOnline) { Text("在线选房间（含亿达公寓等）") }
             }
-            Text(
-                text = "两招都不用挑楼栋：前者读一次学校电费页上那个绑定房间；" +
-                    "后者按「区域 → 楼栋 → 照明/空调 → 房间」从学校服务器现取，" +
-                    "下面这份内置表里没有的楼栋（亿达学生公寓）就用它。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            HintText("不用挑楼栋：读账户绑定房间，或在线逐层选")
+            DescriptionText("内置表里没有的楼栋（如亿达公寓）用「在线选房间」")
         }
     }
     if (catalogError != null) {
-        Text(
-            text = "房间表读不出来：$catalogError\n可以点右下角手动填房间号。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.error,
-        )
+        HintText("房间表读不出来，可点右下角手动填", color = MaterialTheme.colorScheme.error)
+        // 具体错误原因不常显，留给「显示描述」
+        DescriptionText(catalogError.orEmpty())
         return
     }
     if (catalog == null) {
@@ -227,14 +222,8 @@ private fun CampusStep(
         return
     }
 
-    Text(
-        text = "先选校区（房间号第一段就是它）：共 ${catalog.campuses.size} 个校区、" +
-            "${catalog.buildings.size} 栋楼。\n" +
-            "照明与空调是两套独立电表（余额不能互抵），房间号不一样；带出来的空调号请核对一遍。" +
-            "表里没有的楼栋用上面的「从学校账户读取」。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    HintText("先选校区（房间号第一段就是它）")
+    DescriptionText("照明 / 空调各一套表，带出的空调号请核对一遍")
     SearchField(
         value = query,
         onValueChange = onQueryChange,
@@ -285,12 +274,8 @@ private fun BuildingStep(
     onQueryChange: (String) -> Unit,
     onPick: (RoomBuilding) -> Unit,
 ) {
-    Text(
-        text = "${campus.name} · 共 ${campus.buildings.size} 栋楼。输入楼栋名或数字可以快速筛。" +
-            "洛阳校区是按楼层分的（「1号宿舍楼 2层」），选自己那层。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    HintText("${campus.name} · 输入楼栋名或数字可快速筛")
+    DescriptionText("洛阳校区按楼层分，选自己那层")
     SearchField(
         value = query,
         onValueChange = onQueryChange,
@@ -347,14 +332,8 @@ private fun RoomStep(
     onQueryChange: (String) -> Unit,
     onPick: (String) -> Unit,
 ) {
-    Text(
-        text = "选你宿舍的门牌号。选完会自动带出照明与空调两套表计。" +
-            (highlight?.let { "（当前：$it）" } ?: "") +
-            "\n注意：有些楼栋（如荷园部分楼）一间房有多个空调户、每人一个表，" +
-            "这里只能带出其中一个 —— 请到学校电费页核对你自己的编号。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    HintText("选门牌号" + (highlight?.let { "（当前：$it）" } ?: "") + "，自动带出照明 / 空调")
+    DescriptionText("部分楼一间房多个空调户，以学校电费页编号为准")
     SearchField(
         value = query,
         onValueChange = onQueryChange,
@@ -448,12 +427,7 @@ private fun ConfirmStep(
             )
 
             acNumbers.size > 1 -> {
-                Text(
-                    text = "这间房有 ${acNumbers.size} 个空调户（每人一个表），选你自己的那个 —— " +
-                        "选错了就是查到别人的电表：",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                HintText("这间房有 ${acNumbers.size} 个空调户，选你自己的")
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -484,18 +458,10 @@ private fun ConfirmStep(
         }
 
         if (noAc && building.acUnit > 0) {
-            Text(
-                text = "要查空调，用「在线选房间」：那是一条条问学校服务器拿到的确切房间号，" +
-                    "不用自己抄；或者照学校电费页显示的编号用「手动填房间号」填进来。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            HintText("查空调可用「在线选房间」或手动填", color = MaterialTheme.colorScheme.primary)
         }
-        Text(
-            text = "同一栋楼里照明与空调是两套独立账户，余额不能互相抵用。",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // 「不互抵」影响用户对余额数字的理解（拿一路余额当两路花的误读曾有），必须常显
+        HintText("照明 / 空调两套独立账户，余额不互抵")
     }
 }
 
@@ -535,23 +501,9 @@ private fun ManualRoomDialog(
         title = { Text("手动填房间号") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "格式（两个短横线在中间，别写成三个或一个）：\n" +
-                        "    区域-楼栋--层级-房间\n" +
-                        "例：照明 99-16--31-101　空调 99-16--32-8101\n" +
-                        "同一栋楼里照明与空调的层级号不同（这个例子 31 对 32），" +
-                        "房间号也可能不同（空调常多一个前导 8，但不是所有楼都这样）。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = "最稳的抄法：学校电费页上那两行编号直接复制。\n" +
-                        "房表里没有的楼栋（如亿达学生公寓）建议回上一页用「在线选房间」——" +
-                        "那是问学校服务器要的确切房间号，不用抄。\n" +
-                        "只有一套表的楼栋（如留学生公寓）只填一路就行。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                HintText("格式：区域-楼栋--层级-房间")
+                // 两路编号可能对不上是抄号时最常见的卡点（层级不同、空调常多一个前导 8），说明留在描述里
+                DescriptionText("例 99-16--31-101（空调或为 99-16--32-8101）；两路编号可从学校电费页直接复制")
                 OutlinedTextField(
                     value = light,
                     onValueChange = { onLightChange(it.take(40)) },
@@ -597,14 +549,15 @@ private fun ManualRoomDialog(
 private fun roomIdHint(raw: String): String {
     val t = raw.trim()
     if (t.isEmpty()) return "还没填"
-    if (t.count { it == '-' } < 3) return "短横线太少：应该是 区域-楼栋--层级-房间（例 99-16--31-101）"
-    if (!t.contains("--")) return "少了中间的双横线：楼栋和层级之间是两个短横线（例 99-16--31-101）"
-    if (t.contains("---")) return "中间多了一个短横线：楼栋和层级之间只要两个"
+    // 校验提示只说「该怎么改」，不解释原因、不举例 —— 格式本身就在上方那行 hint 里
+    if (t.count { it == '-' } < 3) return "格式：区域-楼栋--层级-房间"
+    if (!t.contains("--")) return "中间要有两个短横线"
+    if (t.contains("---")) return "中间只要两个短横线"
     val head = t.substringBefore("--")
     val tail = t.substringAfter("--")
-    if (head.split("-").size != 2) return "前半段应该是 区域-楼栋 两段数字（例 99-16）"
-    if (tail.split("-").size != 2) return "后半段应该是 层级-房间 两段（例 31-101）"
+    if (head.split("-").size != 2) return "前半段应为 区域-楼栋"
+    if (tail.split("-").size != 2) return "后半段应为 层级-房间"
     if (!head.all { it.isDigit() || it == '-' }) return "区域和楼栋只能填数字"
-    if (tail.substringBefore("-").toIntOrNull() == null) return "层级只能填数字（例 31）"
-    return "房间 ID 不合法，照 99-16--31-101 这种格式填"
+    if (tail.substringBefore("-").toIntOrNull() == null) return "层级只能填数字"
+    return "格式应为 99-16--31-101"
 }

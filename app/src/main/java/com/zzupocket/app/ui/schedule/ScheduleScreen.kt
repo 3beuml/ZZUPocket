@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -224,8 +225,19 @@ fun ScheduleScreen(
                 // 研究生：整学期数据已经映射成本科的 Session/Course，直接复用同一套周网格。
                 // 没有数据时才退回下面的登录/空态区块。
                 state.gradMode && state.gmsSessions.isNotEmpty() -> {
+                    // pager 状态提升：表头在滑动过程中实时跟随 currentPage，
+                    // 落定后才写回 ViewModel（ WeekPager 内部仍只听 settledPage，防打架逻辑不变）。
+                    // 修复「滑动时网格已到下一周、表头还停着旧周次」的慢一拍（2026-11-11 用户反馈）。
+                    val gmsPager = rememberPagerState(
+                        initialPage = state.gmsWeeks.indexOf(state.gmsWeekIndex).coerceAtLeast(0),
+                        pageCount = { state.gmsWeeks.size },
+                    )
                     WeekHeader(
-                        week = state.gmsWeekIndex,
+                        week = if (gmsPager.isScrollInProgress) {
+                            state.gmsWeeks.getOrNull(gmsPager.currentPage) ?: state.gmsWeekIndex
+                        } else {
+                            state.gmsWeekIndex
+                        },
                         total = state.gmsWeekCount,
                         onPick = { showWeekPicker = true },
                         onWallpaper = prefs.backgroundPath != null,
@@ -233,6 +245,7 @@ fun ScheduleScreen(
                         onOpenSettings = onOpenDisplaySettings,
                     )
                     WeekPager(
+                        pagerState = gmsPager,
                         weeks = state.gmsWeeks,
                         weekIndex = state.gmsWeekIndex,
                         sessionsOf = state::gmsSessionsOf,
@@ -268,22 +281,34 @@ fun ScheduleScreen(
                 )
 
                 else -> {
-                    WeekHeader(
-                        week = state.weekIndex,
-                        total = state.weekCount,
-                        onPick = { showWeekPicker = true },
-                        onWallpaper = prefs.backgroundPath != null,
-                        confirmed = state.weekConfirmed,
-                        onOpenSettings = onOpenDisplaySettings,
-                    )
                     // 周次还没解析出来之前**不要挂翻页器**：它的初始页取自 state.weekIndex，
                     // 而 bootstrap 会先给 weeks（19 周）、后给真实周次，中间那一小段
                     // weekIndex 还是默认的 1 —— 于是翻页器从第 1 周挂载、再一路动画滚到本周，
                     // 动画每经过一页都会被写回 ViewModel（详见 WeekPager 的注释）。
                     // 等解析完再挂，初始页直接就是本周，没有"从第 1 周滚过来"这一出。
                     val weekReady = state.weekResolvedOn != null || !state.loading
-                    if (weekReady) {
+                    // pager 状态提升：表头在滑动过程中实时跟随 currentPage，落定后才写回
+                    // ViewModel（WeekPager 内部仍只听 settledPage，防打架逻辑不变）。
+                    // 修复「滑动时网格已到下一周、表头还停着旧周次」的慢一拍（2026-11-11 用户反馈）。
+                    val pagerState = if (weekReady) rememberPagerState(
+                        initialPage = state.weeks.indexOf(state.weekIndex).coerceAtLeast(0),
+                        pageCount = { state.weeks.size },
+                    ) else null
+                    WeekHeader(
+                        week = if (pagerState != null && pagerState.isScrollInProgress) {
+                            state.weeks.getOrNull(pagerState.currentPage) ?: state.weekIndex
+                        } else {
+                            state.weekIndex
+                        },
+                        total = state.weekCount,
+                        onPick = { showWeekPicker = true },
+                        onWallpaper = prefs.backgroundPath != null,
+                        confirmed = state.weekConfirmed,
+                        onOpenSettings = onOpenDisplaySettings,
+                    )
+                    if (pagerState != null) {
                         WeekPager(
+                            pagerState = pagerState,
                             weeks = state.weeks,
                             weekIndex = state.weekIndex,
                             sessionsOf = state::sessionsOf,
@@ -460,6 +485,7 @@ private val WEEKDAY_HEADER_HEIGHT = 38.dp
 
 @Composable
 private fun WeekPager(
+    pagerState: PagerState,
     weeks: List<Int>,
     weekIndex: Int,
     sessionsOf: (Int) -> List<Session>,
@@ -469,8 +495,6 @@ private fun WeekPager(
     prefs: UiPrefs,
     onSessionClick: (Session) -> Unit,
 ) {
-    val initial = weeks.indexOf(weekIndex).coerceAtLeast(0)
-    val pagerState = rememberPagerState(initialPage = initial, pageCount = { weeks.size })
 
     // ① 用户滑动 → 通知 ViewModel。
     //

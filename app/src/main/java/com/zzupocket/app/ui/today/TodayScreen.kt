@@ -61,7 +61,7 @@ import java.util.Locale
 private val TIME_FMT = SimpleDateFormat("HH:mm", Locale.getDefault())
 
 /**
- * 「今天」页 —— 首页。
+ * 「首页」页（原「今天」）。
  *
  * 结构：**今天的时间轴**（上课 / 已完成的专注）+ 今天的日程 + 几张现成数据的卡片（电费、校园卡）。
  * 时间轴只做"我这一天长什么样"，不做成就/打卡那套通用番茄钟的东西，
@@ -97,7 +97,7 @@ fun TodayScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("今天") },
+                title = { Text("首页") },
                 actions = {
                     IconButton(onClick = onOpenDiagnostics) {
                         Icon(Icons.Filled.MoreHoriz, contentDescription = "登录状态")

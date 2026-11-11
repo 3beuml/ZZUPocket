@@ -65,8 +65,15 @@ class PomodoroNotifications(private val context: Context) {
         } else {
             ""
         }
-        val text = PomodoroClock.format(remainingSeconds) +
-            " / ${plannedSeconds / 60} 分钟$pizza"
+        val text = if (running) {
+            // 运行中：走字交给系统的 chronometer（见下），正文不再每秒改写。
+            // 这样即使进程被厂商省电冻结/打盹，通知栏的倒计时**仍然照走**——
+            // 用户不用进 App 也能看到剩余时间（2026-11-11 用户反馈的根因）。
+            "剩余 ${plannedSeconds / 60} 分钟$pizza"
+        } else {
+            // 暂停：剩余时间冻结，用静态文本
+            "${PomodoroClock.format(remainingSeconds)} / ${plannedSeconds / 60} 分钟$pizza"
+        }
 
         return NotificationCompat.Builder(context, CHANNEL_TIMER)
             .setSmallIcon(R.drawable.ic_stat_focus)
@@ -76,9 +83,20 @@ class PomodoroNotifications(private val context: Context) {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
-            .setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .apply {
+                if (running) {
+                    // 系统级倒计时：设置「结束时刻」，由系统渲染剩余 mm:ss，
+                    // 不依赖我们进程的 ticker 存活
+                    setShowWhen(true)
+                    setUsesChronometer(true)
+                    setChronometerCountDown(true)
+                    setWhen(System.currentTimeMillis() + remainingSeconds * 1000L)
+                } else {
+                    setShowWhen(false)
+                }
+            }
             .addAction(
                 0,
                 if (running) "暂停" else "继续",

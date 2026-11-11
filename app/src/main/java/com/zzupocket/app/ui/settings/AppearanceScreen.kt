@@ -26,7 +26,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.DescriptionText
 import com.zzupocket.app.ui.components.GlassCard
+import com.zzupocket.app.ui.components.HintText
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -217,18 +219,14 @@ fun AppearanceScreen(
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("说明", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        text = "· 「跟随壁纸」用的是系统的动态取色（Material You），取色结果跟你的手机壁纸一致，" +
-                            "这也是安卓原生的默认观感。\n" +
-                            "· 其余每个配色由一个种子色出发，用 Material 3 同一套算法推出浅色与深色两份色板，" +
-                            "所以颜色之间的关系跟原生一致，而不是随手挑的色。\n" +
-                            "· 深浅色可以单独设，不影响配色选择。\n" +
-                            "· 深色对比度对标系统的「对比度」选项，只在深色下生效：中/高档把文字、容器、边线整体" +
-                            "推亮；「跟随壁纸」在标准档保持系统原样，选中/高档会以壁纸主色重算一套高对比配色。\n" +
-                            "· 「深色保留颜色」用 Material 3 Expressive 的 2025 规则重写深色表面：底色不再只有" +
-                            "灰色系，会带上配色/壁纸的主色色相并整体比默认深色亮一档；与对比度档可以叠加使用。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // 用户要做决定的事只有一件：深浅色各管各的、两个深色选项只在深色下生效；
+                    // 取色算法（种子色 / Material You / Expressive 规则）是实现细节，进描述层。
+                    HintText("深浅色可以单独设；对比度与保留颜色只在深色下生效")
+                    DescriptionText(
+                        "「跟随壁纸」= 系统动态取色（Material You），跟壁纸同色；其余配色用 " +
+                            "Material 3 种子色算法，与系统原生同规则。\n" +
+                            "对比度：中/高档把文字、容器、边线整体推亮，「跟随壁纸」的选中/高档会以壁纸主色重算。\n" +
+                            "保留颜色：深色表面带上配色/壁纸的主色色相、比默认深色亮一档，可与对比度叠加。"
                     )
                 }
             }

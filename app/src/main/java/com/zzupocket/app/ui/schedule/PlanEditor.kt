@@ -137,7 +137,7 @@ fun PlanEditDialog(
                     )
                 } else {
                     Text(
-                        text = "自己的安排（自习/社团/实验）也会同步到「今天」页和桌面小组件，一并显示。",
+                        text = "自己的安排（自习/社团/实验）也会同步到「首页」和桌面小组件，一并显示。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -68,6 +68,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +77,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.data.eas.EasClient
 import com.zzupocket.app.domain.Period
 import com.zzupocket.app.domain.RoomRow
+import com.zzupocket.app.ui.components.DescriptionText
+import com.zzupocket.app.ui.components.HintText
 import com.zzupocket.app.ui.components.RelativeTime
 import java.time.Instant
 import java.time.LocalDate
@@ -209,7 +212,10 @@ fun RoomScreen(
                     Icon(Icons.Filled.ChevronLeft, contentDescription = "前一天", Modifier.size(20.dp))
                 }
                 Row(
+                    // weight(fill=false)：空间富余时只占内容宽；紧张时**先收缩这一项**，
+                    // 保住后面的「筛选」按钮不被挤成竖排（#11②，大字体机型实测）
                     Modifier
+                        .weight(1f, fill = false)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable { vm.openDatePicker() }
                         .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -226,6 +232,8 @@ fun RoomScreen(
                         text = state.date.format(ROOM_DATE_FMT) +
                             if (state.date == LocalDate.now()) "（今天）" else "",
                         style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 IconButton(onClick = { vm.shiftDate(1) }, modifier = Modifier.size(40.dp)) {
@@ -235,7 +243,10 @@ fun RoomScreen(
                 OutlinedButton(onClick = vm::openFilter) {
                     Icon(Icons.Filled.FilterList, contentDescription = null, Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text(if (state.selectedBuildings.isEmpty()) "筛选" else "筛选·${state.selectedBuildings.size}")
+                    Text(
+                        if (state.selectedBuildings.isEmpty()) "筛选" else "筛选·${state.selectedBuildings.size}",
+                        maxLines = 1,
+                    )
                 }
             }
 
@@ -324,15 +335,15 @@ fun RoomScreen(
                     }
                 }
                 item {
-                    Text(
-                        text = "填色 = 那节有课；空白 = 那节空着可以用。宽实线 = 上/下午/晚上分界，" +
-                            "窄虚线 = 两节连排分界（大多数课一次连上两节）。" +
-                            (if (state.hiddenVirtual > 0) "虚拟教室（${state.hiddenVirtual}）未显示。" else "") +
-                            "长按教室号可看接口原始字段。教室借用请走学校流程，这里只做查询。",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp),
-                    )
+                    Column(Modifier.padding(16.dp)) {
+                        // 图例只留一眼能对上的那句；分界线含义、原始字段入口进描述层。
+                        // 「借用走学校流程」有防误用价值，常显。
+                        HintText("填色 = 有课，空白 = 可用 · 教室借用请走学校流程")
+                        DescriptionText(
+                            "宽实线 = 上/下午/晚上分界，窄虚线 = 两节连排分界；长按教室号可看接口原始字段" +
+                                (if (state.hiddenVirtual > 0) "；虚拟教室（${state.hiddenVirtual}）未显示" else "")
+                        )
+                    }
                 }
             }
         }
@@ -380,13 +391,7 @@ private fun RawRoomDialog(room: RoomRow, onDismiss: () -> Unit) {
                 RawLine("校区", room.campusName.ifBlank { "（空）" })
                 RawLine("当天占用条数", room.occupiedCount.toString())
                 RawLine("显示的房间号", room.code)
-                Text(
-                    text = "房间号优先取 nameZh 的最后一段数字；code 不稳定（实测可能是 12 位内部编码），" +
-                        "只在 nameZh 取不出时才用。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
+                // 「nameZh 优先、code 兜底」是解析口径的备忘，写给开发者看的，不进用户界面
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },

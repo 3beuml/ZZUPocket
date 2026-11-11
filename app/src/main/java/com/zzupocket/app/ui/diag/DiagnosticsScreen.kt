@@ -117,6 +117,8 @@ data class DiagState(
     // ── 小组件几何（2026-11-06 #13 五轮起，面向所有用户的自适配排障数据）────
     /** 桌面上每个组件实例的画布上报值/尺寸通道/字体实测行高；空串 = 还没收集到 */
     val widgetReport: String = "",
+    /** 小组件几何卡是否展开（默认收起：平时不打扰，反馈小组件问题时再点开截图） */
+    val widgetOpen: Boolean = false,
 )
 
 class DiagnosticsViewModel : ViewModel() {
@@ -299,6 +301,8 @@ class DiagnosticsViewModel : ViewModel() {
     /** 自检工具展开/收起（默认收起，避免挡住日常信息） */
     fun toggleProbes() = _state.update { it.copy(probesOpen = !it.probesOpen) }
 
+    fun toggleWidgetCard() = _state.update { it.copy(widgetOpen = !it.widgetOpen) }
+
     /**
      * 采用 WebView 登录后的会话（与课表页同一套逻辑）。
      *
@@ -477,24 +481,40 @@ fun DiagnosticsScreen(
             // ── 小组件几何（所有人可见的自适配排障数据）────────────────────
             // 桌面组件显示不对时的反馈凭据：报数偏差/字体度量/尺寸通道三类问题，
             // 这张卡片的截图基本都能定位。ycli：只读几何，无个人信息。
+            // 默认收起（和自检工具同款交互）：平时不打扰，反馈小组件问题时再点开截图。
             GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("小组件几何", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = { vm.refreshWidgets() }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                            Text("重新采集", style = MaterialTheme.typography.labelSmall)
-                        }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable { vm.toggleWidgetCard() },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (state.widgetOpen) "小组件几何（收起）" else "小组件几何（排障用，点开）",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(if (state.widgetOpen) "▲" else "▼", style = MaterialTheme.typography.titleSmall)
                     }
-                    Text(
-                        "桌面小组件显示不正常时，把这整张卡片截图发到反馈里即可（只含尺寸数据，无个人信息）。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        state.widgetReport.ifBlank { "正在采集…" },
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    )
+                    if (state.widgetOpen) {
+                        Text(
+                            "桌面小组件显示不正常时，把这整张卡片截图发到反馈里即可（只含尺寸数据，无个人信息）。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedButton(
+                                onClick = { vm.refreshWidgets() },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                            ) {
+                                Text("重新采集", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        Text(
+                            state.widgetReport.ifBlank { "正在采集…" },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        )
+                    }
                 }
             }
 

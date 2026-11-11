@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -60,7 +61,9 @@ import com.zzupocket.app.data.prefs.UiPrefs
 import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
 import com.zzupocket.app.ui.about.AboutScreen
+import com.zzupocket.app.ui.settings.WidgetSettingsScreen
 import com.zzupocket.app.ui.theme.rememberEffectiveDark
+import com.zzupocket.app.ui.components.LocalShowDescriptions
 import com.zzupocket.app.ui.campus.CampusScreen
 import com.zzupocket.app.ui.campus.CardScreen
 import com.zzupocket.app.ui.campus.ElectricityScreen
@@ -87,7 +90,7 @@ enum class Destination(
     /** 未选中态用线性版本（M3 惯例：outlined ↔ filled 区分选中），悬浮胶囊 dock 用 */
     val outlinedIcon: ImageVector,
 ) {
-    TODAY(AppRoutes.TODAY, "今天", Icons.Filled.Today, Icons.Outlined.Today),
+    TODAY(AppRoutes.TODAY, "首页", Icons.Filled.Today, Icons.Outlined.Today),
     SCHEDULE(AppRoutes.SCHEDULE, "课表", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     FOCUS(AppRoutes.FOCUS, "专注", Icons.Filled.Timer, Icons.Outlined.Timer),
     CAMPUS(AppRoutes.CAMPUS, "更多", Icons.Filled.Apps, Icons.Outlined.Apps),
@@ -110,6 +113,7 @@ private const val ROUTE_LIBRARY = "library_web"
 private const val ROUTE_LIB_RECORDS = "library_records"
 private const val ROUTE_ABOUT = "about"
 private const val ROUTE_APPEARANCE = "appearance"
+private const val ROUTE_WIDGET_SETTINGS = "widget_settings"
 
 /** "重新裁剪"时用这个占位值代替相册 URI */
 private const val CROP_SOURCE_SAVED = "saved"
@@ -198,6 +202,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val mutedVersion by UpdateCenter.mutedVersion.collectAsState(initial = null)
     val hasUpdate = AppUpdate.shouldShowDot(currentVersion, remoteRelease?.version, mutedVersion)
 
+    // 「显示描述」下发到整棵 Compose 树（含各页面自己的 AlertDialog）：
+    // 开关一拨 → prefs 发新值 → 这里重组 → 所有 DescriptionText 立刻随之出现/消失。
+    CompositionLocalProvider(LocalShowDescriptions provides prefs.showDescriptions) {
     Box(
         Modifier
             .fillMaxSize()
@@ -258,10 +265,14 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
                         onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                         onOpenAppearance = { navController.navigate(ROUTE_APPEARANCE) },
+                        onOpenWidgetSettings = { navController.navigate(ROUTE_WIDGET_SETTINGS) },
                     )
                 }
                 composable(ROUTE_APPEARANCE) {
                     AppearanceScreen(onBack = { navController.popBackStack() })
+                }
+                composable(ROUTE_WIDGET_SETTINGS) {
+                    WidgetSettingsScreen(onBack = { navController.popBackStack() })
                 }
                 composable(ROUTE_ABOUT) {
                     AboutScreen(onBack = { navController.popBackStack() })
@@ -459,6 +470,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
             }
         }
     }
+    } // CompositionLocalProvider
 }
 
 /**

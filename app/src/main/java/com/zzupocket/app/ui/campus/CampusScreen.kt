@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.SettingsInputAntenna
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.EventSeat
@@ -39,6 +40,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -57,7 +59,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zzupocket.app.core.AppGraph
+import com.zzupocket.app.data.prefs.UiPrefs
+import com.zzupocket.app.ui.components.DescriptionText
+import com.zzupocket.app.ui.components.LocalShowDescriptions
 import com.zzupocket.app.data.update.AppRelease
 import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
@@ -80,6 +86,7 @@ fun CampusScreen(
     onOpenLibrary: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
+    onOpenWidgetSettings: () -> Unit = {},
 ) {
     var loggedIn by remember { mutableStateOf(AppGraph.authRepository.isLoggedIn()) }
     // 从登录页返回时重新读一次：这一页没有自己的 ViewModel，否则会一直显示"登录 / 切换账号"
@@ -90,6 +97,8 @@ fun CampusScreen(
     // ── 检测更新：状态存放在 data.update.UpdateCenter（开屏已静默查过一次）──
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 「显示描述」是全局偏好：改一下 AppNav 根部的 CompositionLocal 就会全树重组
+    val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
     val currentVersion = remember { AppUpdate.localVersion(context) }
     val remoteRelease by UpdateCenter.release.collectAsState(initial = null)
     val mutedVersion by UpdateCenter.mutedVersion.collectAsState(initial = null)
@@ -115,27 +124,61 @@ fun CampusScreen(
                 Entry(
                     Icons.Filled.Person,
                     "账号",
-                    if (loggedIn) "已登录 · 查看状态、退出登录" else "未登录 · 使用统一身份认证",
+                    // 登录态本身就是全部信息，页面里自然有「查看/退出」的动作，不必在副标题复述
+                    if (loggedIn) "已登录" else "未登录 · 点这里登录",
                     if (loggedIn) onOpenDiagnostics else onOpenLogin,
+                    // 登录态是状态，不是描述：关掉「显示描述」也必须留着
+                    alwaysShowSubtitle = true,
                 )
                 Entry(Icons.Filled.Info, "关于", "数据来源、隐私与致谢", onOpenAbout)
             }
 
             GroupTitle("学习空间")
             EntryCard {
-                Entry(Icons.Filled.MeetingRoom, "教室占用", "按楼看每间教室哪一节有课", onOpenRooms)
-                Entry(Icons.Filled.EventSeat, "图书馆座位预约", "学校原版网页（需联网）", onOpenLibrary)
+                Entry(Icons.Filled.MeetingRoom, "教室占用", "按楼查空教室", onOpenRooms)
+                Entry(Icons.Filled.EventSeat, "图书馆座位预约", "学校原版网页", onOpenLibrary)
             }
 
             GroupTitle("生活服务")
             EntryCard {
-                Entry(Icons.Filled.Bolt, "电费", "照明 + 空调 · 每日用量与电费", onOpenElectricity)
-                Entry(Icons.Filled.CreditCard, "校园卡", "余额、日周月年消费、流水明细", onOpenCard)
+                Entry(Icons.Filled.Bolt, "电费", "照明 + 空调用量", onOpenElectricity)
+                Entry(Icons.Filled.CreditCard, "校园卡", "余额与流水", onOpenCard)
             }
 
             GroupTitle("外观")
             EntryCard {
-                Entry(Icons.Filled.Palette, "配色与深色模式", "跟随壁纸动态取色，或选内置配色", onOpenAppearance)
+                Entry(Icons.Filled.Palette, "配色与深色模式", "配色与深浅色", onOpenAppearance)
+            }
+
+            GroupTitle("界面")
+            EntryCard {
+                ListItem(
+                    headlineContent = { Text("显示描述") },
+                    // 开关自己这行说明也受控：关掉后整行只留标题 + 开关，不占副标题高度
+                    supportingContent = if (prefs.showDescriptions) {
+                        { DescriptionText("开启时显示原理、例外与错误原因") }
+                    } else {
+                        null
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = prefs.showDescriptions,
+                            onCheckedChange = {
+                                scope.launch { AppGraph.uiPrefsStore.setShowDescriptions(it) }
+                            },
+                        )
+                    },
+                )
+            }
+
+            GroupTitle("小组件")
+            EntryCard {
+                Entry(
+                    Icons.Filled.SettingsInputAntenna,
+                    "小组件设置",
+                    "时间 / 地点 / 行样式 · 各桌面组件",
+                    onOpenWidgetSettings,
+                )
             }
 
             GroupTitle("系统")
@@ -150,6 +193,8 @@ fun CampusScreen(
                         "当前 v$currentVersion · 点这里手动检查"
                     },
                     { showUpdateDialog = true },
+                    // 版本号 / 有无新版是状态，不是描述
+                    alwaysShowSubtitle = true,
                     badge = showDot,
                 )
             }
@@ -193,18 +238,28 @@ private fun Entry(
     title: String,
     subtitle: String,
     onClick: (() -> Unit)? = null,
+    /** 登录态、版本号这类状态文案：即使关掉「显示描述」也要常显 */
+    alwaysShowSubtitle: Boolean = false,
     /** 「有新东西」角标：图标右上角一枚小圆点（检测更新用） */
     badge: Boolean = false,
 ) {
     val enabled = onClick != null
+    // 描述性副标题受开关控制；关掉时整个 supportingContent 为 null，
+    // ListItem 收成单行高度，不是留一块空白。
+    val shownSubtitle = subtitle.takeIf { alwaysShowSubtitle || LocalShowDescriptions.current }
     ListItem(
         headlineContent = { Text(title) },
-        supportingContent = {
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        supportingContent = if (shownSubtitle != null) {
+            {
+                Text(
+                    shownSubtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        } else {
+            null
         },
         leadingContent = {
             Box {
@@ -297,11 +352,7 @@ private fun UpdateCheckDialog(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Spacer(Modifier.height(10.dp))
-                        Text(
-                            text = "下载需要能连上 GitHub（校园网偶尔拦，用移动数据更稳）。",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        DescriptionText("下载需能访问 GitHub")
                         Spacer(Modifier.height(120.dp))
                     }
 
@@ -328,12 +379,15 @@ private fun UpdateCheckDialog(
                     else -> {
                         Text(
                             text = if (phase == UpdateCenter.Phase.Done) {
-                                "连不上 GitHub（校园网可能拦了），换移动数据再试一次。"
+                                "连不上 GitHub"
                             } else {
-                                "点「检查更新」向 GitHub 要一次最新 release。"
+                                "点「检查更新」检查一次"
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        if (phase == UpdateCenter.Phase.Done) {
+                            DescriptionText("校园网可能拦截，可换移动数据再试")
+                        }
                         Spacer(Modifier.height(24.dp))
                     }
                 }

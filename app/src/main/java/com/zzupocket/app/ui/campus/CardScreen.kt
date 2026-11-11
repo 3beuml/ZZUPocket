@@ -33,6 +33,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.zzupocket.app.ui.components.DescriptionText
 import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -470,11 +471,11 @@ private fun FilterSheet(
                 OutlinedButton(onClick = { onReset(); onDismiss() }) { Text("重置") }
             }
 
-            Text(
-                text = "筛选只在**本地已有的流水**里进行；首次进页面会把服务端能给的都拉下来，" +
-                    "所以最早期的一批记录受服务端范围限制。",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // 影响解读的口径（为什么搜不到最早的记录）不能删，进描述层——默认仍可见，
+            // 关掉「显示描述」的人才看不到。
+            DescriptionText(
+                "筛选只在本地已有的流水里进行；首次进页面会把服务端能给的都拉下来，" +
+                    "所以最早期的一批记录受服务端范围限制"
             )
         }
     }
