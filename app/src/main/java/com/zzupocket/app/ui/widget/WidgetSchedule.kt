@@ -332,8 +332,13 @@ object WidgetSchedule {
 
         fun fit(rows: List<WidgetCourseRow>): List<WidgetCourseRow> {
             if (columnHeightDp <= 0) return rows
+            // 自然高按**行样式**分账：竖排每行多一行小字（+16dp），
+            // 用紧凑口径会多留行 → 最后一行超出画布被裁（自检 2026-11-12）
             val naturals = rows.map {
-                rowNaturalHeightDp(nameLineCount(it.course.name, columnWidthDp, nameDp))
+                twoDayRowNaturalHeightDp(
+                    nameLineCount(it.course.name, columnWidthDp, nameDp),
+                    rowStyle,
+                )
             }
             return rows.take(visibleRowCount(columnHeightDp, naturals))
         }
