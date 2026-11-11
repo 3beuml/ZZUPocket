@@ -153,6 +153,60 @@ class RoomViewModel : ViewModel() {
      * 网络失败的统一降级：**有快照就不报红错**（红字会让人以为账号出问题），
      * 留一行灰字说明数据是几点抓的；真没快照才红条。
      */
+    /**
+     * 切换（日期 / 楼栋 / 校区）后的离线兜底：为**切换后的新状态**读本地快照并渲染。
+     *
+     * 之前的降级只把**旧状态的数据**留在屏上（灰字提示"获取于 HH:MM"）——
+     * 用户切了日期看到的还是上一个日期的占用，切了楼栋筛选看起来毫无反应
+     * （2026-11-11 用户实测）。快照覆盖 昨天~今天+5（在线时抓取即存 + 预取 +1~+5），
+     * 切进这个窗口应当直接出快照数据，而不是老画面。
+     *
+     * 返回 false = 新状态确实没有可用快照（调用方再走 [degradeToCache]）。
+     */
+    private suspend fun renderSnapshotForCurrentState(): Boolean {
+        val s = _state.value
+        val snap = runCatching {
+            // 先精确匹配当前校区；没有再退「该日期最近抓取的任意校区」
+            s.campusId?.let {
+                AppGraph.scheduleRepository.cachedRoomSnapshot(s.date.toString(), it)
+            } ?: AppGraph.scheduleRepository.cachedRoomSnapshotAnyCampus(s.date.toString())
+        }.getOrNull() ?: return false
+        if (snap.rows.isEmpty()) return false
+        val units = s.periods.map { it.startTime to it.endTime }
+        val rows = snap.rows.map { r ->
+            RoomRow(
+                id = r.roomId,
+                code = r.code,
+                buildingId = r.buildingId,
+                buildingName = r.buildingName,
+                campusName = r.campusName,
+                occupied = RoomOccupancyGrid.grid(r.occupations, units),
+            )
+        }
+        // 楼栋筛选是服务端做的（快照按抓取时的筛选落盘）——离线在本地补一道
+        val filtered = if (s.selectedBuildings.isEmpty()) {
+            rows
+        } else {
+            rows.filter { it.buildingId in s.selectedBuildings }
+        }
+        if (filtered.isEmpty()) return false
+        allRooms = filtered
+        val groups = rebuildGroups(filtered, s.buildings.map { it.id }, s.selectedUnits)
+        _state.update {
+            it.copy(
+                loading = false,
+                loadingMore = false,
+                error = null,
+                groups = groups,
+                loadedRooms = filtered.size,
+                lastFetchedAt = snap.fetchedAt,
+                fromCache = true,
+                notice = noticeOf(snap.fetchedAt),
+            )
+        }
+        return true
+    }
+
     private fun degradeToCache(e: Throwable) {
         if (allRooms.isNotEmpty()) {
             _state.update {
@@ -275,16 +329,17 @@ class RoomViewModel : ViewModel() {
             )
         }
         allRooms = if (reset) newRows else (allRooms + newRows).distinctBy { it.id }
-        // 落一份当天快照：教务挂了/断网时还能看到"上次抓到的状态 + 时间"
-        if (reset) {
-            runCatching {
-                val campusId = s.campusId ?: return@runCatching
-                AppGraph.scheduleRepository.saveRoomSnapshot(
-                    date = s.date.toString(),
-                    campusId = campusId,
-                    rows = toCacheRows(result, s.buildings),
-                )
-            }
+        // 落当天快照：教务挂了/断网时还能看到"上次抓到的状态 + 时间"。
+        // reset（第一页）= replace；续页 = append 累积——否则"今天"的快照
+        // 永远只有第一页（2026-11-11 自检发现）。
+        runCatching {
+            val campusId = s.campusId ?: return@runCatching
+            AppGraph.scheduleRepository.saveRoomSnapshot(
+                date = s.date.toString(),
+                campusId = campusId,
+                rows = toCacheRows(result, s.buildings),
+                replace = reset,
+            )
         }
         val totalPages = result.page?.totalPages ?: 1
         val currentPage = result.page?.currentPage ?: page
@@ -339,9 +394,10 @@ class RoomViewModel : ViewModel() {
     private var prefetchJob: kotlinx.coroutines.Job? = null
 
     /**
-     * 进页联网成功后，把**今天+1 ~ 今天+5** 的占用预取落库
-     * （2026-11-05 用户拍定：本地保留 7 天 = 昨天 1 天 + 今天起 6 天；
-     * 昨天的靠保留窗口不删，未来几天的靠这里补 —— 不然只有"浏览过的日期"才有快照）。
+     * 进页联网成功后，把**今天+1 ~ 今天+3** 的占用**完整**（所有页）预取落库
+     * （2026-11-11 用户拍板收窄到 3 天：目标是应对教务系统临时出问题，
+     * 完整比天数重要——此前的分页覆盖 bug 正是"求天数不求完整性"的产物。
+     * 7 天保留窗口不变，昨天与浏览过的日期照旧在窗口内保留）。
      *
      * 串行、低优先、逐日跳过当天已抓过的：二次进页零请求；中途断网就整轮停掉。
      */
@@ -372,6 +428,9 @@ class RoomViewModel : ViewModel() {
         ) {
             return
         }
+        // 攒齐该日期的**所有页**再一次性落库——按页落库会互相覆盖，
+        // 快照只剩最后一页的教室（根因见 saveRoomSnapshot 的 replace 注释）。
+        val allRows = mutableListOf<com.zzupocket.app.data.repo.RoomCacheRow>()
         var page = 1
         while (true) {
             val result = repo.roomsPage(
@@ -380,16 +439,17 @@ class RoomViewModel : ViewModel() {
                 page = page,
                 pageSize = RoomRepository.PAGE_SIZE_LARGE,
             )
-            runCatching {
-                AppGraph.scheduleRepository.saveRoomSnapshot(
-                    date = date.toString(),
-                    campusId = campusId,
-                    rows = toCacheRows(result, _state.value.buildings),
-                )
-            }
+            allRows += toCacheRows(result, _state.value.buildings)
             val totalPages = result.page?.totalPages ?: 1
             if (page >= totalPages) break
             page++
+        }
+        runCatching {
+            AppGraph.scheduleRepository.saveRoomSnapshot(
+                date = date.toString(),
+                campusId = campusId,
+                rows = allRows,
+            )
         }
     }
 
@@ -451,7 +511,9 @@ class RoomViewModel : ViewModel() {
                 val buildings = orderedBuildings(repo.buildings(id))
                 _state.update { it.copy(buildings = buildings) }
                 fetch(reset = true)
-            }.onFailure { e -> degradeToCache(e) }
+            }.onFailure { e ->
+                if (!renderSnapshotForCurrentState()) degradeToCache(e)
+            }
         }
     }
 
@@ -459,7 +521,9 @@ class RoomViewModel : ViewModel() {
         _state.update { it.copy(selectedBuildings = ids, loading = true) }
         viewModelScope.launch {
             runCatching { fetch(reset = true) }
-                .onFailure { e -> degradeToCache(e) }
+                .onFailure { e ->
+                    if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                }
         }
     }
 
@@ -467,7 +531,9 @@ class RoomViewModel : ViewModel() {
         _state.update { it.copy(date = date, loading = true, showDatePicker = false) }
         viewModelScope.launch {
             runCatching { fetch(reset = true) }
-                .onFailure { e -> degradeToCache(e) }
+                .onFailure { e ->
+                    if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                }
         }
     }
 
@@ -524,6 +590,6 @@ class RoomViewModel : ViewModel() {
         const val MIN_VISIBLE = 15
 
         /** 预取天数：今天+1 ~ 今天+5（与保留窗口"昨天~今天+5"配套） */
-        const val PREFETCH_DAYS = 5
+        const val PREFETCH_DAYS = 3
     }
 }

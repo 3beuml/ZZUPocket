@@ -671,9 +671,13 @@ class ScheduleRepository(
         campusId: Long,
         rows: List<RoomCacheRow>,
         fetchedAt: Long = System.currentTimeMillis(),
+        replace: Boolean = true,
     ) {
         db.withTransaction {
-            db.roomOccupancyDao().deleteByDateAndCampus(date, campusId)
+            // replace = 全量替换（该日期+校区的新一轮抓取）；append = 翻页累积——
+            // 旧实现预取分页时每页都 replace，**每页互相删**，最终快照只剩最后一页
+            // 的教室（2026-11-11 用户实测：12/13 日快照同形、部分日期缺楼）。
+            if (replace) db.roomOccupancyDao().deleteByDateAndCampus(date, campusId)
             db.roomOccupancyDao().upsertAll(
                 rows.map { r ->
                     RoomOccupancyEntity(
