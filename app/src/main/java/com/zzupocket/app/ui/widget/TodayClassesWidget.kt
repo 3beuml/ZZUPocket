@@ -105,7 +105,7 @@ class TodayClassesWidget : AppWidgetProvider() {
                 val columnWidthDp = ((widthDp - 28 - 17) / 2).coerceAtLeast(0)
                 val rows = WidgetSchedule.columnRows(heightDp)
                 val detail = WidgetSchedule.rowDetail(columnWidthDp)   // 单列里一行内容的可用宽
-                val plan = schedule.twoDayPlan(rows, columnWidthDp, heightDp)
+                val plan = schedule.twoDayPlan(rows, columnWidthDp, heightDp, prefs.widgetTwoDayStyle)
                 val rv = build(context, plan, colors, dark, click, heightDp, detail, columnWidthDp)
                 runCatching { mgr.updateAppWidget(id, rv) }
             }
@@ -153,11 +153,13 @@ class TodayClassesWidget : AppWidgetProvider() {
 
             bindColumn(
                 context, rv, plan.today, colors, dark, heightDp, detail, columnWidthDp,
+                rowStyle = plan.rowStyle,
                 headerId = R.id.today_header, footerId = R.id.today_footer,
                 rowsId = R.id.today_rows, emptyId = R.id.today_empty,
             )
             bindColumn(
                 context, rv, plan.tomorrow, colors, dark, heightDp, detail, columnWidthDp,
+                rowStyle = plan.rowStyle,
                 headerId = R.id.tomorrow_header, footerId = R.id.tomorrow_footer,
                 rowsId = R.id.tomorrow_rows, emptyId = R.id.tomorrow_empty,
             )
@@ -180,6 +182,7 @@ class TodayClassesWidget : AppWidgetProvider() {
             heightDp: Int,
             detail: WidgetSchedule.RowDetail,
             columnWidthDp: Int,
+            rowStyle: String,
             headerId: Int,
             footerId: Int,
             rowsId: Int,
@@ -206,8 +209,9 @@ class TodayClassesWidget : AppWidgetProvider() {
                 // 两行课名的行实际 ~60dp，最后一行被顶出画布裁字，2026-11-01 实证。）
                 val (nameDp, subDp) = WidgetSchedule.rowFontSizes(heightDp)
                 val naturals = column.rows.map {
-                    WidgetSchedule.rowNaturalHeightDp(
+                    WidgetSchedule.twoDayRowNaturalHeightDp(
                         WidgetSchedule.nameLineCount(it.course.name, columnWidthDp, nameDp),
+                        rowStyle,
                     )
                 }
                 val targets = WidgetSchedule.rowStretchTargetsDp(heightDp, naturals)
@@ -220,6 +224,9 @@ class TodayClassesWidget : AppWidgetProvider() {
                             nameSizeDp = nameDp,
                             subSizeDp = subDp,
                             naturalHeightDp = naturals[index],
+                            stacked = (rowStyle == WidgetSchedule.ROW_MODE_STACKED),
+                            mini = (rowStyle == WidgetSchedule.ROW_MODE_MINI),
+                            nameMaxLines = if ((rowStyle == WidgetSchedule.ROW_MODE_MINI)) 1 else 2,
                         ),
                     )
                     // 行与行之间插一条 1dp 分隔线（与拾光一致）

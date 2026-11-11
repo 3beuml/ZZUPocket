@@ -21,6 +21,8 @@ data class WidgetScheduleBundle(
     val hasSchedule: Boolean,
     /** 今天属于第几教学周；假期/学期外为 null */
     val week: Int?,
+    /** 明天属于第几教学周：周日跨周时「明日预告」表头要跟明天的课走 */
+    val tomorrowWeek: Int? = null,
     /** 今天 / 明天（用日期拼「今天 9.29 周二」这种列头） */
     val todayDate: LocalDate,
     val tomorrowDate: LocalDate,
@@ -34,7 +36,12 @@ data class WidgetScheduleBundle(
     val nextBoundaryMillis: Long?,
 ) {
     /** 4×2 课表：左列今天、右列明天（尺寸知道时按换行感知账本裁行，防最后一行被裁字） */
-    fun twoDayPlan(maxRows: Int, columnWidthDp: Int = 0, columnHeightDp: Int = 0): WidgetTwoDayPlan =
+    fun twoDayPlan(
+        maxRows: Int,
+        columnWidthDp: Int = 0,
+        columnHeightDp: Int = 0,
+        rowStyle: String = "auto",
+    ): WidgetTwoDayPlan =
         WidgetSchedule.twoDayPlan(
             hasSchedule = hasSchedule,
             week = week,
@@ -46,6 +53,7 @@ data class WidgetScheduleBundle(
             maxRows = maxRows,
             columnWidthDp = columnWidthDp,
             columnHeightDp = columnHeightDp,
+            rowStyle = rowStyle,
         )
 
     /** 2×2：两行 4×2 同款行样式（本节 + 下一节）；今天没了就顶明天的头两节 */
@@ -55,6 +63,7 @@ data class WidgetScheduleBundle(
         today = today,
         tomorrow = tomorrow,
         nowMin = nowMin,
+        tomorrowWeek = tomorrowWeek,
     )
 }
 
@@ -118,6 +127,7 @@ object WidgetData {
     suspend fun loadSchedule(): WidgetScheduleBundle {
         val repo = AppGraph.scheduleRepository
         val prefsStore = AppGraph.uiPrefsStore
+        val prefs = prefs()
         val today = LocalDate.now()
         val tomorrow = today.plusDays(1)
         val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
@@ -128,20 +138,38 @@ object WidgetData {
             .hasAnySchedule(repo, prefsStore)
         val periods = repo.periods()
         val week = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(repo, prefsStore, today)
+        val tomorrowWeek = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(repo, prefsStore, tomorrow)
 
         val todayCourses = com.zzupocket.app.data.repo.TodayTimetable
             .sessionsOn(repo, prefsStore, today)
-            .mapNotNull { WidgetSchedule.toCourse(it, periods) }
+            .mapNotNull {
+                WidgetSchedule.toCourse(
+                    it,
+                    periods,
+                    timeAsPeriod = prefs.widgetTimeAsPeriod,
+                    hidePlace = !prefs.widgetShowPlace,
+                    hideTime = !prefs.widgetShowTime,
+                )
+            }
             .sortedBy { it.startMin }
 
         val tomorrowCourses = com.zzupocket.app.data.repo.TodayTimetable
             .sessionsOn(repo, prefsStore, tomorrow)
-            .mapNotNull { WidgetSchedule.toCourse(it, periods) }
+            .mapNotNull {
+                WidgetSchedule.toCourse(
+                    it,
+                    periods,
+                    timeAsPeriod = prefs.widgetTimeAsPeriod,
+                    hidePlace = !prefs.widgetShowPlace,
+                    hideTime = !prefs.widgetShowTime,
+                )
+            }
             .sortedBy { it.startMin }
 
         return WidgetScheduleBundle(
             hasSchedule = hasSchedule,
             week = week,
+            tomorrowWeek = tomorrowWeek,
             todayDate = today,
             tomorrowDate = tomorrow,
             today = todayCourses,
@@ -153,7 +181,7 @@ object WidgetData {
 
     /** 「周课表」组件要用的数据：本周每天一列（周一..周日），只读本地 */
     data class WidgetWeekBundle(
-        /** 库里到底有没有课表数据（区分"假期"和"还没同步过课表"） */
+        /** 库里到底有没有课表数据（区分"假期"和"还没同步过"） */
         val hasSchedule: Boolean,
         /** 本周是第几教学周；假期/学期外为 null */
         val week: Int?,
@@ -161,12 +189,15 @@ object WidgetData {
         val coursesByDay: Map<Int, List<WidgetCourse>>,
         /** 今天（决定"今"列头与高亮） */
         val today: LocalDate,
+        /** 周末明细条开关（小组件设置页） */
+        val showWeekendStrip: Boolean = true,
     ) {
         fun weekPlan(): WidgetSchedule.WidgetWeekPlan = WidgetSchedule.weekPlan(
             hasSchedule = hasSchedule,
             week = week,
             coursesByDay = coursesByDay,
             today = today,
+            showWeekendStrip = showWeekendStrip,
         )
     }
 
@@ -180,6 +211,7 @@ object WidgetData {
     suspend fun loadWeekSchedule(): WidgetWeekBundle {
         val repo = AppGraph.scheduleRepository
         val prefsStore = AppGraph.uiPrefsStore
+        val prefs = prefs()
         val today = LocalDate.now()
         val monday = today.minusDays(((today.dayOfWeek.value + 6) % 7).toLong())
         val hasSchedule = com.zzupocket.app.data.repo.TodayTimetable
@@ -189,7 +221,16 @@ object WidgetData {
             val date = monday.plusDays((day - 1).toLong())
             com.zzupocket.app.data.repo.TodayTimetable
                 .sessionsOn(repo, prefsStore, date)
-                .mapNotNull { WidgetSchedule.toCourse(it, periods) }
+                .mapNotNull {
+                    WidgetSchedule.toCourse(
+                        it,
+                        periods,
+                        timeAsPeriod = prefs.widgetTimeAsPeriod,
+                        // 周课表格子里的地点/时刻有独立开关
+                        hidePlace = !prefs.widgetWeekShowPlace,
+                        hideTime = !prefs.widgetWeekShowTime,
+                    )
+                }
                 .sortedBy { it.startUnit }
         }
         return WidgetWeekBundle(
@@ -197,6 +238,7 @@ object WidgetData {
             week = com.zzupocket.app.data.repo.TodayTimetable.currentWeekAt(repo, prefsStore, today),
             coursesByDay = coursesByDay,
             today = today,
+            showWeekendStrip = prefs.widgetWeekendStrip,
         )
     }
 

@@ -22,6 +22,12 @@ data class WidgetCourse(
     val startUnit: Int = 0,
     /** 结束大节；0 = 未知 */
     val endUnit: Int = 0,
+    /** 用户设置「时间显示为节次」；false（默认）= 显示时刻（10:00-11:35） */
+    val timeAsPeriod: Boolean = false,
+    /** 用户设置隐藏地点（小组件设置页）；隐藏是**显示层**的，数据原样保留 */
+    val hidePlace: Boolean = false,
+    /** 用户设置隐藏时间段 */
+    val hideTime: Boolean = false,
 ) {
     /** "10:00" */
     val startText: String get() = WidgetSchedule.clock(startMin)
@@ -31,6 +37,13 @@ data class WidgetCourse(
 
     /** "10:00-11:35" —— 与拾光课程表完全一致：**没有空格**的连字符写法 */
     val rangeText: String get() = "$startText-$endText"
+
+    /** "第3-4节"；节次未知（0）时退回时刻 */
+    val periodText: String get() =
+        if (startUnit in 1..9 && endUnit >= startUnit) "第${startUnit}-${endUnit}节" else rangeText
+
+    /** 组件上实际显示的时间文本——用户设置的唯一出口（时刻 / 节次 / 隐藏） */
+    val timeText: String get() = if (hideTime) "" else if (timeAsPeriod) periodText else rangeText
 }
 
 /**
@@ -101,8 +114,14 @@ data class WidgetTwoDayPlan(
      */
     val overlayTitle: String = "",
     val overlayMessage: String = "",
+    /** 4×2 行样式（小组件设置页）；auto=「地点｜时间」同行，stacked=竖排三行，mini=课名+时间 */
+    val rowStyle: String = WidgetSchedule.ROW_MODE_AUTO,
 ) {
     val hasOverlay: Boolean get() = overlayTitle.isNotBlank()
+
+    /** 当前样式对应的行形态标志（渲染层传给 courseRow） */
+    val stackedRows: Boolean get() = rowStyle == WidgetSchedule.ROW_MODE_STACKED
+    val miniRows: Boolean get() = rowStyle == WidgetSchedule.ROW_MODE_MINI
 }
 
 /**
@@ -157,6 +176,13 @@ data class WidgetNextClassPlan(
  */
 object WidgetSchedule {
 
+    /** 行样式偏好值（UiPrefs.widgetRowMode 存的就是这四个串） */
+    const val ROW_MODE_AUTO = "auto"
+    const val ROW_MODE_STACKED = "stacked"
+    const val ROW_MODE_COMPACT = "compact"
+    const val ROW_MODE_MINI = "mini"
+
+
     /** 480 → "08:00" */
     fun clock(minute: Int): String {
         val m = ((minute % 1440) + 1440) % 1440
@@ -180,7 +206,13 @@ object WidgetSchedule {
      * 节次时间优先取作息表（`/room/system/course-units`），取不到才退回记录自带的 startTime；
      * 都取不到就没法排版，返回 null（这一节不显示，而不是显示成 00:00）。
      */
-    fun toCourse(session: Session, periods: List<Period>): WidgetCourse? {
+    fun toCourse(
+        session: Session,
+        periods: List<Period>,
+        timeAsPeriod: Boolean = false,
+        hidePlace: Boolean = false,
+        hideTime: Boolean = false,
+    ): WidgetCourse? {
         val startPeriod = periods.firstOrNull { it.indexNo == session.startUnit }
         val endPeriod = periods.firstOrNull { it.indexNo == session.endUnit }
         val start = minuteOf(startPeriod?.startText ?: session.startTime) ?: return null
@@ -194,6 +226,9 @@ object WidgetSchedule {
             endMin = end,
             startUnit = session.startUnit,
             endUnit = session.endUnit,
+            timeAsPeriod = timeAsPeriod,
+            hidePlace = hidePlace,
+            hideTime = hideTime,
         )
     }
 
@@ -218,8 +253,8 @@ object WidgetSchedule {
     /** 一节课 → 一行（地点与时间段都在里面） */
     fun toRow(course: WidgetCourse): WidgetCourseRow = WidgetCourseRow(
         course = course,
-        place = course.place,
-        timeRange = course.rangeText,
+        place = if (course.hidePlace) "" else course.place,
+        timeRange = course.timeText,
     )
 
     /**
@@ -287,6 +322,7 @@ object WidgetSchedule {
         maxRows: Int = 2,
         columnWidthDp: Int = 0,
         columnHeightDp: Int = 0,
+        rowStyle: String = ROW_MODE_AUTO,
     ): WidgetTwoDayPlan {
         val courses = today.sortedBy { it.startMin }
         val st = state(hasSchedule, week, courses, nowMin)
@@ -320,6 +356,7 @@ object WidgetSchedule {
 
         return WidgetTwoDayPlan(
             week = weekText,
+            rowStyle = rowStyle,
             today = WidgetDayPlan(
                 header = dateHeader("今天", todayDate),
                 // footer 仍报**总剩节数**（不是显示了几行）—— 少画的行不隐瞒
@@ -407,6 +444,7 @@ object WidgetSchedule {
         week: Int?,
         coursesByDay: Map<Int, List<WidgetCourse>>,
         today: LocalDate,
+        showWeekendStrip: Boolean = true,
     ): WidgetWeekPlan {
         if (!hasSchedule || week == null) {
             val st = if (!hasSchedule) WidgetCourseState.NOT_SYNCED else WidgetCourseState.VACATION
@@ -436,10 +474,10 @@ object WidgetSchedule {
                     slot = idx,
                     slotSpan = span,
                     name = c.name,
-                    place = c.place,
+                    place = if (c.hidePlace) "" else c.place,
                     code = c.code,
-                    timeRange = c.rangeText,
-                    timeStart = c.startText,
+                    timeRange = c.timeText,
+                    timeStart = if (c.hideTime) "" else c.startText,
                 )
             }
             val date = monday.plusDays((day - 1).toLong())
@@ -452,7 +490,10 @@ object WidgetSchedule {
         }
 
         // 周末明细条：只在该天有课时出一行（完整时间段在这补全；没课时条不出现）
-        val weekendLines = (6..7).flatMap { day ->
+        // 周末明细条：用户可在小组件设置里关掉（关掉后周末仍是网格里的空格子）
+        val weekendLines = if (!showWeekendStrip) {
+            emptyList()
+        } else (6..7).flatMap { day ->
             val courses = coursesByDay[day].orEmpty()
             if (courses.isEmpty()) {
                 emptyList()
@@ -460,7 +501,7 @@ object WidgetSchedule {
                 val date = monday.plusDays((day - 1).toLong())
                 val head = "${WEEKDAY_SHORT[day - 1]} ${date.monthValue}.${date.dayOfMonth}"
                 val body = courses.joinToString("；") {
-                    listOf(it.name, it.place, it.rangeText)
+                    listOf(it.name, if (it.hidePlace) "" else it.place, it.timeText)
                         .filter { s -> s.isNotBlank() }
                         .joinToString(" ")
                 }
@@ -547,6 +588,9 @@ object WidgetSchedule {
         today: List<WidgetCourse>,
         tomorrow: List<WidgetCourse>,
         nowMin: Int,
+        /** 明天的教学周：表头「明日预告 · 第 N 周」应该跟**列出的课**走，
+         *  周日跨周时（今天第 9 周周日、明天第 10 周周一）用今天的周次会差一周 */
+        tomorrowWeek: Int? = null,
     ): WidgetNextClassPlan {
         val courses = today.sortedBy { it.startMin }
         val st = state(hasSchedule, week, courses, nowMin)
@@ -565,7 +609,8 @@ object WidgetSchedule {
 
         val tomorrowCourses = tomorrow.sortedBy { it.startMin }
         if (tomorrowCourses.isNotEmpty()) {
-            return nextClassOf(tomorrowCourses, "明日预告$weekSuffix")
+            val tomorrowSuffix = weekLabel(tomorrowWeek ?: week).let { if (it.isBlank()) "" else " · $it" }
+            return nextClassOf(tomorrowCourses, "明日预告$tomorrowSuffix")
         }
 
         return WidgetNextClassPlan(
@@ -658,6 +703,19 @@ object WidgetSchedule {
         COURSE_ROW_HEIGHT_DP + (nameLines.coerceIn(1, NAME_MAX_LINES) - 1) * NAME_LINE_EXTRA_DP
 
     /**
+     * 4×2 行的自然高度，按行样式分账：
+     *  - auto/mini：两行式口径（mini 内容更少但账多记无害，剩余高度反正摊给行）；
+     *  - stacked（竖排三行）：多一行小字，同 [COURSE_ROW_HEIGHT_DP] 的构成再加一行小字号行。
+     *    显式行高必须 ≥ 内容高，否则裁字（2026-11-01 病根）——竖排的账本必须分开记。
+     */
+    fun twoDayRowNaturalHeightDp(nameLines: Int, rowStyle: String): Int {
+        val base = rowNaturalHeightDp(nameLines)
+        // 竖排比两行式多一行小字（地点、时间段各自成行）；+16dp 与 2×2 账本的
+        // stacked−compact 差一致（方向：宁可多记）
+        return if (rowStyle == ROW_MODE_STACKED) base + NAME_LINE_EXTRA_DP else base
+    }
+
+    /**
      * 给定每行的自然高度，这一列**实际画得下几行**。
      *
      * 装不下就少画一行 —— 宁可少一行完整的课，也不能画上去被裁掉半截字
@@ -732,7 +790,7 @@ object WidgetSchedule {
         /** 单行一行式：课名（超长省略）+ 时间段同一行，不画地点。最低档 */
         MINI,
 
-        /** 单行两行式：课名（单行省略）与时间段各占一行，不画地点 */
+        /** 紧凑三行式：课名 / 地点 / 时间段各占一行；地点恒一行，过长先缩字号再裁左边 */
         COMPACT,
 
         /** 满档：竖排三行形态（课名 / 地点 / 时间段各占一行，不挤一行） */
@@ -770,25 +828,111 @@ object WidgetSchedule {
     const val NEXT_CLASS_LADDER_BUFFER_DP = 8
 
     /**
-     * 「2×2」两行的档位阶梯——**两行统一紧凑**版（#13 六轮，2026-11-06 用户拍板）。
+     * 用户**强制指定**行样式时的缓冲：从 8dp 降到 2dp。
+     * 为什么：165dp 画布上满档竖排实测 ~123dp，原预算 119dp 会静默回退到紧凑档，
+     * 「满档」就成了空操作（2026-11-11 用户实测三档同形）。强制是用户点名，
+     * 2dp 余量 + 行高自然撑（不写显式高）足以吸收度量误差。
+     */
+    const val NEXT_CLASS_FORCED_BUFFER_DP = 2
+
+    /** 紧凑三行档里地点的最小字号（dp）；再小就看不清了，改为裁左边 */
+    const val NEXT_CLASS_PLACE_MIN_DP = 9
+
+    /** 紧凑三行档的单边内边距（dp）；XML padding 与 compactNat 账本共用这一个数 */
+    const val NEXT_CLASS_TRIPLE_PAD_DP = 2
+
+    /** 地点自适应结果：最终显示的文本与字号（dp） */
+    data class PlaceFit(val text: String, val sizeDp: Int)
+
+    /**
+     * 地点永远只占一行：先把字号从 [maxSizeDp] 逐级缩到 [minSizeDp] 直到完整放下，
+     * 仍放不下就从**左边**裁（"…"+尾部）——教室细节（楼栋之后的房号）在末尾。
      *
-     * 用户真机拍板：两行都用"色条 + 课名 + 「地点(左，省略)｜时间段(右)」"**紧凑两行式**
-     * （就像此前 2×2 里"222/南222 · 时间"那行）；竖排三行的满档只留给拉高的
-     * 2×3+。这样 2×2 的总需求从 ~146dp 降到 ~100dp，全部已知机型的 2×2 画布
-     * （Meizu 165 / HyperOS ~150）都装得下两节——阶梯的临界点从"贴边 1dp"挪到
-     * "宽裕十几 dp"，判档不再翻车。
+     * 纯函数：宽度由 [measureWidthDp] 提供，渲染层传 Paint 实测，JVM 单测用默认估算。
+     * 缩字号只会让行变矮，行高账本按 [maxSizeDp] 记属于"多记"，方向安全。
+     */
+    fun fitPlaceText(
+        place: String,
+        usableWidthDp: Int,
+        maxSizeDp: Int,
+        minSizeDp: Int,
+        measureWidthDp: (String, Int) -> Float = { text, size -> estimatePlaceWidthDp(text, size) },
+    ): PlaceFit {
+        if (place.isBlank() || usableWidthDp <= 0) return PlaceFit(place, maxSizeDp)
+        val floor = minSizeDp.coerceIn(1, maxSizeDp)
+        for (size in maxSizeDp downTo floor) {
+            if (measureWidthDp(place, size) <= usableWidthDp.toFloat()) {
+                return PlaceFit(place, size)
+            }
+        }
+        val budget = usableWidthDp.toFloat() - measureWidthDp("…", floor)
+        var tail = ""
+        for (ch in place.reversed()) {
+            val candidate = ch + tail
+            if (measureWidthDp(candidate, floor) > budget) break
+            tail = candidate
+        }
+        return PlaceFit("…" + tail, floor)
+    }
+
+    /** 无 Android 依赖的宽度估算：CJK 记 1em、ASCII 记 0.55em（与 nameLineCount 同口径，偏保守） */
+    private fun estimatePlaceWidthDp(text: String, sizeDp: Int): Float =
+        text.sumOf { ch -> (if (ch.code > 0x2E80) 1.0 else 0.55) * sizeDp }.toFloat()
+
+    /**
+     * 「2×2」两行的档位阶梯——紧凑档改成**紧凑三行**版（#13 七轮，2026-11-06 用户拍板）。
+     *
+     * 出处：三行式与 [fitPlaceText]（缩字号 + 裁左边保房号）的方案来自
+     * @Voya-rina 在 issue #13 的 fork 对照实验（同一台设备上两行式地点只剩
+     * 4 个汉字宽，「环保馆 306」都放不下；三行式全信息放下）。
+     *
+     * 六轮的紧凑两行式把"地点(左，省略)｜时间段(右)"挤在同一行，长教室名会被右边的
+     * 时间段吃掉。七轮把紧凑档换成 `widget_course_row_triple.xml`：课名 / 地点 / 时间段
+     * 各占一行，地点恒单行（过长由 [fitPlaceText] 缩字号 + 裁左边）。为把多出来的一行
+     * 小字塞回 2×2，紧凑档同时收字号（13/11、12/10）、课名强制单行、行内边距 2dp、行距 0
+     * ——两行合计约 90dp，比六轮长课名时的 ~109dp 还省，150dp 画布也留出约 8dp 安全垫。
+     * 满档竖排仍只留给拉高的 2×3+。
      *
      *  · 高度读不到（≤0）→ **画满**（两行都满档竖排、自然高不撑）：options 首次回调
      *    前的空档不能表现为"课没了"；行是自然高，画满也不会行内裁字；
      *  · 从 [满/满, 紧凑/紧凑, 紧凑/单行, 单行/单行] 里取**第一个"两行自然高之和
-     *    ≤ 可用−缓冲"的组合**——注意紧凑档是**两行都**一起转，不做"一行竖排一行紧凑"
-     *    的混搭（用户拍的统一版式优先于逐行信息最大）；
+     *    ≤ 可用−缓冲"的组合**——紧凑档是**两行都**一起转，不做混搭；
      *  · 全都超预算 → 单行/单行兜底——最低档任何合法盒子都放得下，
      *    **两节课在任何情况下都至少以最低档存在**。
      *
      * @param availDp 可用高度（画布 − 固定开销）；≤0 = 读不到尺寸 → 画满
+     * @param rowMode 用户偏好（更多 → 小组件）：auto=纯阶梯；compact=强制三行（放不下
+     *                回退阶梯，「永不蒸发」优先于偏好）；mini=强制单行（阶梯最低档，恒生效）
      */
     fun nextClassRowPair(
+        availDp: Int,
+        n: NextClassRowNaturals,
+        rowMode: String = ROW_MODE_AUTO,
+    ): Pair<NextClassPreviewStyle, NextClassPreviewStyle> {
+        // 强制单行：MINI 是阶梯最低档，任何合法盒子（含"读不到尺寸"的画满分支）都放得下，恒生效
+        if (rowMode == ROW_MODE_MINI) return NextClassPreviewStyle.MINI to NextClassPreviewStyle.MINI
+        val ladderPair = nextClassLadderPair(availDp, n)
+        if (availDp <= 0) return ladderPair
+        return when (rowMode) {
+            // 强制档共用 2dp 缓冲：用户点名要的形态，贴边也给（见 FORCED_BUFFER 注释）
+            ROW_MODE_STACKED -> {
+                val budget = availDp - NEXT_CLASS_FORCED_BUFFER_DP
+                val sum = nextClassRowNatDp(n, NextClassPreviewStyle.STACKED, first = true) +
+                    nextClassRowNatDp(n, NextClassPreviewStyle.STACKED, first = false)
+                if (sum <= budget) NextClassPreviewStyle.STACKED to NextClassPreviewStyle.STACKED else ladderPair
+            }
+            ROW_MODE_COMPACT -> {
+                val budget = availDp - NEXT_CLASS_FORCED_BUFFER_DP
+                val sum = nextClassRowNatDp(n, NextClassPreviewStyle.COMPACT, first = true) +
+                    nextClassRowNatDp(n, NextClassPreviewStyle.COMPACT, first = false)
+                if (sum <= budget) NextClassPreviewStyle.COMPACT to NextClassPreviewStyle.COMPACT else ladderPair
+            }
+            else -> ladderPair
+        }
+    }
+
+    /** 阶梯本体（无用户偏好介入） */
+    private fun nextClassLadderPair(
         availDp: Int,
         n: NextClassRowNaturals,
     ): Pair<NextClassPreviewStyle, NextClassPreviewStyle> {

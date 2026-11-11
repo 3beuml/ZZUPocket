@@ -420,9 +420,61 @@ class WidgetScheduleTest {
     }
 
     @Test
+    fun `地点恒一行_先缩字号再裁左边保留教室号`() {
+        val width = 130
+        // 短地点：11dp 原样放下
+        val short = WidgetSchedule.fitPlaceText("南3 101", width, 11, 9)
+        assertEquals("南3 101", short.text)
+        assertEquals(11, short.sizeDp)
+        // 中等：11dp 放不下，缩到 10dp 就完整显示，一个字都不裁
+        val mid = WidgetSchedule.fitPlaceText("南校区综合教学楼 3 层 305", width, 11, 9)
+        assertEquals("南校区综合教学楼 3 层 305", mid.text)
+        assertEquals(10, mid.sizeDp)
+        // 超长：缩到下限 9dp 仍放不下 → 裁左边，保留尾部教室细节
+        val origin = "北校区实验实训中心 B 区 2 层 205 计算机机房（东）"
+        val long = WidgetSchedule.fitPlaceText(origin, width, 11, 9)
+        assertEquals(9, long.sizeDp)
+        assertTrue(long.text.startsWith("…"))
+        assertTrue(long.text.endsWith("（东）"))
+        assertTrue(long.text.length < origin.length)
+    }
+
+    @Test
+    fun `地点适配可以接入安卓Paint实测宽度`() {
+        // 渲染层传的 lambda（这里用一个字固定 10dp 宽代替 Paint）
+        val fit = WidgetSchedule.fitPlaceText("南3 101", 60, 11, 9) { text, _ -> text.length * 10f }
+        assertEquals("南3 101", fit.text)
+        assertEquals(11, fit.sizeDp)
+        val cut = WidgetSchedule.fitPlaceText("南3 101", 40, 11, 9) { text, _ -> text.length * 10f }
+        assertEquals(9, cut.sizeDp)
+        assertEquals("…101", cut.text)
+    }
+
+    @Test
+    fun `2×2 紧凑三行在150dp画布留出安全垫且不降级`() {
+        fun compactNat(lhN: Int, lhS: Int) =
+            lhN + lhS * 2 + WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1
+        // Paint 实测的代表值：13 粗≈16 / 11≈13 / 12 粗≈15 / 10≈12
+        val first = compactNat(16, 13)
+        val second = compactNat(15, 12)
+        val avail = WidgetSchedule.nextClassAvailableDp(150)   // 106（账本 chrome=44，比渲染实测更保守）
+        val budget = avail - WidgetSchedule.NEXT_CLASS_LADDER_BUFFER_DP   // 98
+        assertTrue(
+            "150dp 画布至少要留 6dp 安全垫: sum=${first + second} budget=$budget",
+            budget - (first + second) >= 6,
+        )
+        val n = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 66, firstCompact = first, firstMini = 30,
+            secondStacked = 62, secondCompact = second, secondMini = 28,
+        )
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(avail, n))
+    }
+
+    @Test
     fun `2×2 阶梯判档按实测自然高_两行统一紧凑_永不蒸发`() {
-        // #13 六轮（2026-11-06 用户拍板）：两行统一"课名 + 地点|时间"紧凑两行式；
-        // 满档竖排只留给拉高的 2×3。判档纯函数 nextClassRowPair 只从
+        // 判档纯函数的契约测试：下面构造的 naturals 沿用六轮口径，只验证「阶梯怎么选」，
+        // 不代表七轮渲染层的真实行高（真实值由上面的 150dp 安全垫测试覆盖）。
+        // 满档竖排只留给拉高的 2×3。nextClassRowPair 只从
         // 满/满 → 紧凑/紧凑 → 紧凑/单行 → 单行/单行 里选，取第一对放得下的；
         // 全超预算落 (MINI,MINI) —— 第二节课在任何尺寸下都存在。
         fun nats(
@@ -480,6 +532,7 @@ class WidgetScheduleTest {
 
     @Test
     fun `2×2 阶梯全域扫描_任何画布与字体度量组合都不丢行不溢出`() {
+        // 沿用六轮的字号/自然高构造做全域压力测试（判档契约与渲染层口径解耦）。
         // 把"能不能适配不同机型"写成可执行的证明：画布（真实剪裁后）100..260dp ×
         // 字体度量比 1.05..1.45（Roboto≈1.16 到 MiSans≈1.36，两侧行都多留余量），
         // 每个组合断言三条不变量：
@@ -860,5 +913,173 @@ class WidgetScheduleTest {
         // 名字行数：76dp 高、扣掉地点时间后 3 行封顶；矮行 1 行
         assertEquals(3, WidgetSchedule.weekNameMaxLines(43, 76))
         assertEquals(1, WidgetSchedule.weekNameMaxLines(43, 30))
+    }
+
+    @Test
+    fun `时间显示可在时刻与节次之间切换`() {
+        fun course(timeAsPeriod: Boolean) = WidgetCourse(
+            code = "C", name = "编译原理", place = "南4 103",
+            startMin = 610, endMin = 710, startUnit = 3, endUnit = 4,
+            timeAsPeriod = timeAsPeriod,
+        )
+        // 默认（false）= 时刻，与拾光口径一致
+        assertEquals("10:10-11:50", course(false).timeText)
+        assertEquals("10:10-11:50", course(false).rangeText)
+        // 开启 = 节次
+        assertEquals("第3-4节", course(true).timeText)
+        // 节次未知（0）退回时刻，不出「第0-0节」
+        assertEquals("10:10-11:50", course(true).copy(startUnit = 0).timeText)
+    }
+
+    @Test
+    fun `行样式偏好_强制三行放得下才生效_放不下回退阶梯`() {
+        // 放得下：强制三行生效（哪怕阶梯本来判得更高/更低）
+        val fits = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 66, firstCompact = 52, firstMini = 30,
+            secondStacked = 62, secondCompact = 47, secondMini = 28,
+        )
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(127, fits, WidgetSchedule.ROW_MODE_COMPACT))
+        // 强制档缓冲 2dp：106dp → 预算 104 ≥ 52+47=99 → 生效（2026-11-11 用户实测三档同形后收紧）
+        assertEquals(COMPACT to COMPACT, WidgetSchedule.nextClassRowPair(106, fits, WidgetSchedule.ROW_MODE_COMPACT))
+        // 真放不下（预算 98 < 99）：回退阶梯
+        val (f, s) = WidgetSchedule.nextClassRowPair(100, fits, WidgetSchedule.ROW_MODE_COMPACT)
+        assertTrue("$f/$s", (f to s) != (COMPACT to COMPACT))
+        // 自动档不受影响
+        assertEquals(WidgetSchedule.nextClassRowPair(127, fits), WidgetSchedule.nextClassRowPair(127, fits, WidgetSchedule.ROW_MODE_AUTO))
+    }
+
+    @Test
+    fun `行样式偏好_强制单行恒生效_任何画布都不溢出`() {
+        val n = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 90, firstCompact = 70, firstMini = 30,
+            secondStacked = 86, secondCompact = 66, secondMini = 28,
+        )
+        // 高画布：强制单行也生效（用户要的就是省高度）
+        assertEquals(MINI to MINI, WidgetSchedule.nextClassRowPair(300, n, WidgetSchedule.ROW_MODE_MINI))
+        // 读不到尺寸：单行偏好同样恒生效（画满分支只属于 auto）
+        assertEquals(MINI to MINI, WidgetSchedule.nextClassRowPair(0, n, WidgetSchedule.ROW_MODE_MINI))
+        // auto 读不到尺寸 = 画满（STACKED）
+        assertEquals(STACKED to STACKED, WidgetSchedule.nextClassRowPair(0, n, WidgetSchedule.ROW_MODE_AUTO))
+    }
+
+    @Test
+    fun `地点与时间段可整体隐藏_数据原样保留`() {
+        val c = WidgetCourse(
+            code = "C", name = "编译原理", place = "南4 103",
+            startMin = 610, endMin = 710, startUnit = 3, endUnit = 4,
+        )
+        // 默认全显示
+        assertEquals("南4 103", WidgetSchedule.toRow(c).place)
+        assertEquals("10:10-11:50", WidgetSchedule.toRow(c).timeRange)
+        // 隐藏地点：行里空串，course.place 原样
+        assertTrue(WidgetSchedule.toRow(c.copy(hidePlace = true)).place.isEmpty())
+        assertEquals("南4 103", c.copy(hidePlace = true).place)
+        // 隐藏时间：timeText 空串
+        assertTrue(c.copy(hideTime = true).timeText.isEmpty())
+        // 组合：节次 + 隐藏地点
+        val both = c.copy(timeAsPeriod = true, hidePlace = true)
+        assertEquals("第3-4节", both.timeText)
+        assertTrue(WidgetSchedule.toRow(both).place.isEmpty())
+    }
+
+    @Test
+    fun `周末明细条可整体关闭`() {
+        val monday = java.time.LocalDate.of(2026, 11, 9)
+        val sat = WidgetCourse(code = "C", name = "补课", place = "南1 203", startMin = 480, endMin = 525)
+        val byDay = mapOf(6 to listOf(sat))
+        val withStrip = WidgetSchedule.weekPlan(
+            hasSchedule = true, week = 10, coursesByDay = byDay, today = monday,
+        )
+        assertTrue(withStrip.weekendLines.isNotEmpty())
+        val withoutStrip = WidgetSchedule.weekPlan(
+            hasSchedule = true, week = 10, coursesByDay = byDay, today = monday,
+            showWeekendStrip = false,
+        )
+        assertTrue(withoutStrip.weekendLines.isEmpty())
+    }
+
+    @Test
+    fun `行样式偏好_强制满档_放得下才生效`() {
+        // 165dp 画布口径：stacked 66+62=128 > 预算 119 → 回退阶梯（紧凑三行）
+        val tall = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 66, firstCompact = 52, firstMini = 30,
+            secondStacked = 62, secondCompact = 47, secondMini = 28,
+        )
+        val (f1, s1) = WidgetSchedule.nextClassRowPair(127, tall, WidgetSchedule.ROW_MODE_STACKED)
+        assertTrue("高画布也应受限检查: $f1/$s1", (f1 to s1) == (COMPACT to COMPACT))
+        // 更宽的画布：stacked 放得下 → 满档生效
+        val (f2, s2) = WidgetSchedule.nextClassRowPair(200, tall, WidgetSchedule.ROW_MODE_STACKED)
+        assertEquals(STACKED to STACKED, f2 to s2)
+    }
+
+    @Test
+    fun `明日预告表头用明天的周次`() {
+        val tomorrowCourses = listOf(
+            WidgetCourse(code = "C", name = "职业生涯规划", place = "北1 108", startMin = 840, endMin = 940),
+        )
+        // 周日跨周：今天第 9 周，明天第 10 周 → 表头应跟明天的课走
+        val plan = WidgetSchedule.nextClassPlan(
+            hasSchedule = true, week = 9,
+            today = emptyList(), tomorrow = tomorrowCourses, nowMin = 1200,
+            tomorrowWeek = 10,
+        )
+        assertEquals("明日预告 · 第 10 周", plan.header)
+        // 不传 tomorrowWeek（旧调用点）保持今天的周次
+        val planLegacy = WidgetSchedule.nextClassPlan(
+            hasSchedule = true, week = 9,
+            today = emptyList(), tomorrow = tomorrowCourses, nowMin = 1200,
+        )
+        assertEquals("明日预告 · 第 9 周", planLegacy.header)
+    }
+
+    @Test
+    fun `4x2 行样式进计划_竖排自然高更高`() {
+        val courses = listOf(
+            WidgetCourse(code = "C", name = "编译原理", place = "南4 103", startMin = 610, endMin = 710),
+        )
+        val base = mapOf(
+            "todayDate" to java.time.LocalDate.of(2026, 11, 11),
+        )
+        fun plan(style: String) = WidgetSchedule.twoDayPlan(
+            hasSchedule = true, week = 10,
+            todayDate = base.getValue("todayDate"),
+            tomorrowDate = base.getValue("todayDate").plusDays(1),
+            today = courses, tomorrow = courses, nowMin = 1200,
+            rowStyle = style,
+        )
+        assertEquals(WidgetSchedule.ROW_MODE_AUTO, plan(WidgetSchedule.ROW_MODE_AUTO).rowStyle)
+        assertEquals(WidgetSchedule.ROW_MODE_STACKED, plan(WidgetSchedule.ROW_MODE_STACKED).rowStyle)
+        assertTrue(plan(WidgetSchedule.ROW_MODE_STACKED).stackedRows)
+        assertTrue(plan(WidgetSchedule.ROW_MODE_MINI).miniRows)
+        // 竖排的自然高 = 标准 + 一行小字（16dp）
+        val lines = WidgetSchedule.nameLineCount("编译原理", 150, 13)
+        assertEquals(
+            WidgetSchedule.rowNaturalHeightDp(lines) + WidgetSchedule.NAME_LINE_EXTRA_DP,
+            WidgetSchedule.twoDayRowNaturalHeightDp(lines, WidgetSchedule.ROW_MODE_STACKED),
+        )
+        assertEquals(
+            WidgetSchedule.rowNaturalHeightDp(lines),
+            WidgetSchedule.twoDayRowNaturalHeightDp(lines, WidgetSchedule.ROW_MODE_AUTO),
+        )
+    }
+
+    @Test
+    fun `强制满档在真实画布预算内生效`() {
+        // Meizu 165dp 实测口径：满档自然高 ~63+60=123dp，可用 127dp。
+        // 旧预算（−8）判放不下 → 静默回退紧凑，「满档」成空操作；
+        // 强制档缓冲 2dp → 123 ≤ 125 生效。
+        val n = WidgetSchedule.NextClassRowNaturals(
+            firstStacked = 63, firstCompact = 52, firstMini = 30,
+            secondStacked = 60, secondCompact = 47, secondMini = 28,
+        )
+        assertEquals(
+            STACKED to STACKED,
+            WidgetSchedule.nextClassRowPair(127, n, WidgetSchedule.ROW_MODE_STACKED),
+        )
+        // 紧凑三行同样在强制预算下生效
+        assertEquals(
+            COMPACT to COMPACT,
+            WidgetSchedule.nextClassRowPair(127, n, WidgetSchedule.ROW_MODE_COMPACT),
+        )
     }
 }

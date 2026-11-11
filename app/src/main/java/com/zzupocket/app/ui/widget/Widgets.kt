@@ -132,21 +132,36 @@ object Widgets {
         return kotlin.math.ceil(paint.measureText(text) / usable).toInt().coerceIn(1, 4)
     }
 
+    /** 文字在指定字号下的实测宽度（dp），给 WidgetSchedule.fitPlaceText 用 */
+    fun measureTextWidthDp(context: Context, text: String, sizeDp: Int): Float {
+        if (text.isEmpty()) return 0f
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = dpToPx(context, sizeDp).toFloat()
+            typeface = android.graphics.Typeface.DEFAULT
+        }
+        return paint.measureText(text) / context.resources.displayMetrics.density
+    }
+
+    /** 紧凑三行档的附加配置：地点可用宽度与最小字号；非空即启用 widget_course_row_triple.xml */
+    data class CourseRowTriple(val usableWidthDp: Int, val minSizeDp: Int)
+
     /**
      * 画一行课程（4×2 与 2×2 共用同一套行，两个组件的观感才一致）。
      *
-     * 一行 = 左侧课程色条 + 课名（大）+ 一行「地点（左）／时间段（右）」小字。
+     * 一行 = 左侧课程色条 + 课名（大）+ 地点 / 时间段小字。
      * **不显示老师**（用户要求）。色条按课程代码取色（与 App 课表格子同一套算法）。
+     * 四套布局的 view id 完全一致，这里只按档位选 XML、不分支渲染逻辑：
+     *   · 默认 = 紧凑两行（地点｜时间段同行，4×2 专用）；
+     *   · stacked = 满档竖排三行（拉高的 2×3）；
+     *   · mini = 单行一行式（最低档，不画地点）；
+     *   · triple = 紧凑三行（2×2 标准档，课名 / 地点 / 时间各一行，地点恒单行）。
      *
      * @param rowHeightDp 这一行应该占的高度（dp，按实测画布与**实际行数**算）；
      *   行内容只有约 50dp 高，而 4×2 的实测画布有 195dp —— 不撑的话两行只占 100dp，
      *   下面近百 dp 全空（用户报的"下部分很空"）。
      * @param naturalHeightDp 这一行**不撑时**的自然高 —— 两行课名的行比单行的高 16dp
      *   （换行感知账本，见 [WidgetSchedule.rowNaturalHeightDp]）；传错就会把内容裁掉。
-     * @param stacked 竖排三行版式（课名 / 地点 / 时间段各占一行，issue #13 第三轮）：
-     *   2×2 用它 —— 定不了 HyperOS 的 2×2 实际宽度，与其猜宽度门槛，不如让
-     *   地点/时间段永远不挤同一行（用户报的"挤在一起看不清时间"）。两个布局的
-     *   view id 完全一致，渲染代码不分支；4×2 不传（保持单行版式不动）。
+     * @param triple 非空时启用紧凑三行并做地点自适应；4×2 不传
      */
     fun courseRow(
         context: Context,
@@ -161,22 +176,34 @@ object Widgets {
         stacked: Boolean = false,
         mini: Boolean = false,
         nameMaxLines: Int = 2,
+        triple: CourseRowTriple? = null,
     ): RemoteViews {
+        // 紧凑三行档：地点先缩字号、仍放不下裁左边；地点与时间段共用缩小后的字号保持对齐
+        val placeFit = triple?.let {
+            WidgetSchedule.fitPlaceText(
+                place = row.place,
+                usableWidthDp = it.usableWidthDp,
+                maxSizeDp = subSizeDp,
+                minSizeDp = it.minSizeDp,
+            ) { text, size -> measureTextWidthDp(context, text, size) }
+        }
+        val shownSubDp = placeFit?.sizeDp ?: subSizeDp
         val rv = RemoteViews(
             context.packageName,
             when {
                 mini -> R.layout.widget_course_row_mini
+                triple != null -> R.layout.widget_course_row_triple
                 stacked -> R.layout.widget_course_row_stacked
                 else -> R.layout.widget_course_row
             },
         )
         rv.setTextViewText(R.id.row_name, row.course.name)
-        rv.setTextViewText(R.id.row_place, row.place)
+        rv.setTextViewText(R.id.row_place, placeFit?.text ?: row.place)
         rv.setTextViewText(R.id.row_time, row.timeRange)
         // 字号按画布分档动态设（XML 里是标准档基线；矮盒子用紧凑档防裁字）
         rv.setTextViewTextSize(R.id.row_name, android.util.TypedValue.COMPLEX_UNIT_DIP, nameSizeDp.toFloat())
-        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, subSizeDp.toFloat())
-        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, subSizeDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, shownSubDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, shownSubDp.toFloat())
         // 2×2 紧凑档把课名收到单行省略：长课名换两行的话单行高度装不下，
         // 显式行高会把时间段裁没（#13 四轮）。setMaxLines 带 @RemotableViewMethod，可反射调。
         if (nameMaxLines != 2) {
@@ -196,20 +223,22 @@ object Widgets {
         )
 
         WidgetStyle.tint(rv, R.id.row_bar, WidgetStyle.courseColor(row.course.code, colors, dark))
+        val rowPadDp = if (triple != null) WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP else COURSE_ROW_PAD_DP
         stretch(
             rv = rv,
             viewId = R.id.row_root,
             context = context,
             targetHeightDp = rowHeightDp,
             naturalHeightDp = naturalHeightDp,
-            basePadTopDp = COURSE_ROW_PAD_DP,
-            basePadBottomDp = COURSE_ROW_PAD_DP,
+            basePadTopDp = rowPadDp,
+            basePadBottomDp = rowPadDp,
         )
         return rv
     }
 
     /** widget_course_row.xml 里原本的上下内边距（撑高时要把它加回去，别把它覆盖没了）。2026-11-01 6→5：给两行课名腾高度 */
     private const val COURSE_ROW_PAD_DP = 5
+
 
     /**
      * 把一块内容"撑"到指定高度：靠**加内边距**，不是靠 minHeight。
