@@ -16,3 +16,6 @@ app/schemas/
 *.aab
 *.jks
 *.keystore
+
+# 本地工作日志（不入库）
+WORKLOG*.md
