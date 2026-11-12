@@ -33,37 +33,42 @@ class RoomRepository(
     suspend fun campuses(force: Boolean = false): List<EasClient.CampusDto> {
         if (!force) campusesCache?.let { return it }
         // 盘里有没过期的就直接用（字典是慢变数据，不值得每次进页都赌网络）
-        if (!force) persistedDict<List<EasClient.CampusDto>>(KEY_CAMPUSES, requireFresh = true)?.let {
-            campusesCache = it
-            return it
-        }
+        if (!force) persistedDict<List<EasClient.CampusDto>>(KEY_CAMPUSES, requireFresh = true)
+            ?.takeIf { it.isNotEmpty() }?.let {
+                campusesCache = it
+                return it
+            }
         val list = try {
             eas.fetchCampuses(auth.requireCasToken())
         } catch (e: Exception) {
             // 网络失败：盘里就算过期也当降级兜底——总好过筛选弹窗空空如也
-            persistedDict<List<EasClient.CampusDto>>(KEY_CAMPUSES, requireFresh = false)?.also { campusesCache = it }
+            persistedDict<List<EasClient.CampusDto>>(KEY_CAMPUSES, requireFresh = false)
+                ?.takeIf { it.isNotEmpty() }?.also { campusesCache = it }
                 ?: throw e
         }
         campusesCache = list
-        persistDict(KEY_CAMPUSES, list)
+        // ⚠️ 空列表**不落盘**：服务端瞬态抽风返回 [] 的话，落了盘就是 7 天的
+        // "字典毒化"——每次冷启动都从盘里读到空、断网兜底也兜不出东西。
+        if (list.isNotEmpty()) persistDict(KEY_CAMPUSES, list)
         return list
     }
 
     suspend fun buildings(campusId: Long, force: Boolean = false): List<EasClient.BuildingDto> {
         if (!force) buildingsCache[campusId]?.let { return it }
-        if (!force) persistedDict<List<EasClient.BuildingDto>>(keyBuildings(campusId), requireFresh = true)?.let {
-            buildingsCache[campusId] = it
-            return it
-        }
+        if (!force) persistedDict<List<EasClient.BuildingDto>>(keyBuildings(campusId), requireFresh = true)
+            ?.takeIf { it.isNotEmpty() }?.let {
+                buildingsCache[campusId] = it
+                return it
+            }
         val list = try {
             eas.fetchBuildings(auth.requireCasToken(), campusId)
         } catch (e: Exception) {
-            persistedDict<List<EasClient.BuildingDto>>(keyBuildings(campusId), requireFresh = false)?.also {
-                buildingsCache[campusId] = it
-            } ?: throw e
+            persistedDict<List<EasClient.BuildingDto>>(keyBuildings(campusId), requireFresh = false)
+                ?.takeIf { it.isNotEmpty() }?.also { buildingsCache[campusId] = it }
+                ?: throw e
         }
         buildingsCache[campusId] = list
-        persistDict(keyBuildings(campusId), list)
+        if (list.isNotEmpty()) persistDict(keyBuildings(campusId), list)
         return list
     }
 

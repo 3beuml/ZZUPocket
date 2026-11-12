@@ -10,5 +10,6 @@ fun Throwable.toUserMessage(): String = when (this) {
         ?: "学校接口返回了意料之外的数据（可能已改版）"
     is AppError.Server -> "学校服务返回错误：$message"
     is AppError.ReLoginRequired -> message ?: "登录已失效"
+    is AppError.ZeroTrustAuthRequired -> message ?: "校园网安全网关要求认证"
     else -> message ?: javaClass.simpleName
 }

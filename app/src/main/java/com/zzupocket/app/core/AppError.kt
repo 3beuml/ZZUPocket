@@ -29,4 +29,12 @@ sealed class AppError(message: String, cause: Throwable? = null) : Exception(mes
 
     /** 账号或密码错误 */
     class BadCredentials(message: String = "学号或密码错误") : AppError(message)
+
+    /**
+     * 零信任网关（nox.zzu.edu.cn，奇安信 TrustSSO）要求认证：整条访问路径的
+     * "可信会话"掉了，教务所有接口都会被 302 到认证门户。app 无法代登，
+     * 用户必须去浏览器完成一次认证。与 [ReLoginRequired]（教务令牌）是两回事，
+     * 界面提示必须分开——用户重登教务令牌解决不了这个。
+     */
+    class ZeroTrustAuthRequired(message: String) : AppError(message)
 }

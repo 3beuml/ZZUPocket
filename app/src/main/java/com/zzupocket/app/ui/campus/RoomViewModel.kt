@@ -56,9 +56,16 @@ data class RoomUiState(
     /** 长按教室号弹出的原始字段（排查用） */
     val rawRoom: RoomRow? = null,
     val hiddenVirtual: Int = 0,
+    /**
+     * 快照自带的校区名（字典没起来时界面汇总行用它，别把北校区写成"主校区"）。
+     * 字典加载成功后置回 null。
+     */
+    val snapshotCampusName: String? = null,
 ) {
     val campusName: String
-        get() = campuses.firstOrNull { it.id == campusId }?.nameZh ?: "主校区"
+        get() = campuses.firstOrNull { it.id == campusId }?.nameZh
+            ?: snapshotCampusName
+            ?: "主校区"
 
     val buildingSummary: String
         get() = if (selectedBuildings.isEmpty()) {
@@ -98,6 +105,7 @@ class RoomViewModel : ViewModel() {
 
     private suspend fun bootstrap() {
         _state.update { it.copy(loading = true, error = null) }
+        Log.i(TAG, "bootstrap：进页")
         try {
             val periods = scheduleRepo.periods()
             val semester = scheduleRepo.currentSemester()
@@ -113,6 +121,11 @@ class RoomViewModel : ViewModel() {
             // ⚠️ 快照渲染必须放在任何网络调用之前：断网时 campuses() 会抛，
             // 走不到快照渲染的话明明有数据也整页红条（2026-11-05 用户蜂窝实测，#15 复发）。
             val shownFromCache = renderCachedSnapshot()
+            Log.i(
+                TAG,
+                "bootstrap：快照渲染 shown=$shownFromCache rows=${_state.value.loadedRooms} " +
+                    "fetchedAt=${_state.value.lastFetchedAt} campusId=${_state.value.campusId}",
+            )
             // ② 校区/楼栋字典失败不再炸整页：有快照就停在快照 + 灰字，没快照才红条
             val dictResult = runCatching {
                 val campuses = repo.campuses()
@@ -120,17 +133,29 @@ class RoomViewModel : ViewModel() {
                 if (campus != null) {
                     val buildings = orderedBuildings(repo.buildings(campus.id))
                     _state.update {
-                        it.copy(campuses = campuses, campusId = campus.id, buildings = buildings)
+                        it.copy(
+                            campuses = campuses,
+                            campusId = campus.id,
+                            buildings = buildings,
+                            // 字典回来了：汇总行别再用快照里的校区名
+                            snapshotCampusName = null,
+                        )
                     }
                 }
                 campus != null
             }
             if (!dictResult.getOrDefault(false)) {
+                Log.w(TAG, "bootstrap：字典加载失败", dictResult.exceptionOrNull())
+                // 字典彻底拿不到（网络 + 盘里都没有）：从快照行反推楼栋列表，
+                // 保住筛选弹窗可用——断网也该能按楼栋看快照（2026-11-12 用户实测：
+                // 字典失败后弹窗 0 栋、刷新卡死，一整天只能瞪着快照）。
+                deriveBuildingsFromSnapshot()
                 degradeToCache(
                     dictResult.exceptionOrNull() ?: IllegalStateException("校区字典不可用"),
                 )
                 return
             }
+            Log.i(TAG, "bootstrap：字典 OK buildings=${_state.value.buildings.size}")
             // ③ 距上次成功抓取不足 30 分钟就不联网了（空教室是分钟级数据，但也不该每秒重拉）
             if (shownFromCache && !com.zzupocket.app.core.SyncPolicy.shouldRefresh(
                     now = System.currentTimeMillis(),
@@ -138,13 +163,17 @@ class RoomViewModel : ViewModel() {
                     ttlMs = ROOM_TTL_MS,
                 )
             ) {
+                Log.i(TAG, "bootstrap：快照够新（${_state.value.lastFetchedAt}），跳过联网")
                 _state.update { it.copy(loading = false) }
                 startPrefetchIfOnline()
                 return
             }
+            Log.i(TAG, "bootstrap：开始联网抓取")
             fetch(reset = true)
+            Log.i(TAG, "bootstrap：抓取完成 rooms=${_state.value.loadedRooms}")
             startPrefetchIfOnline()
         } catch (e: Throwable) {
+            Log.w(TAG, "bootstrap：异常降级", e)
             degradeToCache(e)
         }
     }
@@ -166,7 +195,8 @@ class RoomViewModel : ViewModel() {
     private suspend fun renderSnapshotForCurrentState(): Boolean {
         val s = _state.value
         val snap = runCatching {
-            // 先精确匹配当前校区；没有再退「该日期最近抓取的任意校区」
+            // 先精确匹配当前校区；campusId 未知（boot 未完成）才退「该日期最近抓取的任意校区」
+            // ——切校区离线时 campusId 已知，退到别的校区的快照会张冠李戴
             s.campusId?.let {
                 AppGraph.scheduleRepository.cachedRoomSnapshot(s.date.toString(), it)
             } ?: AppGraph.scheduleRepository.cachedRoomSnapshotAnyCampus(s.date.toString())
@@ -197,6 +227,8 @@ class RoomViewModel : ViewModel() {
                 loading = false,
                 loadingMore = false,
                 error = null,
+                campusId = s.campusId ?: snap.campusId,
+                snapshotCampusName = filtered.first().campusName.ifBlank { null },
                 groups = groups,
                 loadedRooms = filtered.size,
                 lastFetchedAt = snap.fetchedAt,
@@ -207,15 +239,45 @@ class RoomViewModel : ViewModel() {
         return true
     }
 
+    /**
+     * 字典彻底拿不到时，从已渲染的快照行反推楼栋列表（id + 楼栋名），
+     * 让筛选弹窗在断网时也有东西可选、离线筛选有 ids 可用。
+     * 只在 buildings 为空时生效；字典恢复后会被正常字典覆盖。
+     */
+    private fun deriveBuildingsFromSnapshot() {
+        val s = _state.value
+        if (s.buildings.isNotEmpty() || allRooms.isEmpty()) return
+        val derived = allRooms
+            .filter { it.buildingName.isNotBlank() }
+            .distinctBy { it.buildingId }
+            .map { EasClient.BuildingDto(id = it.buildingId, nameZh = it.buildingName) }
+        if (derived.isEmpty()) return
+        _state.update { it.copy(buildings = derived) }
+    }
+
     private fun degradeToCache(e: Throwable) {
+        Log.w(TAG, "空教室降级：快照兜底 rows=${allRooms.size} auth=${e is com.zzupocket.app.core.AppError.ReLoginRequired}", e)
         if (allRooms.isNotEmpty()) {
+            // 鉴权失效必须亮出来（红条）：温和的"获取于 HH:mm · 点此刷新"会把它
+            // 吞掉——用户不知道要重新登录，只会觉得"点了刷新没反应"
+            // （2026-11-12 用户实测：令牌过期 + 字典无兜底 → 整页卡死在快照上）。
+            val authMessage = when (e) {
+                is com.zzupocket.app.core.AppError.ReLoginRequired -> e.toUserMessage()
+                // 零信任网关要求认证：重登教务令牌解决不了，必须引导去浏览器认证
+                is com.zzupocket.app.core.AppError.ZeroTrustAuthRequired -> e.toUserMessage()
+                else -> null
+            }
             _state.update {
                 it.copy(
                     loading = false,
                     loadingMore = false,
-                    error = null,
+                    error = authMessage,
                     fromCache = true,
-                    notice = noticeOf(it.lastFetchedAt) ?: "暂时连不上教务系统 · 点此重试",
+                    notice = if (authMessage != null) {
+                        null
+                    } else {
+                        noticeOf(it.lastFetchedAt) ?: "暂时连不上教务系统 · 点此重试"
+                    },
                 )
             }
         } else {
@@ -226,10 +288,16 @@ class RoomViewModel : ViewModel() {
     /** 空教室缓存有效期：30 分钟（当天课表，变化少但毕竟是"现在是否有课"） */
     private val ROOM_TTL_MS = 30L * 60 * 1000
 
-    /** 一行灰字里的"获取于 HH:MM" */
+    /** 一行灰字里的"获取于 HH:MM"；不是今天的快照要带日期——昨天的 09:34 看起来像今天会误导人 */
     private fun noticeOf(fetchedAt: Long?): String? = fetchedAt?.let {
-        val t = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).toLocalTime()
-        "获取于 " + t.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        val zoned = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault())
+        val time = zoned.toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+        val day = when (zoned.toLocalDate()) {
+            java.time.LocalDate.now() -> ""
+            java.time.LocalDate.now().minusDays(1) -> "昨天 "
+            else -> zoned.toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("M月d日 ")) + " "
+        }
+        "获取于 " + day + time
     }
 
     /**
@@ -257,10 +325,23 @@ class RoomViewModel : ViewModel() {
         }
         allRooms = rows
         val groups = rebuildGroups(rows, s.buildings.map { it.id }, s.selectedUnits)
+        val snapCampusId = snap.campusId
+        val snapCampusName = rows.firstOrNull()?.campusName.orEmpty()
         _state.update {
             it.copy(
                 loading = false,
                 error = null,
+                // 快照自带 campusId：字典没起来时用它顶上（校区名同取快照），
+                // 这样后续 refresh 的 fetch 有 campusId 可用，不会卡死
+                campusId = s.campusId ?: snapCampusId,
+                campuses = s.campuses.ifEmpty {
+                    listOfNotNull(
+                        snapCampusId?.let { id ->
+                            EasClient.CampusDto(id = id, nameZh = snapCampusName)
+                        },
+                    )
+                },
+                snapshotCampusName = snapCampusName.ifBlank { null },
                 groups = groups,
                 loadedRooms = rows.size,
                 lastFetchedAt = snap.fetchedAt,
@@ -279,7 +360,16 @@ class RoomViewModel : ViewModel() {
     /** 拉教室（[reset] = 从第一页开始） */
     private suspend fun fetch(reset: Boolean) {
         val s = _state.value
-        if (s.campusId == null) return
+        Log.i(
+            TAG,
+            "fetch：reset=$reset date=${s.date} campusId=${s.campusId} " +
+                "buildings=${s.buildings.size} selected=${s.selectedBuildings.size} page=${s.page}",
+        )
+        // ⚠️ campusId 没就绪必须**抛错**而不是静默 return：静默返回会让调用方
+        // （refresh 的 loading=true）永远等不到 loading=false——之后 refresh 的
+        // `if (loading) return` 把所有刷新永远拒之门外，用户看到的就是
+        // "刷新/筛选都没反应"（2026-11-12 用户实测 0.36.1）。
+        val campusId = s.campusId ?: throw IllegalStateException("校区字典未加载，无法查询教室")
         val ids = if (s.selectedBuildings.isEmpty()) {
             s.buildings.map { it.id }
         } else {
@@ -308,6 +398,7 @@ class RoomViewModel : ViewModel() {
             page = page,
             pageSize = pageSize,
         )
+        Log.i(TAG, "fetch：拿到 ${result.data.size} 间（page=$page/${result.page?.totalPages}）")
         val units = s.periods.map { it.startTime to it.endTime }
         val buildingNames = s.buildings.associate { it.id to it.nameZh }
         val newRows = result.data.filterNot { it.virtual }.map { room ->
@@ -332,14 +423,19 @@ class RoomViewModel : ViewModel() {
         // 落当天快照：教务挂了/断网时还能看到"上次抓到的状态 + 时间"。
         // reset（第一页）= replace；续页 = append 累积——否则"今天"的快照
         // 永远只有第一页（2026-11-11 自检发现）。
-        runCatching {
-            val campusId = s.campusId ?: return@runCatching
-            AppGraph.scheduleRepository.saveRoomSnapshot(
-                date = s.date.toString(),
-                campusId = campusId,
-                rows = toCacheRows(result, s.buildings),
-                replace = reset,
-            )
+        // ⚠️ **筛选态不落快照**：快照的语义是"该日期+校区的全量占用"，
+        // 把只含所选楼栋的结果 replace 进去会覆盖全量快照——之后所有
+        // 快照渲染（冷启动断网兜底、切换兜底）都只剩那栋楼，看起来像
+        // "app 记住了我上次选的楼"（2026-11-12 用户实测）。
+        if (s.selectedBuildings.isEmpty()) {
+            runCatching {
+                AppGraph.scheduleRepository.saveRoomSnapshot(
+                    date = s.date.toString(),
+                    campusId = campusId,
+                    rows = toCacheRows(result, s.buildings),
+                    replace = reset,
+                )
+            }
         }
         val totalPages = result.page?.totalPages ?: 1
         val currentPage = result.page?.currentPage ?: page
@@ -358,6 +454,8 @@ class RoomViewModel : ViewModel() {
                 groups = groups,
                 fromCache = false,
                 notice = null,
+                // 网络实抓成功：汇总行回到字典口径
+                snapshotCampusName = null,
             )
         }
 
@@ -472,12 +570,25 @@ class RoomViewModel : ViewModel() {
     }
 
     fun refresh() {
-        if (_state.value.loading) return
+        if (_state.value.loading) {
+            Log.w(TAG, "refresh：被 loading 守卫拦下（上一轮未结束）")
+            return
+        }
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
-            runCatching {
+            // 字典强刷一次（成功则落盘也更新）。失败**不能吞**：
+            // campusId 还没就绪时 fetch 无从谈起，把真实原因（典型：登录已失效）
+            // 交给 degradeToCache 亮出来——否则用户看到的就是"刷新没反应"。
+            val dictError = runCatching {
                 repo.campuses(force = true)
                 _state.value.campusId?.let { repo.buildings(it, force = true) }
+            }.exceptionOrNull()
+            if (dictError != null) Log.w(TAG, "refresh：字典强刷失败", dictError)
+            if (_state.value.campusId == null) {
+                degradeToCache(
+                    dictError ?: IllegalStateException("校区字典未加载"),
+                )
+                return@launch
             }
             runCatching { fetch(reset = true) }
                 .onFailure { e -> degradeToCache(e) }
@@ -503,6 +614,7 @@ class RoomViewModel : ViewModel() {
                 campusId = id,
                 selectedBuildings = emptySet(),
                 buildings = emptyList(),
+                snapshotCampusName = null,
                 loading = true,
             )
         }

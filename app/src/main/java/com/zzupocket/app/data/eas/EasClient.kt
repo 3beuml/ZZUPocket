@@ -390,6 +390,29 @@ class EasClient(
      * 教室列表 + 每间教室当天的占用。
      * ⚠️ 请求体里**不能出现 campusAssoc**（见上面注释）。
      */
+    /**
+     * 3xx 守卫 + 取证：eas 客户端**有意不跟随重定向**（HttpClients.eas）。
+     * 两件事：① 学校零信任网关（nox.zzu.edu.cn，奇安信 TrustSSO）拦下整条访问路径
+     * 的会话时，抛 [AppError.ZeroTrustAuthRequired]——"去浏览器认证"级别的失败，
+     * 不能和普通网络错误混在一起；② 其余重定向记 Location 的 host+path 供定位
+     * （Location 指向哪，直接决定是"等一等"还是"改代码"）。
+     */
+    private fun redirectGuardOf(code: Int, path: String, location: String?) {
+        if (code in 300..399) {
+            val url = location?.let { runCatching { it.toHttpUrl() }.getOrNull() }
+            // 零信任网关（奇安信 TrustSSO）要求认证：整条访问路径的"可信会话"掉了，
+            // 教务所有接口都会被 302 到 nox 认证门户——app 端无法代登，必须
+            // 引导用户去浏览器完成认证（2026-11-12 实测：移动数据下也会这样）。
+            if (url != null && url.host.endsWith("nox.zzu.edu.cn")) {
+                throw AppError.ZeroTrustAuthRequired(
+                    "校园网安全网关要求认证：请用浏览器打开教务系统（jwxt.zzu.edu.cn）完成登录，回来再点刷新。",
+                )
+            }
+            val short = url?.let { u -> "${u.host}${u.encodedPath}" } ?: location?.take(120)
+            Log.w(TAG_AUTH, "教务重定向：HTTP $code $path → Location=$short")
+        }
+    }
+
     suspend fun fetchRooms(
         userToken: String,
         body: RoomQueryBody,
@@ -412,6 +435,7 @@ class EasClient(
                 throw rejectExplained(it.code, "教室占用", userToken, err)
             }
             if (!it.isSuccessful) {
+                redirectGuardOf(it.code, "/room/place/rooms", it.header("Location"))
                 throw AppError.Server(it.code, "教室查询失败（HTTP ${it.code}）：${serverMessageOf(text)}")
             }
             val env = try {
@@ -519,7 +543,10 @@ class EasClient(
                 Log.w(TAG_AUTH, "教务拒绝：HTTP ${it.code} ${url.substringAfter("zzu.edu.cn", url)}（响应体 ${text.length} 字节）")
                 throw rejectExplained(it.code, what, userToken, err)
             }
-            if (!it.isSuccessful) throw AppError.Server(it.code, "教务返回 HTTP ${it.code}（$what）")
+            if (!it.isSuccessful) {
+                redirectGuardOf(it.code, url.substringAfter("zzu.edu.cn", url), it.header("Location"))
+                throw AppError.Server(it.code, "教务返回 HTTP ${it.code}（$what）")
+            }
 
             val env = try {
                 json.decodeFromString<Envelope<T>>(text)
