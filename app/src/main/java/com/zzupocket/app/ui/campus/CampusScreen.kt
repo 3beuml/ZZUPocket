@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -80,6 +81,8 @@ import kotlinx.coroutines.launch
 fun CampusScreen(
     onOpenLogin: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    /** 更多 → 网关认证：学校统一身份验证网关的状态与手动兜底 */
+    onOpenGateway: () -> Unit = {},
     onOpenElectricity: () -> Unit = {},
     onOpenCard: () -> Unit = {},
     onOpenRooms: () -> Unit = {},
@@ -131,6 +134,12 @@ fun CampusScreen(
                     alwaysShowSubtitle = true,
                 )
                 Entry(Icons.Filled.Info, "关于", "数据来源、隐私与致谢", onOpenAbout)
+                Entry(
+                    Icons.Filled.VpnKey,
+                    "网关认证",
+                    "学校统一身份验证的状态与手动处理",
+                    onOpenGateway,
+                )
             }
 
             GroupTitle("学习空间")

@@ -577,8 +577,19 @@ cacheNoticeNeedsLogin = expired,
                 // 学期列表拉不到不再炸整页（#15 复发：蜂窝下 refreshSemesters 抛
                 // "网络不可达"，外层 catch 把整页打成红错+空白 —— 本地明明有整学期缓存）。
                 // 失败就空着继续走：loadSemester 自己有"缓存优先 + 灰字"兜底。
-                runCatching { repo.refreshSemesters() }
+                val refreshed = runCatching { repo.refreshSemesters() }
                 all = repo.semesters()
+                // ⚠️ 但**本地也是空的**（新装/清数据）时不能再吞：selected 会是 null
+                // → loading 永远 true → "正在获取课表…"无限转圈（2026-11-12 网关拦截
+                // 期间新用户实测）。把真实原因亮出来。
+                if (all.isEmpty()) {
+                    refreshed.exceptionOrNull()?.let { e ->
+                        _state.update {
+                            it.copy(loading = false, error = e.toUserMessage(), loggedIn = loggedIn)
+                        }
+                        return
+                    }
+                }
             }
             val (visible, notice) = applyYearFilter(all)
             val selected = visible.firstOrNull { it.isCurrent } ?: visible.firstOrNull()

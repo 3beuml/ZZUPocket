@@ -87,11 +87,14 @@ class AuthRepository(
         if (challenge != null) {
             // 立刻发一次短信，用户不用再点一次
             cas.sendSmsCode(challenge)
+            // 密码先记住：网关自动认证要用（短信通过后走 submitSmsCode 再确认一次）
+            store.noxAccount = account
+            store.noxPassword = password
             return LoginStep.NeedSms(challenge)
         }
         // ⚠️ 即使不需要 MFA，也必须把 detect 返回的 state 传回去；
         // 传空字符串服务端会直接 400（exception.mfa.verify.error）。
-        return persist(cas.login(account, password, mfaState = detect.state), account)
+        return persist(cas.login(account, password, mfaState = detect.state), account, password)
     }
 
     suspend fun resendSmsCode(challenge: CasClient.MfaChallenge) {
@@ -107,13 +110,22 @@ class AuthRepository(
         cas.verifySmsCode(challenge, code)
         // 同样要带上 state —— 它来自 /mfa/detect，短信校验通过后一并交给 passwordLogin
         val result = cas.login(account, password, mfaState = challenge.state)
-        return persist(result, account)
+        return persist(result, account, password)
     }
 
-    private fun persist(result: CasClient.LoginResult, account: String): LoginStep.Success {
+    private fun persist(
+        result: CasClient.LoginResult,
+        account: String,
+        /** 非空时同步给统一身份验证网关自动认证用（加密存储，2026-11-12 用户拍板） */
+        password: String? = null,
+    ): LoginStep.Success {
         store.casUserToken = result.userToken
         store.casRefreshToken = result.refreshToken
         store.lastLoginAt = System.currentTimeMillis()
+        if (password != null) {
+            store.noxAccount = account
+            store.noxPassword = password
+        }
         // CAS 令牌换了，一卡通的二级令牌一起作废
         store.ecardAccessToken = null
         store.ecardRefreshToken = null

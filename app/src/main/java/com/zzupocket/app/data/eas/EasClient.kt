@@ -3,10 +3,13 @@ package com.zzupocket.app.data.eas
 import android.util.Log
 import com.zzupocket.app.core.AppError
 import com.zzupocket.app.core.ScheduleText
+import com.zzupocket.app.data.auth.NoxGatewayClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.serializer
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -33,6 +36,12 @@ import java.io.IOException
 class EasClient(
     private val client: OkHttpClient,
     private val json: Json,
+    /**
+     * 统一身份验证网关自动认证（2026-11 学校新增网关）。教务请求被 302 到认证门户时，
+     * 先尝试后台自动登录一次再重试；未配置或失败则照旧抛
+     * [com.zzupocket.app.core.AppError.ZeroTrustAuthRequired] 走界面提示。
+     */
+    private val gateway: NoxGatewayClient? = null,
 ) {
 
     // ── DTO ──────────────────────────────────────────────────────────────
@@ -387,35 +396,50 @@ class EasClient(
         getData("$MICRO/room/place/building?campusAssoc=${campusAssoc ?: ""}", userToken, "楼栋列表")
 
     /**
+     * 3xx 守卫 + 取证：eas 客户端**有意不跟随重定向**（HttpClients.eas）。
+     * 三件事：① Location 指向统一身份验证网关时返回门户地址——
+     * 调用方先走 [NoxGatewayClient.restoreTrust] 自动认证再重试一次；
+     * ② 自动认证不可用/失败时抛 [AppError.ZeroTrustAuthRequired]（"去浏览器
+     * 认证"级别的失败，不能和普通网络错误混在一起）；
+     * ③ 其余重定向记 Location 的 host+path 供定位。
+     */
+    private suspend fun redirectGuardOf(
+        code: Int,
+        path: String,
+        location: String?,
+        allowAutoAuth: Boolean,
+    ) {
+        if (code !in 300..399) return
+        val url = location?.let { runCatching { it.toHttpUrl() }.getOrNull() }
+        if (url != null && url.host.endsWith(NoxGatewayClient.HOST)) {
+            val portalUrl = NoxGatewayClient.portalUrlOf(location)
+            if (allowAutoAuth && portalUrl != null && gateway?.restoreTrust(portalUrl) == true) {
+                Log.i(TAG_AUTH, "网关自动认证成功，重试原请求：$path")
+                return
+            }
+            throw AppError.ZeroTrustAuthRequired(
+                // 没存过密码（升级后还没重新登录过）→ 指路 app 内登录，一次到位。
+                // 注意：这句话出现时 RoomScreen 的红条下必有「去补录密码」按钮，别指错路。
+                if (gateway?.hasStoredCredentials() == false) {
+                    "校园网安全网关要求认证：请点下方「去补录密码」重新登录一次——" +
+                        "新版会记住密码，之后网关过期会自动恢复，无需再管。"
+                } else {
+                    "校园网安全网关要求认证：请用浏览器打开教务系统（jwxt.zzu.edu.cn）完成登录，回来再点刷新。"
+                },
+            )
+        }
+        val short = url?.let { u -> "${u.host}${u.encodedPath}" } ?: location?.take(120)
+        Log.w(TAG_AUTH, "教务重定向：HTTP $code $path → Location=$short")
+    }
+
+    /**
      * 教室列表 + 每间教室当天的占用。
      * ⚠️ 请求体里**不能出现 campusAssoc**（见上面注释）。
      */
-    /**
-     * 3xx 守卫 + 取证：eas 客户端**有意不跟随重定向**（HttpClients.eas）。
-     * 两件事：① 学校零信任网关（nox.zzu.edu.cn，奇安信 TrustSSO）拦下整条访问路径
-     * 的会话时，抛 [AppError.ZeroTrustAuthRequired]——"去浏览器认证"级别的失败，
-     * 不能和普通网络错误混在一起；② 其余重定向记 Location 的 host+path 供定位
-     * （Location 指向哪，直接决定是"等一等"还是"改代码"）。
-     */
-    private fun redirectGuardOf(code: Int, path: String, location: String?) {
-        if (code in 300..399) {
-            val url = location?.let { runCatching { it.toHttpUrl() }.getOrNull() }
-            // 零信任网关（奇安信 TrustSSO）要求认证：整条访问路径的"可信会话"掉了，
-            // 教务所有接口都会被 302 到 nox 认证门户——app 端无法代登，必须
-            // 引导用户去浏览器完成认证（2026-11-12 实测：移动数据下也会这样）。
-            if (url != null && url.host.endsWith("nox.zzu.edu.cn")) {
-                throw AppError.ZeroTrustAuthRequired(
-                    "校园网安全网关要求认证：请用浏览器打开教务系统（jwxt.zzu.edu.cn）完成登录，回来再点刷新。",
-                )
-            }
-            val short = url?.let { u -> "${u.host}${u.encodedPath}" } ?: location?.take(120)
-            Log.w(TAG_AUTH, "教务重定向：HTTP $code $path → Location=$short")
-        }
-    }
-
     suspend fun fetchRooms(
         userToken: String,
         body: RoomQueryBody,
+        retriedAfterGatewayAuth: Boolean = false,
     ): ClassroomPageDto = withContext(Dispatchers.IO) {
         val payload = json.encodeToString(RoomQueryBody.serializer(), body)
         val request = Request.Builder()
@@ -435,7 +459,11 @@ class EasClient(
                 throw rejectExplained(it.code, "教室占用", userToken, err)
             }
             if (!it.isSuccessful) {
-                redirectGuardOf(it.code, "/room/place/rooms", it.header("Location"))
+                redirectGuardOf(it.code, "/room/place/rooms", it.header("Location"), !retriedAfterGatewayAuth)
+                // 走到这说明 redirectGuardOf 没抛——只可能是"自动认证刚成功"→ 重试一次（防环）
+                if (!retriedAfterGatewayAuth && gateway != null) {
+                    return@withContext fetchRooms(userToken, body, retriedAfterGatewayAuth = true)
+                }
                 throw AppError.Server(it.code, "教室查询失败（HTTP ${it.code}）：${serverMessageOf(text)}")
             }
             val env = try {
@@ -517,10 +545,16 @@ class EasClient(
         }
     }
 
-    private suspend inline fun <reified T> getData(
+    /**
+     * 网关自动认证需要"被拦后重试一次"，而 inline+reified 函数不允许递归——
+     * 所以把请求体拆成非内联的 [getDataImpl]，[getData] 只做薄壳（提供 serializer）。
+     */
+    private suspend fun <T> getDataImpl(
         url: String,
         userToken: String,
         what: String,
+        elementSerializer: KSerializer<T>,
+        retriedAfterGatewayAuth: Boolean,
     ): T = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url.toHttpUrl())
@@ -544,12 +578,16 @@ class EasClient(
                 throw rejectExplained(it.code, what, userToken, err)
             }
             if (!it.isSuccessful) {
-                redirectGuardOf(it.code, url.substringAfter("zzu.edu.cn", url), it.header("Location"))
+                redirectGuardOf(it.code, url.substringAfter("zzu.edu.cn", url), it.header("Location"), !retriedAfterGatewayAuth)
+                // 走到这说明 redirectGuardOf 没抛——只可能是"自动认证刚成功"→ 重试一次（防环）
+                if (!retriedAfterGatewayAuth && gateway != null) {
+                    return@withContext getDataImpl(url, userToken, what, elementSerializer, retriedAfterGatewayAuth = true)
+                }
                 throw AppError.Server(it.code, "教务返回 HTTP ${it.code}（$what）")
             }
 
             val env = try {
-                json.decodeFromString<Envelope<T>>(text)
+                json.decodeFromString(Envelope.serializer(elementSerializer), text)
             } catch (e: Exception) {
                 throw AppError.Parse(
                     "教务${what}响应无法解析（顶层字段：${EasDiagnostics.topKeys(json, text)}）",
@@ -562,6 +600,13 @@ class EasClient(
             env.data ?: throw AppError.Parse("教务${what}响应缺少 data")
         }
     }
+
+    private suspend inline fun <reified T> getData(
+        url: String,
+        userToken: String,
+        what: String,
+        retriedAfterGatewayAuth: Boolean = false,
+    ): T = getDataImpl(url, userToken, what, serializer<T>(), retriedAfterGatewayAuth)
 
     companion object {
         private const val TAG_SCHEDULE = "ScheduleRaw"

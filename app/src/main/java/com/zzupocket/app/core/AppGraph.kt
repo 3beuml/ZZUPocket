@@ -105,7 +105,14 @@ object AppGraph {
 
     val ecardClient: EcardClient by lazy { EcardClient(HttpClients.ecard, json) }
 
-    val easClient: EasClient by lazy { EasClient(HttpClients.eas, json) }
+    /** 统一身份验证网关自动认证（学校 2026-11 新增网关；网关认证管理页与 EasClient 共用） */
+    val noxGateway: com.zzupocket.app.data.auth.NoxGatewayClient by lazy {
+        com.zzupocket.app.data.auth.NoxGatewayClient(tokenStore)
+    }
+
+    val easClient: EasClient by lazy {
+        EasClient(HttpClients.eas, json, noxGateway)
+    }
 
     /** 图书馆（order.lib.zzu.edu.cn）： WebView 抓会话 → 原生查询预约记录 */
     val libSessionSource: com.zzupocket.app.data.lib.LibSessionSource by lazy {

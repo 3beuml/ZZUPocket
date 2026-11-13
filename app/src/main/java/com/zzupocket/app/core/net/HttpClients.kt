@@ -77,7 +77,8 @@ object HttpClients {
         }
     }
 
-    private fun builder(minIntervalMs: Long) = OkHttpClient.Builder()
+    /** 网关自动认证（NoxGatewayClient）需要自组 client：跟重定向 + 内存 cookie jar */
+    internal fun builder(minIntervalMs: Long) = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)

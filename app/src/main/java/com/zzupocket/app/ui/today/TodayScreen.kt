@@ -27,22 +27,33 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.MeetingRoom
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import com.zzupocket.app.ui.components.GlassCard
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,11 +63,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.domain.EnergyStats
 import com.zzupocket.app.ui.nav.DOCK_CLEARANCE
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 private val TIME_FMT = SimpleDateFormat("HH:mm", Locale.getDefault())
 
@@ -85,6 +98,14 @@ fun TodayScreen(
     val timeline by timelineVm.state.collectAsStateWithLifecycle()
     val card by cardVm.state.collectAsStateWithLifecycle()
 
+    // 首页模块自定义（issue #19）：顺序 + 隐藏，从 UiPrefs 读
+    val scope = rememberCoroutineScope()
+    val uiPrefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = null)
+    val moduleLayout = remember(uiPrefs) {
+        TodayModules.resolved(uiPrefs?.todayModuleOrder.orEmpty(), uiPrefs?.todayModulesHidden.orEmpty())
+    }
+    var showModuleEditor by remember { mutableStateOf(false) }
+
     // 从登录页返回、或从后台切回来时重新确认登录态并补一次刷新。
     // 少了这一步，登录成功回到「今天」仍会显示"未登录"——因为 ViewModel 不会重建。
     // 时间轴和校园卡也要重算：刚在专注页记完一笔，回到这里就该看到。
@@ -99,6 +120,9 @@ fun TodayScreen(
             TopAppBar(
                 title = { Text("首页") },
                 actions = {
+                    IconButton(onClick = { showModuleEditor = true }) {
+                        Icon(Icons.Filled.Tune, contentDescription = "自定义首页模块")
+                    }
                     IconButton(onClick = onOpenDiagnostics) {
                         Icon(Icons.Filled.MoreHoriz, contentDescription = "登录状态")
                     }
@@ -123,43 +147,151 @@ fun TodayScreen(
                 LoginPromptCard(onOpenLogin)
             }
 
-            // ① 今天的时间轴：上课 / 已完成的专注（课间空档不画，见 TodayTimelineCard 的注释）
-            TodayTimelineCard(state = timeline, onOpenSchedule = onOpenSchedule)
+            // 模块按用户自定义的顺序渲染（issue #19）；隐藏的模块直接不出现。
+            // 每个模块的加载/数据逻辑不变，这里只管"排不排、排哪"。
+            moduleLayout.forEach { (moduleId, visible) ->
+                if (!visible) return@forEach
+                when (moduleId) {
+                    TodayModules.TODAY_MODULE_TIMELINE ->
+                        // ① 今天的时间轴：上课 / 已完成的专注（课间空档不画，见 TodayTimelineCard 的注释）
+                        TodayTimelineCard(state = timeline, onOpenSchedule = onOpenSchedule)
 
-            // ② 今天的日程：自己在课表里加的（没有就不显示这张卡）
-            TodayCustomScheduleCard(
-                entries = timeline.customEntries,
-                onOpenSchedule = onOpenSchedule,
-            )
+                    TodayModules.TODAY_MODULE_SCHEDULE ->
+                        // ② 今天的日程：自己在课表里加的（没有就不显示这张卡）
+                        TodayCustomScheduleCard(
+                            entries = timeline.customEntries,
+                            onOpenSchedule = onOpenSchedule,
+                        )
 
-            // ②.5 快速入口（和非学习页同款的一行式）：
-            LibraryEntryCard(
-                icon = Icons.Filled.LocalLibrary,
-                title = "图书馆 · 座位预约",
-                subtitle = "学校原版网页",
-                onOpen = onOpenLibrary,
-            )
-            LibraryEntryCard(
-                icon = Icons.Filled.MeetingRoom,
-                title = "空教室查询",
-                subtitle = "按楼看每间教室哪节有课",
-                onOpen = onOpenRooms,
-            )
+                    TodayModules.TODAY_MODULE_LIBRARY ->
+                        // ②.5 快速入口（和非学习页同款的一行式）：
+                        LibraryEntryCard(
+                            icon = Icons.Filled.LocalLibrary,
+                            title = "图书馆 · 座位预约",
+                            subtitle = "学校原版网页",
+                            onOpen = onOpenLibrary,
+                        )
 
-            // ③ 宿舍电量（底部带"近 7 天"摘要行，完整的趋势图在电费页）
-            ElectricityCard(
-                state = state,
-                onRefresh = vm::refresh,
-                onOpenLogin = onOpenLogin,
-                onOpen = onOpenElectricity,
-            )
+                    TodayModules.TODAY_MODULE_ROOMS ->
+                        LibraryEntryCard(
+                            icon = Icons.Filled.MeetingRoom,
+                            title = "空教室查询",
+                            subtitle = "按楼看每间教室哪节有课",
+                            onOpen = onOpenRooms,
+                        )
 
-            // ④ 校园卡：余额 + 今日消费
-            TodayCardBalanceCard(state = card, onOpen = onOpenCard)
+                    TodayModules.TODAY_MODULE_ELECTRICITY ->
+                        // ③ 宿舍电量（底部带"近 7 天"摘要行，完整的趋势图在电费页）
+                        ElectricityCard(
+                            state = state,
+                            onRefresh = vm::refresh,
+                            onOpenLogin = onOpenLogin,
+                            onOpen = onOpenElectricity,
+                        )
+
+                    TodayModules.TODAY_MODULE_CARD ->
+                        // ④ 校园卡：余额 + 今日消费
+                        TodayCardBalanceCard(state = card, onOpen = onOpenCard)
+                }
+            }
 
             Spacer(Modifier.height(4.dp))
         }
     }
+
+    if (showModuleEditor) {
+        TodayModuleEditorSheet(
+            layout = moduleLayout,
+            onDismiss = { showModuleEditor = false },
+            onSave = { order, hidden ->
+                showModuleEditor = false
+                scope.launch {
+                    AppGraph.uiPrefsStore.setTodayModules(order, hidden)
+                }
+            },
+        )
+    }
+}
+
+/**
+ * 首页模块自定义编辑器（issue #19）：每行一个模块——可见开关 + 上/下移按钮。
+ * 时间轴固定可见（首页的核心），只能调序。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TodayModuleEditorSheet(
+    layout: List<Pair<String, Boolean>>,
+    onDismiss: () -> Unit,
+    onSave: (order: List<String>, hidden: Set<String>) -> Unit,
+) {
+    // 本地编辑态：确认时才落盘
+    val items = remember(layout) { mutableStateListOf<Pair<String, Boolean>>().apply { addAll(layout) } }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            Text("自定义首页模块", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "「今天的时间轴」是首页核心，始终显示；其余模块可隐藏、可调序。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+            )
+            items.forEachIndexed { index, (id, visible) ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 可见开关（时间轴没有）
+                    if (id in TodayModules.HIDEABLE) {
+                        Checkbox(
+                            checked = visible,
+                            onCheckedChange = { v ->
+                                items[index] = id to v
+                            },
+                        )
+                    } else {
+                        Spacer(Modifier.width(48.dp))
+                    }
+                    Text(
+                        TodayModules.LABELS[id].orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (visible) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 上移/下移（时间轴恒在第一，不给它按钮）
+                    if (index > 1) {
+                        IconButton(onClick = {
+                            if (index > 1) items.move(index, index - 1)
+                        }) {
+                            Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上移")
+                        }
+                    } else {
+                        Spacer(Modifier.width(48.dp))
+                    }
+                    if (index > 0 && index < items.size - 1) {
+                        IconButton(onClick = { items.move(index, index + 1) }) {
+                            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "下移")
+                        }
+                    }
+                }
+            }
+            Button(
+                onClick = { onSave(items.map { it.first }, items.filter { !it.second }.map { it.first }.toSet()) },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) { Text("保存") }
+        }
+    }
+}
+
+/** Compose 的 StateList 没有现成的 move：摘出再插回去 */
+private fun SnapshotStateList<Pair<String, Boolean>>.move(from: Int, to: Int) {
+    if (from == to || from !in indices || to !in indices) return
+    val item = removeAt(from)
+    add(to, item)
 }
 
 @Composable

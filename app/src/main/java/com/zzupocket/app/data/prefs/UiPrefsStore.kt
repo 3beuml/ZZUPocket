@@ -161,6 +161,17 @@ data class UiPrefs(
     val acRoomLabel: String? = null,
     /** 检测更新里被用户「不再提醒」的版本号（如 "0.33.0"）；null = 没屏蔽过任何版本 */
     val updateMutedVersion: String? = null,
+    /**
+     * 首页模块的**显示顺序**（模块 id CSV，见 [com.zzupocket.app.ui.today.TodayModules]）。
+     * 空 = 默认顺序（用户没自定义过）。用户保存过自定义后写入全量顺序；
+     * 将来新增的模块不在表里 → 追加到末尾（默认可见，见 [com.zzupocket.app.ui.today.TodayModules.resolved]）。
+     */
+    val todayModuleOrder: List<String> = emptyList(),
+    /**
+     * 首页被**隐藏**的模块 id 集合（issue #19：有同学用不到校园卡）。
+     * 时间轴是首页的核心，不在可隐藏之列。
+     */
+    val todayModulesHidden: Set<String> = emptySet(),
 ) {
     val dayCount: Int get() = if (showWeekend) 7 else 5
 
@@ -235,6 +246,9 @@ class UiPrefsStore(context: Context) {
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             updateMutedVersion = p[KEY_UPDATE_MUTED]?.takeIf { it.isNotBlank() },
+            todayModuleOrder = p[KEY_TODAY_MODULE_ORDER]?.split(',')?.filter { it.isNotBlank() } ?: emptyList(),
+            todayModulesHidden = p[KEY_TODAY_MODULES_HIDDEN]?.split(',')?.filter { it.isNotBlank() }?.toSet()
+                ?: emptySet(),
         )
     }
 
@@ -307,6 +321,12 @@ class UiPrefsStore(context: Context) {
 
     /** 「更多 → 界面 → 显示描述」；写入后 AppNav 根部的 CompositionLocal 立刻全树重组 */
     suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
+
+    /** 首页模块自定义（issue #19）：显示顺序 + 隐藏集合一起写 */
+    suspend fun setTodayModules(order: List<String>, hidden: Set<String>) = store.edit { p ->
+        p[KEY_TODAY_MODULE_ORDER] = order.joinToString(",")
+        p[KEY_TODAY_MODULES_HIDDEN] = hidden.joinToString(",")
+    }
 
     /**
      * 写**其中一路**的房间可读名。
@@ -436,6 +456,8 @@ class UiPrefsStore(context: Context) {
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")
         val KEY_AC_ROOM_LABEL = stringPreferencesKey("ac_room_label")
         val KEY_UPDATE_MUTED = stringPreferencesKey("update_muted_version")
+        val KEY_TODAY_MODULE_ORDER = stringPreferencesKey("today_module_order")
+        val KEY_TODAY_MODULES_HIDDEN = stringPreferencesKey("today_modules_hidden")
 
         /** 旧版（0.31.6 及以前）研究生周次锚点：只保留键名用于一次性清理 */
         val KEY_GMS_WEEK_ONE = androidx.datastore.preferences.core.longPreferencesKey("gms_week_one_epoch_day")

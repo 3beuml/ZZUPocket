@@ -3,6 +3,7 @@ package com.zzupocket.app.ui.library
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -17,8 +18,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -52,8 +56,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.zzupocket.app.BuildConfig
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.data.lib.LibClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * 图书馆（形态 1：内嵌学校自己的网页）。
@@ -77,6 +85,39 @@ import java.io.ByteArrayInputStream
  */
 private const val LIBRARY_URL = "http://order.lib.zzu.edu.cn/h5/"
 private const val TAG = "LibraryWeb"
+
+/**
+ * **WebView 跨进入复用**：离开页面时把实例留在内存（不 destroy），下次进入直接
+ * attach——SPA 的会话、滚动位置、已加载资源全部保留，二次进入秒开。
+ *
+ * 为什么可以放心做：① WebView 用 **applicationContext** 创建，不持有 Activity，
+ * 不会泄漏页面；② 每次组合时先从旧 parent 上摘下来再挂；③ 进程被系统回收时
+ * 缓存自然一起消失，行为等同首次打开。
+ */
+private var cachedWebView: WebView? = null
+
+/** 进入页面时的校园网预检结果 */
+private enum class NetCheck { CHECKING, OK, FAIL }
+
+/**
+ * 预检图书馆系统可达性（2.5 秒超时）。
+ *
+ * 为什么要有：预约系统**只能校内访问**（校外 443 被校园网边界拒，app 只能走明文
+ * HTTP:80，见 network_security_config）——不在校园网时 WebView 会白屏加载很久
+ * 最后报一个模糊的错。先探再进，把"换环境"变成一句明确提示。
+ */
+private suspend fun checkLibReachable(): Boolean = withContext(Dispatchers.IO) {
+    try {
+        val conn = URL("http://order.lib.zzu.edu.cn/h5/").openConnection() as HttpURLConnection
+        conn.connectTimeout = 2500
+        conn.readTimeout = 2500
+        conn.requestMethod = "HEAD"
+        conn.responseCode > 0
+    } catch (e: Exception) {
+        Log.i(TAG, "预检失败（大概率不在校园网）：${e.javaClass.simpleName}")
+        false
+    }
+}
 
 /** 不需要、且国内直连不稳定的第三方域名（拦掉，避免拖死页面） */
 private val BLOCKED_HOSTS = listOf("unpkg.com", "cdn.jsdelivr.net", "fonts.googleapis.com")
@@ -248,6 +289,69 @@ fun LibraryScreen(
     /** 非空时顶栏显示「记录」入口（原生预约记录 + 热力图页） */
     onOpenRecords: (() -> Unit)? = null,
 ) {
+    // ── 校园网预检：先探再进，把"校外白屏很久→模糊报错"变成一句明确提示 ──
+    // 有缓存的 WebView（上次进来过且进程没死）就不必预检了——直接秒开，探测反而添乱。
+    var netCheck by remember { mutableStateOf(if (cachedWebView != null) NetCheck.OK else NetCheck.CHECKING) }
+    LaunchedEffect(Unit) {
+        if (netCheck == NetCheck.CHECKING) {
+            netCheck = if (checkLibReachable()) NetCheck.OK else NetCheck.FAIL
+        }
+    }
+    // 用户点了「仍要尝试」：跳过预检结论继续走（校内偶尔误判时留个出口）
+    var forceStart by remember { mutableStateOf(false) }
+    if (netCheck == NetCheck.CHECKING) {
+        // 预检通常 <1s（校内）/ 2.5s 超时（校外），给个轻提示就行
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = Color(0xFF2F6BDF))
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "正在检查图书馆系统可达性…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF49454F),
+                )
+            }
+        }
+        return
+    }
+    if (netCheck == NetCheck.FAIL && !forceStart) {
+        // 校外（或网络不通）时的明确提示卡：别让用户对着 WebView 白屏猜
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "图书馆预约系统目前无法访问",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color(0xFF1C1B1F),
+                )
+                Text(
+                    "它只对**校园网内**开放（校外访问被学校网络边界拦截，这是学校侧限制）。\n" +
+                        "请连接校园网后重试；如果已在校园网内，可能是网络波动。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF49454F),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 16.dp)) {
+                    Button(
+                        onClick = {
+                            netCheck = NetCheck.CHECKING
+                            forceStart = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF2F6BDF),
+                            contentColor = Color.White,
+                        ),
+                    ) { Text("重新检查") }
+                    TextButton(onClick = { forceStart = true }) { Text("仍要尝试打开") }
+                }
+            }
+        }
+        return
+    }
+
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -403,7 +507,14 @@ fun LibraryScreen(
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { context ->
-                    WebView(context).apply {
+                    // 复用上次留下的 WebView（进程未死时）：SPA 会话/资源全在，二次进入秒开
+                    cachedWebView?.let { old ->
+                        (old.parent as? ViewGroup)?.removeView(old)
+                        Log.i(TAG, "reuse cached WebView")
+                        return@AndroidView old
+                    }
+                    // ⚠️ 用 applicationContext 创建：实例会跨页面存活，挂 Activity 会泄漏
+                    WebView(context.applicationContext).apply {
                         // debug 包打开 WebView 远程调试（chrome://inspect / 直接用 CDP 进页面查），
                         // release 包保持关闭 —— 开着它等于把页面内容暴露给任何能连 adb 的人。
                         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
@@ -520,6 +631,7 @@ fun LibraryScreen(
                         post { startOnce("post") }
                         postDelayed({ startOnce("fallback") }, 1200)
                         webView = this
+                        cachedWebView = this
                     }
                 },
                 update = { webView = it },

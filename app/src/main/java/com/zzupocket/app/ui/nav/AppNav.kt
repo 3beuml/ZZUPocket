@@ -105,6 +105,9 @@ private const val ROUTE_FOCUS_STATS = "focus_stats"
 private const val ROUTE_BG_CROP = "background_crop"
 private const val ROUTE_ROOMS = "room_occupancy"
 
+/** 更多 → 网关认证（学校统一身份验证的管理页） */
+private const val ROUTE_GATEWAY = "gateway_auth"
+
 // 这两个路由同时被桌面小组件用到（点电量去电费页、点余额去校园卡页），
 // 所以统一从 AppRoutes 取，避免两边各写一份字面量、改名时静默失效。
 private const val ROUTE_ELECTRICITY = AppRoutes.ELECTRICITY
@@ -259,6 +262,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     CampusScreen(
                         onOpenLogin = { navController.navigate(ROUTE_LOGIN) },
                         onOpenDiagnostics = { navController.navigate(ROUTE_DIAGNOSTICS) },
+                        onOpenGateway = { navController.navigate(ROUTE_GATEWAY) },
                         onOpenElectricity = { navController.navigate(ROUTE_ELECTRICITY) },
                         onOpenCard = { navController.navigate(ROUTE_CARD) },
                         onOpenRooms = { navController.navigate(ROUTE_ROOMS) },
@@ -266,6 +270,12 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                         onOpenAppearance = { navController.navigate(ROUTE_APPEARANCE) },
                         onOpenWidgetSettings = { navController.navigate(ROUTE_WIDGET_SETTINGS) },
+                    )
+                }
+                composable(ROUTE_GATEWAY) {
+                    com.zzupocket.app.ui.login.GatewayAuthScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenLogin = { navController.navigate(ROUTE_LOGIN) },
                     )
                 }
                 composable(ROUTE_APPEARANCE) {
@@ -329,7 +339,11 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     CardScreen(onBack = { navController.popBackStack() })
                 }
                 composable(ROUTE_ROOMS) {
-                    RoomScreen(onBack = { navController.popBackStack() })
+                    RoomScreen(
+                        onBack = { navController.popBackStack() },
+                        // 网关认证提示 → 补录密码入口（老用户已登录且无登出功能，这是唯一能到登录表单的路）
+                        onOpenLogin = { navController.navigate(ROUTE_LOGIN) },
+                    )
                 }
                 composable(ROUTE_LIBRARY) {
                     LibraryScreen(

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -169,6 +170,8 @@ private fun sessionGroups(periods: List<Period>, marks: List<UnitDivider?>): Lis
 @Composable
 fun RoomScreen(
     onBack: () -> Unit,
+    /** 网关认证提示的"去补录密码"入口（已登录老用户没有登出功能，靠它才能到登录表单） */
+    onOpenLogin: () -> Unit = {},
     vm: RoomViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -295,12 +298,20 @@ fun RoomScreen(
             )
 
             state.error?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    // 网关认证类错误：给"去补录密码"直达按钮——已登录老用户没有登出功能，
+                    // 这是他们走到登录表单、让自动认证拿到密码的唯一路径
+                    if (state.errorNeedsRelogin) {
+                        TextButton(onClick = onOpenLogin, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                            Text("去补录密码（登录一次即可，之后自动恢复）")
+                        }
+                    }
+                }
             }
 
             UnitHeaderRow(state.periods, unitMarks, currentUnit)

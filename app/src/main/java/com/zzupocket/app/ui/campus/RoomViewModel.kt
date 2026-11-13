@@ -57,6 +57,12 @@ data class RoomUiState(
     val rawRoom: RoomRow? = null,
     val hiddenVirtual: Int = 0,
     /**
+     * error 是"校园网安全网关要求认证"类提示时置 true：界面据此给
+     * 「去补录密码」按钮（跳登录页）——老用户已登录且无登出功能，
+     * 这是他们把密码交给自动认证的唯一路径（2026-11-12）。
+     */
+    val errorNeedsRelogin: Boolean = false,
+    /**
      * 快照自带的校区名（字典没起来时界面汇总行用它，别把北校区写成"主校区"）。
      * 字典加载成功后置回 null。
      */
@@ -263,7 +269,7 @@ class RoomViewModel : ViewModel() {
             // （2026-11-12 用户实测：令牌过期 + 字典无兜底 → 整页卡死在快照上）。
             val authMessage = when (e) {
                 is com.zzupocket.app.core.AppError.ReLoginRequired -> e.toUserMessage()
-                // 零信任网关要求认证：重登教务令牌解决不了，必须引导去浏览器认证
+                // 统一身份验证网关要求认证：重登教务令牌解决不了，必须引导去浏览器认证
                 is com.zzupocket.app.core.AppError.ZeroTrustAuthRequired -> e.toUserMessage()
                 else -> null
             }
@@ -272,6 +278,7 @@ class RoomViewModel : ViewModel() {
                     loading = false,
                     loadingMore = false,
                     error = authMessage,
+                    errorNeedsRelogin = e is com.zzupocket.app.core.AppError.ZeroTrustAuthRequired,
                     fromCache = true,
                     notice = if (authMessage != null) {
                         null
@@ -281,7 +288,13 @@ class RoomViewModel : ViewModel() {
                 )
             }
         } else {
-            _state.update { it.copy(loading = false, error = e.toUserMessage()) }
+            _state.update {
+                it.copy(
+                    loading = false,
+                    error = e.toUserMessage(),
+                    errorNeedsRelogin = e is com.zzupocket.app.core.AppError.ZeroTrustAuthRequired,
+                )
+            }
         }
     }
 

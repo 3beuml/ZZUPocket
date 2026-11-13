@@ -8,8 +8,12 @@ import androidx.security.crypto.MasterKey
 /**
  * 令牌存储。
  *
- * ⚠️ **只存令牌，不存密码。** 代价是 userToken（约 1 个月）过期后需要重新登录一次；
- * 收益是设备上不存在可直接复用的账号密码。
+ * 原则曾是"**只存令牌，不存密码**"。2026-11-12 用户拍板放开一项例外：学校在教务前
+ * 新增了统一身份验证网关，会话过期会拦下所有教务请求，而网关认证
+ * **需要账号密码**才能在 app 内自动完成（协议见 [NoxGatewayClient]）。因此新增
+ * [noxAccount] / [noxPassword]：与令牌同一套 EncryptedSharedPreferences + MasterKey
+ * 加密，且 `secure_prefs` 已被备份/数据迁移规则排除，不会离开设备。
+ * 其余存储仍然只存令牌/会话，不碰密码。
  *
  * 文件名 `secure_prefs` 与 `res/xml/backup_rules.xml` / `data_extraction_rules.xml`
  * 里的排除项必须一致 —— 令牌不进任何备份。
@@ -92,6 +96,23 @@ class TokenStore(context: Context) {
         get() = prefs.getLong(KEY_LAST_LOGIN, 0L)
         set(value) = prefs.edit().putLong(KEY_LAST_LOGIN, value).apply()
 
+    /**
+     * 统一身份验证网关自动认证用的账号密码。
+     * ⚠️ 存储决策见类注释（2026-11-12 用户拍板）。登出即随 clearAll 一并清除。
+     */
+    var noxAccount: String?
+        get() = prefs.getString(KEY_NOX_ACCOUNT, null)
+        set(value) = prefs.edit().putString(KEY_NOX_ACCOUNT, value).apply()
+
+    var noxPassword: String?
+        get() = prefs.getString(KEY_NOX_PASSWORD, null)
+        set(value) = prefs.edit().putString(KEY_NOX_PASSWORD, value).apply()
+
+    /** 上次网关认证成功的时间（毫秒；0 = 从未成功）。诊断页展示用 */
+    var noxAuthAt: Long
+        get() = prefs.getLong(KEY_NOX_AUTH_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_NOX_AUTH_AT, value).apply()
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }
@@ -109,5 +130,8 @@ class TokenStore(context: Context) {
         private const val KEY_LIB_TOKEN_AT = "lib_token_at"
         private const val KEY_LIB_COOKIE = "lib_cookie"
         private const val KEY_LAST_LOGIN = "last_login_at"
+        private const val KEY_NOX_ACCOUNT = "nox_account"
+        private const val KEY_NOX_PASSWORD = "nox_password"
+        private const val KEY_NOX_AUTH_AT = "nox_auth_at"
     }
 }

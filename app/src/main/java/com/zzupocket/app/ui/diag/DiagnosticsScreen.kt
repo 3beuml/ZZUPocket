@@ -143,11 +143,16 @@ class DiagnosticsViewModel : ViewModel() {
                 gmsLoggedIn = AppGraph.gmsScheduleSource.hasSession(),
                 gmsLoginAt = AppGraph.gmsScheduleSource.loginAt(),
                 libSessionAt = AppGraph.libSessionSource.capturedAt(),
-                widgetReport = runCatching {
-                    AppGraph.appContextOrNull()?.let {
-                        com.zzupocket.app.ui.widget.WidgetDiagnostics.collect(it)
-                    } ?: "applicationContext 未初始化"
-                }.getOrElse { e -> e.message ?: e.toString() },
+                // 小组件几何卡 release 不再显示（与自检同策略），也就不必采集
+                widgetReport = if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
+                    runCatching {
+                        AppGraph.appContextOrNull()?.let {
+                            com.zzupocket.app.ui.widget.WidgetDiagnostics.collect(it)
+                        } ?: "applicationContext 未初始化"
+                    }.getOrElse { e -> e.message ?: e.toString() }
+                } else {
+                    ""
+                },
             )
         }
     }
@@ -478,11 +483,13 @@ fun DiagnosticsScreen(
                 }
             }
 
-            // ── 小组件几何（所有人可见的自适配排障数据）────────────────────
+            // ── 小组件几何（排障数据）────────────────────────────────────
             // 桌面组件显示不对时的反馈凭据：报数偏差/字体度量/尺寸通道三类问题，
             // 这张卡片的截图基本都能定位。ycli：只读几何，无个人信息。
-            // 默认收起（和自检工具同款交互）：平时不打扰，反馈小组件问题时再点开截图。
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
+            // 2026-11-13 起与自检工具同策略：release 不再显示（普通用户界面上
+            // 不出现检测类内容），排障时装 debug 包。
+            if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth().clickable { vm.toggleWidgetCard() },
@@ -516,6 +523,7 @@ fun DiagnosticsScreen(
                         )
                     }
                 }
+            }
             }
 
             Card(
