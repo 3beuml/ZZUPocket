@@ -149,8 +149,10 @@ PC 端课表页（`/student/for-std/course-table`）不走 micro-server，全部
    （移动端课表查询 H5 同款参数，见 2.1/2.5）；实验记录按 `lessonType=EXPERIMENT` 打标
    （`course_sessions.experiment`，DB v8）。曾试过经典门户 print-data 补全，因会话鉴权
    不可达已**整体移除**（见 2.4 的三连 302 实测）。
-2. 同格多门课只画第一门（实验常与理论同时段）：`ScheduleScreen.DayColumn` 的 `firstOrNull`，
-   `logGridCollisions` 已统计冲突，呈现策略待定。
+2. 同格多门课（实验常与理论同时段）：周网格按实际重叠节次显示「课程冲突（甲…/乙…）」占位。
+   点块后在原课程详情顶部查看所有冲突课程，可按周选择显示其中一门或恢复占位；
+   选择保存在本地显示覆盖表，刷新不覆盖；首页时间轴复用同一份逐周选择，未处理时合并提示冲突。
+   详见 [冲突课表显示](../schedule-conflicts.md)。
 3. 教室名自带楼栋前缀且可能**无分隔符**（如 `物理馆X101`）→ `tidyPlace` 前缀去重失效，
    楼名显示两遍（issue #6）——已修复（前缀剥离，仅非数字结尾楼名）。
 4. `state`（未完成/已结束）的语义未使用；改版时先看 logcat `ScheduleRaw`。

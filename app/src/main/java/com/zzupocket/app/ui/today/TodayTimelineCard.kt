@@ -1,6 +1,7 @@
 ﻿package com.zzupocket.app.ui.today
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,12 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -41,6 +44,7 @@ import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.ui.components.GlassCard
 import com.zzupocket.app.core.ScheduleText
 import com.zzupocket.app.data.repo.ScheduleRepository
+import com.zzupocket.app.data.repo.TodayTimetable
 import com.zzupocket.app.domain.FocusStats
 import com.zzupocket.app.domain.Phase
 import com.zzupocket.app.domain.PlanColor
@@ -51,6 +55,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.Clock
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -78,9 +83,10 @@ data class TodayTimelineUi(
     val customEntries: List<TimelineEntry> = emptyList(),
 )
 
-class TodayTimelineViewModel : ViewModel() {
-
-    private val scheduleRepo: ScheduleRepository = AppGraph.scheduleRepository
+class TodayTimelineViewModel(
+    private val scheduleRepo: ScheduleRepository = AppGraph.scheduleRepository,
+    private val clock: Clock = Clock.systemDefaultZone(),
+) : ViewModel() {
 
     private val _state = MutableStateFlow(TodayTimelineUi())
     val state: StateFlow<TodayTimelineUi> = _state.asStateFlow()
@@ -95,9 +101,9 @@ class TodayTimelineViewModel : ViewModel() {
     }
 
     private suspend fun load() {
-        val now = System.currentTimeMillis()
-        val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
-        val today = LocalDate.now()
+        val now = clock.millis()
+        val nowMin = LocalTime.now(clock).let { it.hour * 60 + it.minute }
+        val today = LocalDate.now(clock)
 
         // 本科 + 研究生统一口径：研究生账号没有学期行，也要能看到今天的课
         val sessions = runCatching {
@@ -117,9 +123,7 @@ class TodayTimelineViewModel : ViewModel() {
             .groupBy { it.contextRef }
             .mapValues { (_, list) -> list.sumOf { it.actualSeconds } }
 
-        val courseEntries = sessions
-            .mapNotNull { session -> courseEntry(session, periods, null, focusByRef) }
-            .sortedBy { it.startMin }
+        val courseEntries = TodayTimeline.courseEntries(TodayTimetable.displayBlocks(scheduleRepo, sessions), periods)
         val customEntries = sessions
             .filter { it.source == ScheduleRepository.SOURCE_CUSTOM }
             .mapNotNull { session -> courseEntry(session, periods, null, focusByRef) }
@@ -131,10 +135,8 @@ class TodayTimelineViewModel : ViewModel() {
 
         // 明天的课概览：没课的空态给"明天第一节"，有课的日子给"明天 N 节"脚注
         val tomorrowEntries = runCatching {
-            com.zzupocket.app.data.repo.TodayTimetable
-                .sessionsOn(scheduleRepo, AppGraph.uiPrefsStore, today.plusDays(1))
-                .mapNotNull { courseEntry(it, periods, null, emptyMap()) }
-                .sortedBy { it.startMin }
+            val tomorrow = TodayTimetable.sessionsOn(scheduleRepo, AppGraph.uiPrefsStore, today.plusDays(1))
+            TodayTimeline.courseEntries(TodayTimetable.displayBlocks(scheduleRepo, tomorrow), periods)
         }.getOrDefault(emptyList())
         val tomorrowHint = if (courseEntries.isEmpty()) {
             tomorrowEntries.firstOrNull()
@@ -165,7 +167,7 @@ class TodayTimelineViewModel : ViewModel() {
             courseCount = sessions.size,
             focusSeconds = records.sumOf { it.actualSeconds },
             focusCount = records.count { it.completed },
-            nextHint = nextHint(courseEntries, nowMin),
+            nextHint = TodayTimeline.nextCourseHint(courseEntries, nowMin),
             tomorrowHint = tomorrowHint,
             tomorrowSummary = tomorrowSummary,
             customEntries = customEntries,
@@ -210,22 +212,6 @@ class TodayTimelineViewModel : ViewModel() {
             subtitle = FocusStats.humanDuration(record.actualSeconds) +
                 if (record.completed) "" else " · 中断",
         )
-    }
-
-    /** "正在上《…》· 还有 32 分钟下课" / "下一节 14:00《…》· 40 分钟后" */
-    private fun nextHint(courses: List<TimelineEntry>, nowMin: Int): String? {
-        courses.firstOrNull { it.covers(nowMin) }?.let { ongoing ->
-            return "正在上《${ongoing.title}》· 还有 " +
-                "${TodayTimeline.duration(ongoing.endMin - nowMin)}下课"
-        }
-        val next = courses.filter { it.startMin > nowMin }.minByOrNull { it.startMin }
-        if (next != null) {
-            val wait = next.startMin - nowMin
-            val gapText = if (wait < 60) "$wait 分钟" else TodayTimeline.duration(wait)
-            // 以前这里还会补一句「够一个番茄」——属于替用户做决定的多余提示，去掉
-            return "下一节 ${TodayTimeline.clock(next.startMin)}《${next.title}》· ${gapText}后"
-        }
-        return if (courses.isEmpty()) null else "今天的课已上完"
     }
 
     private companion object {
@@ -375,7 +361,8 @@ private fun TimelineRow(entry: TimelineEntry, nowMin: Int) {
     val ongoing = entry.covers(nowMin)
     val railColor = MaterialTheme.colorScheme.outlineVariant
     val dotColor = when (entry.kind) {
-        TimelineKind.COURSE -> entry.colorArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.primary
+        TimelineKind.COURSE -> if (entry.hasUnresolvedConflict) MaterialTheme.colorScheme.error
+            else entry.colorArgb?.let { Color(it) } ?: MaterialTheme.colorScheme.primary
         TimelineKind.FOCUS -> MaterialTheme.colorScheme.tertiary
         TimelineKind.GAP -> MaterialTheme.colorScheme.surfaceVariant
     }
@@ -427,39 +414,64 @@ private fun TimelineRow(entry: TimelineEntry, nowMin: Int) {
             modifier = Modifier.weight(1f).padding(bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(1.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = entryTitle(entry),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (entry.kind == TimelineKind.GAP) FontWeight.Normal else FontWeight.Medium,
-                    color = titleColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (ongoing) {
-                    Spacer(Modifier.width(6.dp))
+            if (entry.hasUnresolvedConflict) {
+                // 复用课表的警示色；图标、浅底与边框使它区别于轴上的红色「现在」。
+                Surface(
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f),
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    shape = MaterialTheme.shapes.small,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.WarningAmber, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("课程冲突", style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        }
+                        Text(entry.subtitle, style = MaterialTheme.typography.bodySmall,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text("点按查看课表", style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "进行中",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        text = entryTitle(entry),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (entry.kind == TimelineKind.GAP) FontWeight.Normal else FontWeight.Medium,
+                        color = titleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (ongoing) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "进行中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                entrySubtitle(entry)?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-            entrySubtitle(entry)?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (entry.kind == TimelineKind.COURSE && entry.focusSeconds > 0) {
-                Text(
-                    text = "已专注 ${FocusStats.humanDuration(entry.focusSeconds)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
+                if (entry.kind == TimelineKind.COURSE && entry.focusSeconds > 0) {
+                    Text(
+                        text = "已专注 ${FocusStats.humanDuration(entry.focusSeconds)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
         }
     }

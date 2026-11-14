@@ -4,6 +4,8 @@ import com.zzupocket.app.core.WeekMath
 import com.zzupocket.app.data.gms.GmsScheduleMapper
 import com.zzupocket.app.data.prefs.UiPrefsStore
 import com.zzupocket.app.domain.Session
+import com.zzupocket.app.domain.ScheduleBlock
+import com.zzupocket.app.domain.scheduleBlocks
 import java.time.LocalDate
 
 /**
@@ -42,6 +44,20 @@ object TodayTimetable {
         }
 
         return out.distinctBy { it.id }.sortedBy { it.startUnit }
+    }
+
+    /** 首页沿用周课表的冲突分段与逐周选择；[sessionsOn] 仍返回完整原始日程。 */
+    suspend fun displayBlocks(repo: ScheduleRepository, sessions: List<Session>): List<ScheduleBlock> {
+        // 日期匹配到的临时补课可能没有有效周号/节次，仍保留原先的首页显示。
+        val (indexed, unindexed) = sessions.partition {
+            it.weekIndex > 0 && it.weekday in 1..7 && it.startUnit in 1..10 && it.endUnit in it.startUnit..10
+        }
+        val blocks = indexed.groupBy { it.semesterId }.flatMap { (semesterId, day) ->
+            val choices = repo.conflictDisplayChoices(semesterId)
+            val scope = if (semesterId == GmsScheduleMapper.GRAD_SEMESTER_ID) repo.timetableScope("gms", semesterId) else null
+            scheduleBlocks(day, choices, scopeKey = scope)
+        }
+        return blocks + unindexed.map { ScheduleBlock(it.startUnit, it.endUnit, listOf(it)) }
     }
 
     /** 研究生在 [date] 那天属于第几周；没有周次基准（没设置过）返回 null */
