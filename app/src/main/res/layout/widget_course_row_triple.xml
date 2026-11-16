@@ -22,7 +22,7 @@
     <TextView
         android:id="@+id/row_bar"
         android:layout_width="@dimen/widget_bar_w"
-        android:layout_height="@dimen/widget_bar_h"
+        android:layout_height="@dimen/widget_bar_h_triple"
         android:background="@drawable/widget_bar" />
 
     <LinearLayout

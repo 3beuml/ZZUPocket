@@ -59,4 +59,6 @@
     <dimen name="widget_bar_w">3dp</dimen>
     <dimen name="widget_bar_h">26dp</dimen>     <!-- 课程块：贴着课名与副行 -->
     <dimen name="widget_bar_h_sm">16dp</dimen>  <!-- 数据块：贴着块名 -->
+    <dimen name="widget_bar_h_triple">42dp</dimen> <!-- 2×2 紧凑三行档：比默认 26dp 长，略短于三行文字（PR #18） -->
+    <dimen name="widget_triple_line_gap">2dp</dimen> <!-- 2×2 紧凑三行档行距（账本同步见 nextClassSpacedRowsDp） -->
 </resources>

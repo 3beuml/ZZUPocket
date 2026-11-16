@@ -1082,4 +1082,106 @@ class WidgetScheduleTest {
             WidgetSchedule.nextClassRowPair(127, n, WidgetSchedule.ROW_MODE_COMPACT),
         )
     }
+    // ── PR #18 八轮/九轮：字号档回退链 / 地点下限 11dp / 间距摊余 ──────────
+
+    /** MiSans 真机实测行高阶梯（480dpi：行高 = 字号×1.35 左右，取整） */
+    private val misans = mapOf(9 to 14, 10 to 15, 11 to 15, 12 to 17, 13 to 18, 14 to 19, 15 to 21)
+
+    private fun tierNaturals(
+        t: WidgetSchedule.CompactFontTier,
+        heights: Map<Int, Int>,
+    ): WidgetSchedule.NextClassRowNaturals {
+        fun lh(size: Int) = heights.getValue(size)
+        fun stackedNat(lines: Int, lhN: Int, lhP: Int, lhT: Int): Int =
+            lines * lhN + (2 + lhP) + (2 + lhT) + 10 + 2
+        fun compactNat(lhN: Int, lhP: Int, lhT: Int): Int =
+            lhN + lhP + lhT + WidgetSchedule.NEXT_CLASS_TRIPLE_PAD_DP * 2 + 1
+        fun miniNat(lhN: Int, lhT: Int): Int = maxOf(lhN, lhT) + 10 + 2
+        return WidgetSchedule.NextClassRowNaturals(
+            firstStacked = stackedNat(1, lh(t.n1), lh(t.p1), lh(t.t1)),
+            firstCompact = compactNat(lh(t.n1), lh(t.p1), lh(t.t1)),
+            firstMini = miniNat(lh(t.n1), lh(t.t1)),
+            secondStacked = stackedNat(1, lh(t.n2), lh(t.p2), lh(t.t2)),
+            secondCompact = compactNat(lh(t.n2), lh(t.p2), lh(t.t2)),
+            secondMini = miniNat(lh(t.n2), lh(t.t2)),
+        )
+    }
+
+    @Test
+    fun `地点恒一行_从13缩到11再裁左边保留教室号`() {
+        // "环保馆 405"（宽 11 字符单位）在 10dp 宽度里：13/12/11 都放不下 → 裁左保房号
+        val fit = WidgetSchedule.fitPlaceText(
+            place = "环保馆 405",
+            usableWidthDp = 40,
+            maxSizeDp = 13,
+            minSizeDp = WidgetSchedule.NEXT_CLASS_PLACE_MIN_DP,
+        )
+        assertEquals(WidgetSchedule.NEXT_CLASS_PLACE_MIN_DP, fit.sizeDp)
+        assertTrue(fit.text.startsWith("…"))
+        assertTrue(fit.text.endsWith("405"))
+    }
+
+    @Test
+    fun `地点放得下时保持原文本与最大字号`() {
+        val fit = WidgetSchedule.fitPlaceText(
+            place = "北2 404",
+            usableWidthDp = 60,
+            maxSizeDp = 13,
+            minSizeDp = WidgetSchedule.NEXT_CLASS_PLACE_MIN_DP,
+        )
+        assertEquals("北2 404", fit.text)
+        assertEquals(13, fit.sizeDp)
+    }
+
+    @Test
+    fun `2×2 字号档位按实测行高选档_地点永不因放大字号被砍`() {
+        // 真机 147dp 可用（157×147 上报画布、chrome 22）：大字档放不下 → 回退到能放的档
+        val avail = 125
+        fun bigFont(t: WidgetSchedule.CompactFontTier) = tierNaturals(t, misans)
+        val tier = WidgetSchedule.chooseCompactTier(avail) { bigFont(it) }
+        // 回退链有测试兜底：选中的档两行都不掉 MINI
+        val nat = bigFont(tier)
+        val pair = WidgetSchedule.nextClassRowPair(avail, nat)
+        assertTrue(pair.first != WidgetSchedule.NextClassPreviewStyle.MINI)
+        assertTrue(pair.second != WidgetSchedule.NextClassPreviewStyle.MINI)
+        // 大画布上大字档直接可用
+        val natBig = bigFont(WidgetSchedule.NEXT_CLASS_COMPACT_TIERS.first())
+        val pairBig = WidgetSchedule.nextClassRowPair(200, natBig)
+        assertTrue(pairBig.first != WidgetSchedule.NextClassPreviewStyle.MINI)
+        assertTrue(pairBig.second != WidgetSchedule.NextClassPreviewStyle.MINI)
+    }
+
+    @Test
+    fun `2×2 行距与课间隔折算成padding_不触碰判档账本`() {
+        val nat1 = 50
+        val nat2 = 45
+        val (spaced1, spaced2) = WidgetSchedule.nextClassSpacedRowsDp(
+            availDp = 160,
+            nat1 = nat1,
+            nat2 = nat2,
+            compact1 = true,
+            compact2 = true,
+        )
+        // 目标高 ≥ 内容自然高（行距已含在内容里），且总高不超过可用
+        assertTrue(spaced1.targetHeightDp >= spaced1.contentHeightDp)
+        assertTrue(spaced2.targetHeightDp >= spaced2.contentHeightDp)
+        assertTrue(spaced1.targetHeightDp + spaced2.targetHeightDp <= 160)
+        // 行高永不低于内容自然高
+        assertTrue(spaced1.targetHeightDp >= nat1)
+        assertTrue(spaced2.targetHeightDp >= nat2)
+    }
+
+    @Test
+    fun `字号档自动回退在极矮画布落最小档且课不蒸发`() {
+        val avail = 60
+        fun bigFont(t: WidgetSchedule.CompactFontTier) = tierNaturals(t, misans)
+        val tier = WidgetSchedule.chooseCompactTier(avail) { bigFont(it) }
+        assertEquals(WidgetSchedule.NEXT_CLASS_COMPACT_TIERS.last(), tier)
+        val nat = bigFont(tier)
+        val pair = WidgetSchedule.nextClassRowPair(avail, nat)
+        // 极矮画布：两节课以最低档（MINI）存在——课不蒸发即是正确行为
+        assertTrue(pair.first == WidgetSchedule.NextClassPreviewStyle.MINI)
+        assertTrue(pair.second == WidgetSchedule.NextClassPreviewStyle.MINI)
+    }
+
 }

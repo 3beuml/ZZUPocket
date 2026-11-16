@@ -177,17 +177,27 @@ object Widgets {
         mini: Boolean = false,
         nameMaxLines: Int = 2,
         triple: CourseRowTriple? = null,
+        /**
+         * 地点独立字号（PR #18 八轮）：紧凑三行档里地点不再与时间段共用字号——
+         * 地点先缩到下限再裁左，时间段保持自己的字号，"地点 ≥ 时间"的层级不被打破。
+         * null = 沿用 [subSizeDp]（4×2 等旧行为不变）。
+         */
+        placeSizeDp: Int? = null,
+        /** 时间段独立字号；null = 沿用 [subSizeDp]。地点缩字号时时间**不跟着缩** */
+        timeSizeDp: Int? = null,
     ): RemoteViews {
-        // 紧凑三行档：地点先缩字号、仍放不下裁左边；地点与时间段共用缩小后的字号保持对齐
+        // 紧凑三行档：地点先缩字号（下限 11dp）、仍放不下裁左边；
+        // 时间段保持自己的字号——地点缩小时"地点 ≥ 时间"的层级不被打破
         val placeFit = triple?.let {
             WidgetSchedule.fitPlaceText(
                 place = row.place,
                 usableWidthDp = it.usableWidthDp,
-                maxSizeDp = subSizeDp,
+                maxSizeDp = placeSizeDp ?: subSizeDp,
                 minSizeDp = it.minSizeDp,
             ) { text, size -> measureTextWidthDp(context, text, size) }
         }
-        val shownSubDp = placeFit?.sizeDp ?: subSizeDp
+        val shownPlaceDp = placeFit?.sizeDp ?: (placeSizeDp ?: subSizeDp)
+        val shownTimeDp = timeSizeDp ?: subSizeDp
         val rv = RemoteViews(
             context.packageName,
             when {
@@ -202,8 +212,8 @@ object Widgets {
         rv.setTextViewText(R.id.row_time, row.timeRange)
         // 字号按画布分档动态设（XML 里是标准档基线；矮盒子用紧凑档防裁字）
         rv.setTextViewTextSize(R.id.row_name, android.util.TypedValue.COMPLEX_UNIT_DIP, nameSizeDp.toFloat())
-        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, shownSubDp.toFloat())
-        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, shownSubDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_place, android.util.TypedValue.COMPLEX_UNIT_DIP, shownPlaceDp.toFloat())
+        rv.setTextViewTextSize(R.id.row_time, android.util.TypedValue.COMPLEX_UNIT_DIP, shownTimeDp.toFloat())
         // 2×2 紧凑档把课名收到单行省略：长课名换两行的话单行高度装不下，
         // 显式行高会把时间段裁没（#13 四轮）。setMaxLines 带 @RemotableViewMethod，可反射调。
         if (nameMaxLines != 2) {

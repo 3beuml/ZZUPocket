@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.zzupocket.app.core.WeekSettings
+import com.zzupocket.app.ui.widget.WidgetSchedule
 import com.zzupocket.app.core.WeekSource
 import com.zzupocket.app.core.WeekStartDay
 import java.time.LocalDate
@@ -145,6 +146,15 @@ data class UiPrefs(
      * mini = 课名 + 时间单行。4×2 列宽是 2×2 的一倍多，紧凑三行（小字号）与
      * auto 同形，不单设。
      */
+    /**
+     * 2×2 下一节的字号档：WidgetSchedule.COMPACT_TIER_AUTO 或档位 label
+     * （NEXT_CLASS_COMPACT_TIERS 里的 label：大字14/13/11 / 中字13/12/11 /
+     * 标准13/11/11 / 矮盒12/10/10）。auto = 按组件高度从大字档逐级回退；
+     * 手动指定 = 强制该档（贴边也给，与行样式强制同哲学）。
+     */
+    val widgetFontTier: String = WidgetSchedule.COMPACT_TIER_AUTO,
+    /** 2×2 表头样式：HEADER_CLASSIC（「今天 · 第 4 周」）或 HEADER_COMPACT（带右侧周几）。 */
+    val widgetHeaderStyle: String = WidgetSchedule.HEADER_CLASSIC,
     val widgetTwoDayStyle: String = "auto",
     /**
      * 两个槽位**各自**的房间可读名（如"柳园20号楼 101"）。
@@ -242,6 +252,8 @@ class UiPrefsStore(context: Context) {
             widgetWeekShowPlace = p[KEY_WIDGET_WEEK_SHOW_PLACE] ?: true,
             widgetWeekShowTime = p[KEY_WIDGET_WEEK_SHOW_TIME] ?: true,
             widgetWeekendStrip = p[KEY_WIDGET_WEEKEND_STRIP] ?: true,
+            widgetFontTier = p[KEY_WIDGET_FONT_TIER]?.takeIf { it.isNotBlank() } ?: WidgetSchedule.COMPACT_TIER_AUTO,
+            widgetHeaderStyle = p[KEY_WIDGET_HEADER_STYLE]?.takeIf { it.isNotBlank() } ?: WidgetSchedule.HEADER_CLASSIC,
             widgetTwoDayStyle = p[KEY_WIDGET_TWO_DAY_STYLE]?.takeIf { it.isNotBlank() } ?: "auto",
             lightRoomLabel = p[KEY_LIGHT_ROOM_LABEL]?.takeIf { it.isNotBlank() },
             acRoomLabel = p[KEY_AC_ROOM_LABEL]?.takeIf { it.isNotBlank() },
@@ -318,6 +330,12 @@ class UiPrefsStore(context: Context) {
 
     /** 4×2 今明课表行样式；写入后由调用方触发 Widgets.refreshAll */
     suspend fun setWidgetTwoDayStyle(v: String) = store.edit { p -> p[KEY_WIDGET_TWO_DAY_STYLE] = v }
+
+    /** 2×2 字号档；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetFontTier(v: String) = store.edit { p -> p[KEY_WIDGET_FONT_TIER] = v }
+
+    /** 2×2 表头样式；写入后由调用方触发 Widgets.refreshAll */
+    suspend fun setWidgetHeaderStyle(v: String) = store.edit { p -> p[KEY_WIDGET_HEADER_STYLE] = v }
 
     /** 「更多 → 界面 → 显示描述」；写入后 AppNav 根部的 CompositionLocal 立刻全树重组 */
     suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
@@ -450,6 +468,8 @@ class UiPrefsStore(context: Context) {
         val KEY_WIDGET_WEEK_SHOW_TIME = booleanPreferencesKey("widget_week_show_time")
         val KEY_WIDGET_WEEKEND_STRIP = booleanPreferencesKey("widget_weekend_strip")
         val KEY_WIDGET_TWO_DAY_STYLE = stringPreferencesKey("widget_two_day_style")
+        val KEY_WIDGET_FONT_TIER = stringPreferencesKey("widget_font_tier")
+        val KEY_WIDGET_HEADER_STYLE = stringPreferencesKey("widget_header_style")
         val KEY_SHOW_DESCRIPTIONS = booleanPreferencesKey("show_descriptions")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */

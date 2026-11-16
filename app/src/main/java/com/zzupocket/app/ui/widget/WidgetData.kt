@@ -57,14 +57,16 @@ data class WidgetScheduleBundle(
         )
 
     /** 2×2：两行 4×2 同款行样式（本节 + 下一节）；今天没了就顶明天的头两节 */
-    fun nextClassPlan(): WidgetNextClassPlan = WidgetSchedule.nextClassPlan(
-        hasSchedule = hasSchedule,
-        week = week,
-        today = today,
-        tomorrow = tomorrow,
-        nowMin = nowMin,
-        tomorrowWeek = tomorrowWeek,
-    )
+    fun nextClassPlan(headerStyle: String = WidgetSchedule.HEADER_CLASSIC): WidgetNextClassPlan =
+        WidgetSchedule.nextClassPlan(
+            hasSchedule = hasSchedule,
+            week = week,
+            today = today,
+            tomorrow = tomorrow,
+            nowMin = nowMin,
+            tomorrowWeek = tomorrowWeek,
+            headerStyle = headerStyle,
+        )
 }
 
 /** 「电量与校园卡」组件要用的数据 */

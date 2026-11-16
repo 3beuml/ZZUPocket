@@ -139,6 +139,54 @@ fun WidgetSettingsScreen(onBack: () -> Unit) {
                         "满档 = 大字号竖排三行（画布矮时回退自动）；" +
                         "紧凑 = 小字号三行（课名/地点/时间各一行）；单行 = 课名 + 时间，最省高度",
                 )
+                ListItem(
+                    headlineContent = { Text("字号") },
+                    supportingContent = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 6.dp),
+                        ) {
+                            listOf(
+                                WidgetSchedule.COMPACT_TIER_AUTO to "自动",
+                                WidgetSchedule.NEXT_CLASS_COMPACT_TIERS[0].label to "大字",
+                                WidgetSchedule.NEXT_CLASS_COMPACT_TIERS[1].label to "中字",
+                                WidgetSchedule.NEXT_CLASS_COMPACT_TIERS[2].label to "标准",
+                                WidgetSchedule.NEXT_CLASS_COMPACT_TIERS[3].label to "矮盒",
+                            ).forEach { (value, label) ->
+                                FilterChip(
+                                    selected = prefs.widgetFontTier == value,
+                                    onClick = { set { AppGraph.uiPrefsStore.setWidgetFontTier(value) } },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
+                    },
+                )
+                ListItem(
+                    headlineContent = { Text("表头") },
+                    supportingContent = {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(top = 6.dp),
+                        ) {
+                            listOf(
+                                WidgetSchedule.HEADER_CLASSIC to "经典",
+                                WidgetSchedule.HEADER_COMPACT to "紧凑",
+                            ).forEach { (value, label) ->
+                                FilterChip(
+                                    selected = prefs.widgetHeaderStyle == value,
+                                    onClick = { set { AppGraph.uiPrefsStore.setWidgetHeaderStyle(value) } },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
+                    },
+                )
+                DescriptionText(
+                    "字号：自动 = 按组件高度从大字档（课名14/地点13/时间11）逐级回退；" +
+                        "手动指定时即使贴边也按所选档显示。表头：紧凑 = 「今日 | 第 4 周 周日」" +
+                        "（右侧带周几），经典 = 「今天 · 第 4 周」",
+                )
             }
 
             GroupTitle("4×2 今明课表")

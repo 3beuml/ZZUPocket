@@ -89,6 +89,18 @@
                 android:textColor="@color/widget_text"
                 android:textSize="@dimen/widget_col_header"
                 android:textStyle="bold" />
+
+            <!-- 右侧周几（紧凑表头风格用；经典风格下 GONE）。PR #18 -->
+            <TextView
+                android:id="@+id/header_weekday"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:maxLines="1"
+                android:text=""
+                android:textColor="@color/widget_text"
+                android:textSize="@dimen/widget_col_header"
+                android:visibility="gone" />
         </LinearLayout>
 
         <RelativeLayout
