@@ -538,7 +538,7 @@ class RoomViewModel : ViewModel() {
     private var prefetchJob: kotlinx.coroutines.Job? = null
 
     /**
-     * 进页联网成功后，把**今天+1 ~ 今天+3** 的占用**完整**（所有页）预取落库
+     * 进页联网成功后，把**今天 ~ 今天+3** 的占用**完整**（所有页）预取落库
      * （2026-11-11 用户拍板收窄到 3 天：目标是应对教务系统临时出问题，
      * 完整比天数重要——此前的分页覆盖 bug 正是"求天数不求完整性"的产物。
      * 7 天保留窗口不变，昨天与浏览过的日期照旧在窗口内保留）。
@@ -553,7 +553,11 @@ class RoomViewModel : ViewModel() {
         val buildingIds = s.buildings.map { it.id }
         if (buildingIds.isEmpty()) return
         prefetchJob = viewModelScope.launch {
-            for (offset in 1..PREFETCH_DAYS) {
+            // ⚠️ **offset 从 0 开始（含今天）**：快照保存跟随 UI 分页，无筛选抓取
+            // 第一页（30 间）就会落库，可见数 ≥15 时不会续页——今天的快照会永远
+            // 只有 30 间，用户校外换流量筛选别的楼栋必然空态（2026-11-16 实测抓到）。
+            // 所以"今天"也要走一遍全量管线（跳过条件带完整性检查，不会白跑）。
+            for (offset in 0..PREFETCH_DAYS) {
                 val day = LocalDate.now().plusDays(offset.toLong())
                 runCatching { prefetchDay(campusId, buildingIds, day) }
                     .onFailure {
@@ -608,7 +612,10 @@ class RoomViewModel : ViewModel() {
         if (existing != null && java.time.Instant.ofEpochMilli(existing.fetchedAt)
                 .atZone(java.time.ZoneId.systemDefault()).toLocalDate() == LocalDate.now()
         ) {
-            return true
+            // ⚠️ **完整性检查**：少于 100 间视为不完整——UI 分页只落第一页（30 间）
+            // 是常态，不能当成"已存好"跳过，必须重新全量拉取
+            // （2026-11-16 实测：30 间的快照导致校外筛选别的楼栋必然空态）。
+            if (existing.rows.size >= SNAPSHOT_COMPLETE_MIN_ROOMS) return true
         }
         val allRows = mutableListOf<com.zzupocket.app.data.repo.RoomCacheRow>()
         var page = 1
@@ -625,6 +632,15 @@ class RoomViewModel : ViewModel() {
             page++
         }
         if (allRows.isEmpty()) return false
+        // 诊断（仅 debug 包）：请求了全量楼栋，服务端实际返回了哪些楼、各多少间——
+        // 2026-11-16 实测全量查询只回来 ~30 间，需要这份证据定位是服务端
+        // 过滤/截断还是请求问题。
+        if (com.zzupocket.app.BuildConfig.DEBUG) {
+            val byBuilding = allRows.groupBy { it.buildingId }
+                .map { (b, rows) -> "b$b:${rows.size}" }
+                .sorted()
+            Log.i(TAG, "全量拉取 $date：共 ${allRows.size} 间 / ${byBuilding.size} 栋 [${byBuilding.joinToString(",")}]")
+        }
         AppGraph.scheduleRepository.saveRoomSnapshot(
             date = date.toString(),
             campusId = campusId,
@@ -671,13 +687,38 @@ class RoomViewModel : ViewModel() {
             }.exceptionOrNull()
             if (dictError != null) Log.w(TAG, "refresh：字典强刷失败", dictError)
             if (_state.value.campusId == null) {
-                degradeToCache(
-                    dictError ?: IllegalStateException("校区字典未加载"),
-                )
+                val dictErr = dictError ?: IllegalStateException("校区字典未加载")
+                // 字典强刷失败 + 本地无数据：也要重读快照（同 fetch 失败分支的缺口）
+                if (allRooms.isNotEmpty()) {
+                    degradeToCache(dictErr)
+                } else {
+                    val rendered = runCatching { renderCachedSnapshot() }.getOrDefault(false)
+                    if (!rendered) {
+                        degradeToCache(dictErr)
+                    } else {
+                        // 快照渲染成功后从快照行反推楼栋，筛选弹窗才不会是空的
+                        deriveBuildingsFromSnapshot()
+                    }
+                }
                 return@launch
             }
             runCatching { fetch(reset = true) }
-                .onFailure { e -> degradeToCache(e) }
+                .onFailure { e ->
+                    // ⚠️ 断网重试时**必须重读本地快照**：进页时若当天快照缺失/抓取失败，
+                    // allRooms 是空的，只降级不重读快照的话，"点此重试"永远只会报错——
+                    // 明明库里存着快照却捞不出来（2026-11-16 用户实测：校外换流量后
+                    // 保存过的数据也显示不出来）。
+                    if (allRooms.isNotEmpty()) {
+                        degradeToCache(e)
+                    } else {
+                        val rendered = runCatching { renderCachedSnapshot() }.getOrDefault(false)
+                        if (!rendered) {
+                            degradeToCache(e)
+                        } else {
+                            deriveBuildingsFromSnapshot()
+                        }
+                    }
+                }
             startPrefetchIfOnline()
         }
     }
@@ -705,18 +746,32 @@ class RoomViewModel : ViewModel() {
             )
         }
         viewModelScope.launch {
+            // ① **缓存先行**：新校区的本地快照先渲染（毫秒级），联网放后台
+            val cachedRendered = runCatching { renderSnapshotForCurrentState() }.getOrDefault(false)
+            if (cachedRendered) deriveBuildingsFromSnapshot()
+            // ② 联网刷新：成功覆盖缓存；失败保留缓存 + 按真实原因提示
             runCatching {
                 val buildings = orderedBuildings(repo.buildings(id))
                 _state.update { it.copy(buildings = buildings) }
                 fetch(reset = true)
             }.onFailure { e ->
-                // 切校区离线：内存里的行属于旧校区，不能套用；读新校区快照，
-                // 没有就明确空态（别把旧校区的数据留在屏上冒充新校区）。
-                if (!renderSnapshotForCurrentState()) {
+                if (!cachedRendered) {
+                    // 切校区离线：内存里的行属于旧校区，不能套用；没有快照就明确空态
+                    // （别把旧校区的数据留在屏上冒充新校区）。
                     showNoSnapshotNotice("这个校区还没有本地快照 · 联网后自动重试")
+                } else {
+                    _state.update { it.copy(loading = false, notice = noticeForSwitchFailure(e)) }
                 }
             }
         }
+    }
+
+    /** 切换失败的提示行文案：按真实原因，别都写成"连不上教务系统" */
+    private fun noticeForSwitchFailure(e: Throwable): String = when (e) {
+        is com.zzupocket.app.core.AppError.ZeroTrustAuthRequired -> "学校验证网关要求认证 · 点此重试"
+        is com.zzupocket.app.core.AppError.ReLoginRequired -> "登录已失效 · 重新登录"
+        is com.zzupocket.app.core.AppError.Network -> "暂时连不上教务系统 · 点此重试"
+        else -> "教务系统暂时异常 · 点此重试"
     }
 
     /**
@@ -773,14 +828,19 @@ class RoomViewModel : ViewModel() {
     fun setBuildings(ids: Set<Long>) {
         _state.update { it.copy(selectedBuildings = ids, loading = true) }
         viewModelScope.launch {
+            // ① **缓存先行**：先按新筛选渲染（内存快照优先，读盘兜底）——
+            // "已选 N 栋"必须与屏幕内容一致（2026-11-16 用户实测的教训）。
+            val cachedRendered = filterInMemoryBySelection() ||
+                runCatching { renderSnapshotForCurrentState() }.getOrDefault(false)
+            // ② 联网刷新：成功覆盖；失败保留已渲染的筛选结果 + 按原因提示
             runCatching { fetch(reset = true) }
                 .onFailure { e ->
-                    // 离线兜底顺序：先在**内存快照**上按新筛选本地过滤——
-                    // "已选 N 栋"必须和屏幕内容一致。从前直接 renderSnapshot 失败就保留
-                    // 旧的全量数据，界面成了"已选 2 栋 + 显示全部楼栋"的假象
-                    // （2026-11-16 用户实测：校外筛选后看不到具体教室情况）。
-                    if (!filterInMemoryBySelection()) {
-                        if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                    if (!cachedRendered) {
+                        if (!filterInMemoryBySelection() && !renderSnapshotForCurrentState()) {
+                            showNoSnapshotNotice("本地快照里没有所选楼栋的数据 · 联网后自动重试")
+                        }
+                    } else {
+                        _state.update { it.copy(loading = false, notice = noticeForSwitchFailure(e)) }
                     }
                 }
         }
@@ -789,15 +849,20 @@ class RoomViewModel : ViewModel() {
     fun setDate(date: LocalDate) {
         _state.update { it.copy(date = date, loading = true, showDatePicker = false) }
         viewModelScope.launch {
+            // ① **缓存先行**：新日期的本地快照先渲染（毫秒级），联网放后台
+            val cachedRendered = runCatching { renderSnapshotForCurrentState() }.getOrDefault(false)
+            // ② 联网刷新：成功覆盖；失败保留缓存 + 按真实原因提示
             runCatching { fetch(reset = true) }
                 .onFailure { e ->
-                    // 切日期离线：内存里的行属于**旧日期**，不能套用；读新日期快照，
-                    // 没有就显示明确空态（不要把旧日期的数据留在屏上冒充新日期）。
-                    if (!renderSnapshotForCurrentState()) {
+                    if (!cachedRendered) {
+                        // 切日期离线：内存里的行属于**旧日期**，不能套用；没有快照就明确空态
+                        // （别把旧日期的数据留在屏上冒充新日期）。
                         showNoSnapshotNotice(
                             "这一天的空教室还没有本地快照 · 联网后自动重试" +
                                 "（联网时可在筛选面板「保存这一天」）",
                         )
+                    } else {
+                        _state.update { it.copy(loading = false, notice = noticeForSwitchFailure(e)) }
                     }
                 }
         }
@@ -865,7 +930,13 @@ class RoomViewModel : ViewModel() {
         /** 过滤后少于这个数就自动续页 */
         const val MIN_VISIBLE = 15
 
-        /** 预取天数：今天+1 ~ 今天+5（与保留窗口"昨天~今天+5"配套） */
+        /** 预取天数：今天 ~ 今天+3（与保留窗口"昨天~今天+5"配套） */
         const val PREFETCH_DAYS = 3
+
+        /**
+         * 快照"完整"的最少教室数：全量校园远超此数；UI 分页只落第一页（30 间）
+         * 会被判为不完整并重新全量拉取（2026-11-16 实测的残缺快照根源）。
+         */
+        const val SNAPSHOT_COMPLETE_MIN_ROOMS = 100
     }
 }
