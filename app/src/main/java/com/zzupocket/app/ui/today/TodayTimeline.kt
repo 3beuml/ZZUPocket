@@ -1,5 +1,9 @@
 package com.zzupocket.app.ui.today
 
+import com.zzupocket.app.core.ScheduleText
+import com.zzupocket.app.domain.Period
+import com.zzupocket.app.domain.PlanColor
+import com.zzupocket.app.domain.ScheduleBlock
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
@@ -24,8 +28,11 @@ data class TimelineEntry(
     val focusSeconds: Int = 0,
     /** GAP：这段空档里已经专注掉的秒数 */
     val usedSeconds: Int = 0,
+    /** 只有尚未选择显示课程的冲突才带此字段；已处理的冲突按普通课程显示。 */
+    val conflictCourseNames: List<String> = emptyList(),
 ) {
     val minutes: Int get() = (endMin - startMin).coerceAtLeast(0)
+    val hasUnresolvedConflict: Boolean get() = conflictCourseNames.size > 1
 
     /** 某一分钟是否落在这段里（左闭右开） */
     fun covers(minute: Int): Boolean = minute >= startMin && minute < endMin
@@ -42,6 +49,57 @@ object TodayTimeline {
 
     /** 短于这个长度的空档不值得单独占一行 */
     const val MIN_GAP_MIN = 15
+
+    /** 将课表显示分段转为时间轴，避免首页另选一门课或丢失按周设置。 */
+    fun courseEntries(blocks: List<ScheduleBlock>, periods: List<Period>): List<TimelineEntry> {
+        val visible = mutableListOf<ScheduleBlock>()
+        blocks.sortedWith(compareBy({ it.semesterId }, { it.weekIndex }, { it.weekday }, { it.startUnit })).forEach { block ->
+            val previous = visible.lastOrNull()
+            // 部分重叠选择同一门课后，将相邻片段还原为一行，避免重复课程名。
+            if (previous != null && !previous.showPlaceholder && !block.showPlaceholder &&
+                previous.displaySession.id == block.displaySession.id && previous.endUnit + 1 == block.startUnit
+            ) {
+                visible[visible.lastIndex] = previous.copy(endUnit = block.endUnit)
+            } else {
+                visible += block
+            }
+        }
+        return visible.mapNotNull { block ->
+            val session = block.displaySession
+            val start = minuteOfDay(periods.firstOrNull { it.indexNo == block.startUnit }?.startText ?: session.startTime)
+                ?: return@mapNotNull null
+            val end = minuteOfDay(periods.firstOrNull { it.indexNo == block.endUnit }?.endText ?: session.endTime)
+                ?: (start + 45)
+            if (end <= start) return@mapNotNull null
+            val names = if (block.showPlaceholder) block.sessions.map { it.courseName } else emptyList()
+            TimelineEntry(
+                kind = TimelineKind.COURSE,
+                startMin = start,
+                endMin = end,
+                title = if (block.showPlaceholder) "课程冲突" else session.courseName,
+                subtitle = if (block.showPlaceholder) names.joinToString(" / ")
+                    else ScheduleText.tidyPlace(session.roomText ?: session.campusText).orEmpty(),
+                colorArgb = if (block.showPlaceholder) null else PlanColor.of(session.color)?.argb,
+                conflictCourseNames = names,
+            )
+        }.sortedBy { it.startMin }
+    }
+
+    /** 冲突尚未处理时，不将任意一门课描述成正在上的课程。 */
+    fun nextCourseHint(courses: List<TimelineEntry>, nowMin: Int): String? {
+        courses.firstOrNull { it.covers(nowMin) }?.let { ongoing ->
+            if (ongoing.hasUnresolvedConflict) return "当前时段有课程冲突 · 点按课表查看"
+            return "正在上《${ongoing.title}》· 还有 ${duration(ongoing.endMin - nowMin)}下课"
+        }
+        val next = courses.filter { it.startMin > nowMin }.minByOrNull { it.startMin }
+        if (next != null) {
+            val wait = next.startMin - nowMin
+            val gapText = if (wait < 60) "$wait 分钟" else duration(wait)
+            return if (next.hasUnresolvedConflict) "下一时段 ${clock(next.startMin)} 有课程冲突 · ${gapText}后"
+                else "下一节 ${clock(next.startMin)}《${next.title}》· ${gapText}后"
+        }
+        return if (courses.isEmpty()) null else "今天的课已上完"
+    }
 
     /**
      * 把课程与专注记录合成一根时间轴。

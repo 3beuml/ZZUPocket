@@ -76,6 +76,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +99,9 @@ import com.zzupocket.app.data.prefs.GridDensity
 import com.zzupocket.app.data.prefs.UiPrefs
 import com.zzupocket.app.data.repo.ScheduleRepository
 import com.zzupocket.app.domain.Course
+import com.zzupocket.app.domain.ConflictDisplayChoice
+import com.zzupocket.app.domain.ScheduleBlock
+import com.zzupocket.app.domain.scheduleBlocks
 import com.zzupocket.app.domain.FocusRecord
 import com.zzupocket.app.domain.FocusStats
 import com.zzupocket.app.domain.Period
@@ -257,7 +262,9 @@ fun ScheduleScreen(
                         },
                         onWeekSelected = vm::goToGmsWeek,
                         prefs = prefs,
-                        onSessionClick = vm::onSessionClick,
+                        conflictChoices = state.conflictChoices,
+                        scopeKey = state.gmsTermValue,
+                        onBlockClick = vm::onBlockClick,
                     )
                 }
 
@@ -321,7 +328,8 @@ fun ScheduleScreen(
                             onWeekSelected = vm::goToWeek,
                             prefs = prefs,
                             // 点课程块 → 教务课开详情，自定义日程开编辑框
-                            onSessionClick = vm::onSessionClick,
+                            conflictChoices = state.conflictChoices,
+                            onBlockClick = vm::onBlockClick,
                         )
                     } else {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -361,6 +369,19 @@ fun ScheduleScreen(
             overrides = state.detailOverrides,
             onApplyEdits = vm::applyDisplayEdits,
             onResetOverrides = vm::resetDisplayOverrides,
+            beforeDetails = {
+                state.detailConflict?.let { conflict ->
+                    ConflictDisplaySection(
+                        detail = conflict,
+                        saving = state.conflictSaving,
+                        error = state.conflictError,
+                        notice = state.conflictNotice,
+                        onCourseClick = vm::selectConflictCourse,
+                        onSave = vm::saveConflictDisplay,
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                }
+            },
         )
     }
 
@@ -493,7 +514,9 @@ private fun WeekPager(
     weekMondayOf: (Int) -> LocalDate?,
     onWeekSelected: (Int) -> Unit,
     prefs: UiPrefs,
-    onSessionClick: (Session) -> Unit,
+    conflictChoices: List<ConflictDisplayChoice>,
+    scopeKey: String? = null,
+    onBlockClick: (ScheduleBlock) -> Unit,
 ) {
 
     // ① 用户滑动 → 通知 ViewModel。
@@ -527,20 +550,24 @@ private fun WeekPager(
                 prefs = prefs,
                 // 星期表头下面那行日期要用它：算不出来（没学期/没起始日）就不显示日期
                 weekMonday = weekMondayOf(week),
-                onSessionClick = onSessionClick,
+                conflictChoices = conflictChoices,
+                scopeKey = scopeKey,
+                onBlockClick = onBlockClick,
             )
         }
     }
 }
 
 @Composable
-private fun ScheduleGrid(
+internal fun ScheduleGrid(
     sessions: List<Session>,
     periods: List<Period>,
     prefs: UiPrefs,
     /** 这一周周一的日期；null = 算不出来（没选学期/没同步），表头就只显示周几 */
     weekMonday: java.time.LocalDate?,
-    onSessionClick: (Session) -> Unit,
+    conflictChoices: List<ConflictDisplayChoice>,
+    scopeKey: String? = null,
+    onBlockClick: (ScheduleBlock) -> Unit,
 ) {
     val days = 1..prefs.dayCount
     val cellH = prefs.cellHeightDp.dp
@@ -669,7 +696,9 @@ private fun ScheduleGrid(
                         dark = dark,
                         todayIso = todayIso,
                         now = now,
-                        onSessionClick = onSessionClick,
+                        conflictChoices = conflictChoices,
+                        scopeKey = scopeKey,
+                        onBlockClick = onBlockClick,
                     )
                 }
             }
@@ -681,9 +710,8 @@ private fun ScheduleGrid(
 /**
  * 一天的列。
  *
- * 跨节次的课只画**一个**块：块高 = 节数 × 行高 + 被吃掉的间隙，
- * 并跳过被覆盖的格子。因为 `总高 = 行高 × 节数 + 间隙 × (格数 - 1)` 在合并前后相等，
- * 各天与左侧节次列仍然严格对齐。
+ * 按实际占用集合切段；普通课程仍合并成整块，重叠部分显示冲突占位或本地选择。
+ * 块高仍为节数 × 行高 + 内部间隙，各天与左侧节次列严格对齐。
  */
 @Composable
 private fun DayColumn(
@@ -697,19 +725,25 @@ private fun DayColumn(
     dark: Boolean,
     todayIso: String,
     now: LocalTime,
-    onSessionClick: (Session) -> Unit,
+    conflictChoices: List<ConflictDisplayChoice>,
+    scopeKey: String? = null,
+    onBlockClick: (ScheduleBlock) -> Unit,
 ) {
     val corner = RoundedCornerShape(6.dp)
+    val blocks = remember(sessions, day, conflictChoices, scopeKey) {
+        scheduleBlocks(sessions.filter { it.weekday == day }, conflictChoices, scopeKey = scopeKey).associateBy { it.startUnit }
+    }
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
         var unit = 1
         while (unit <= 10) {
-            val session = sessions.firstOrNull { it.weekday == day && unit in it.startUnit..it.endUnit }
-            if (session == null) {
+            val block = blocks[unit]
+            if (block == null) {
                 Box(Modifier.fillMaxWidth().height(cellH))
                 unit += 1
                 continue
             }
-            val span = (session.endUnit - session.startUnit + 1).coerceIn(1, 11 - unit)
+            val session = block.displaySession
+            val span = block.endUnit - block.startUnit + 1
             CourseBlock(
                 session = session,
                 span = span,
@@ -718,8 +752,12 @@ private fun DayColumn(
                 corner = corner,
                 periods = periods,
                 dark = dark,
-                live = prefs.liveOutlineEnabled && isLiveNow(session, periods, todayIso, now),
-                onClick = onSessionClick,
+                live = prefs.liveOutlineEnabled &&
+                    (if (block.showPlaceholder) block.sessions else listOf(session)).any {
+                        isLiveNow(it.copy(startUnit = block.startUnit, endUnit = block.endUnit), periods, todayIso, now)
+                    },
+                conflict = block.takeIf { it.isConflict },
+                onClick = { onBlockClick(block) },
             )
             unit += span
         }
@@ -736,10 +774,14 @@ private fun CourseBlock(
     periods: List<Period>,
     dark: Boolean,
     live: Boolean,
+    conflict: ScheduleBlock? = null,
     onClick: (Session) -> Unit,
 ) {
+    val placeholder = conflict?.showPlaceholder == true
     val bg = when {
-        // 自定义日程用用户自己挑的颜色，不受"课程配色"设置影响 ——
+        // 冲突是状态，独立于课程代码与单色偏好；只在未选择显示课程时突出。
+        placeholder -> MaterialTheme.colorScheme.errorContainer
+        // 普通自定义日程用用户自己挑的颜色，不受"课程配色"设置影响 ——
         // 挑完就得一直是他挑的那个色，不能被"单色模式"改掉
         session.source == ScheduleRepository.SOURCE_CUSTOM ->
             planBlockColor(session.color, dark)
@@ -748,6 +790,11 @@ private fun CourseBlock(
     }
     // 「正在上的课」描边（借鉴 Sked 的 liveCourseOutline）；否则按设置画实线/虚线/不画
     val decoration = when {
+        placeholder -> Modifier.border(
+            (if (live) maxOf(2, prefs.liveOutlineWidth) else 2).dp,
+            MaterialTheme.colorScheme.error,
+            corner,
+        )
         live -> Modifier.border(prefs.liveOutlineWidth.dp, MaterialTheme.colorScheme.primary, corner)
         prefs.blockBorder == BlockBorder.SOLID ->
             Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, corner)
@@ -761,13 +808,17 @@ private fun CourseBlock(
             .height(height)
             .background(bg, corner)
             .then(decoration)
+            .then(if (conflict != null) Modifier.semantics(mergeDescendants = true) {
+                contentDescription = "课程冲突：" + conflict.sessions.joinToString("、") { it.courseName } +
+                    if (placeholder) "，点击查看冲突详情" else "，当前显示${session.courseName}，点击更改显示"
+            } else Modifier)
             .clickable { onClick(session) },
     ) {
         // 实验/见习标记：右上角小角标。以前用文字后缀「（实验）」，窄格里会把课名
         // 挤到截断（issue #6 的「微机原理及接口技术（实…」），角标不占文字区。
-        if (session.experiment) {
+        if (!placeholder && (session.experiment || conflict != null)) {
             Text(
-                text = "实",
+                text = listOfNotNull(if (session.experiment) "实" else null, if (conflict != null) "冲" else null).joinToString("·"),
                 fontSize = 7.sp,
                 lineHeight = 8.sp,
                 color = MaterialTheme.colorScheme.onPrimary,
@@ -786,7 +837,10 @@ private fun CourseBlock(
             // 比"放开行数撑爆格子"稳（issue #6）
             val nameFont = (prefs.courseFontSp + ScheduleText.fontAdjust(session.courseName))
                 .coerceAtLeast(prefs.courseFontSp - 2)
-            Text(
+            if (placeholder) {
+                ConflictPlaceholderTitle(prefs)
+                ConflictCourseNames(conflict!!.sessions, prefs, span)
+            } else Text(
                 text = session.courseName,
                 fontSize = nameFont.sp,
                 lineHeight = (nameFont + 2).sp,
@@ -809,7 +863,7 @@ private fun CourseBlock(
                     add(SlotText.Kind.ROOM to ScheduleText.tidyPlace(session.roomText))
                 }
             }
-            secondary.forEachIndexed { index, (kind, line) ->
+            if (!placeholder) secondary.forEachIndexed { index, (kind, line) ->
                 if (line == null) return@forEachIndexed
                 // 地点自适应（issue #6）：超长先缩一号、再「保头保尾」缩写（楼名…房号），
                 // 行数按块高给（跨节 3 行、单节 1 行）；教师名维持单行。
@@ -1148,6 +1202,7 @@ internal fun CourseDetailSheet(
     overrides: DisplayOverridesView? = null,
     onApplyEdits: ((Course, String, Map<String, String>) -> Unit)? = null,
     onResetOverrides: ((Course) -> Unit)? = null,
+    beforeDetails: @Composable () -> Unit = {},
 ) {
     var editOpen by remember(course) { mutableStateOf(false) }
     if (editOpen && onApplyEdits != null) {
@@ -1163,9 +1218,10 @@ internal fun CourseDetailSheet(
     }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 32.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            beforeDetails()
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     course.nameZh,

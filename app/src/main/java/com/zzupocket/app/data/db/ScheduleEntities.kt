@@ -167,6 +167,8 @@ data class CourseSessionEntity(
  * - `kind = "name"`：课程名覆盖，作用整门课；
  * - `kind = "room"`：教室覆盖，作用到「星期 + 起始节」这个时段
  *   （同一门课不同时段常在不同教室）。
+ * - `kind = "conflict"`：冲突显示选择，courseCode 存冲突标识，value 存选中的时段标识，
+ *   weeks 存单个周号；用于周网格和首页时间轴，不影响原始日程或课程名称/教室覆盖。
  *   [weeks] 为 null = 该时段**全部周**；否则只作用于逗号分隔的这些教学周——
  *   单双周换教室的课（单周 302、双周 405）靠它分成两条互不干扰。
  * 应用在仓库的读取口（网格/今天/组件/详情统一生效）。
@@ -176,7 +178,7 @@ data class DisplayOverrideEntity(
     @PrimaryKey val id: String,     // "<semesterId>|<courseCode>|name" 或 "|room|<weekday>|<startUnit>|<weeks|all>"
     val semesterId: Int,
     val courseCode: String,
-    val kind: String,               // "name" | "room"
+    val kind: String,               // "name" | "room" | "conflict"
     val weekday: Int?,
     val startUnit: Int?,
     val weeks: String? = null,      // kind=room 时的教学周（如 "1,3,5"）；null = 全部周
