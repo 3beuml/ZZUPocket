@@ -298,6 +298,14 @@ interface RoomOccupancyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<RoomOccupancyEntity>)
 
+    /** 本地快照清单（诊断页展示用）：按日期+校区聚合，楼栋数用于标记"疑似残缺" */
+    @Query(
+        "SELECT date, campusId, MAX(campusName) AS campusName, COUNT(*) AS rooms, " +
+            "COUNT(DISTINCT buildingId) AS buildings, MAX(fetchedAt) AS fetchedAt " +
+            "FROM room_occupancy GROUP BY date, campusId ORDER BY date",
+    )
+    suspend fun summary(): List<RoomSnapshotSummary>
+
     @Query("SELECT * FROM room_occupancy WHERE date = :date AND campusId = :campusId")
     suspend fun byDateAndCampus(date: String, campusId: Long): List<RoomOccupancyEntity>
 
@@ -316,3 +324,15 @@ interface RoomOccupancyDao {
     @Query("DELETE FROM room_occupancy WHERE date < :minDate OR date > :maxDate")
     suspend fun pruneOutside(minDate: String, maxDate: String)
 }
+
+/** 本地快照清单的一行（诊断页"空教室本地快照"卡） */
+data class RoomSnapshotSummary(
+    val date: String,
+    val campusId: Long,
+    val campusName: String,
+    /** 该天存了多少间教室 */
+    val rooms: Int,
+    /** 覆盖了多少栋楼——筛选时段抓取的旧数据会只有一两栋，用这个标记"疑似残缺" */
+    val buildings: Int,
+    val fetchedAt: Long,
+)

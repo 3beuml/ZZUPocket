@@ -50,11 +50,21 @@ import org.json.JSONObject
  */
 class NoxGatewayClient(private val store: TokenStore) {
 
-    /** 独立 client：跟重定向（portal 链需要）+ 内存 cookie jar（会话链依赖） */
+    /** 独立 client：跟重定向（portal 链需要）+ 内存 cookie jar（会话链依赖）。
+     *  ⚠️ 连接超时收紧到 8s：门户挂掉时不该让每笔教务请求都陪它等满 15s */
     private val client: OkHttpClient = HttpClients.builder(minIntervalMs = 300)
         .followRedirects(true)
+        .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
         .cookieJar(MemoryCookieJar())
         .build()
+
+    /** 更快的探测专用 client：只回答"门户能不能连上"，4s 内答不上来就当挂了 */
+    private val probeClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     /** 单飞：多个教务请求同时被拦时只跑一轮登录 */
     private val loginMutex = Mutex()
@@ -152,17 +162,30 @@ class NoxGatewayClient(private val store: TokenStore) {
         withContext(Dispatchers.IO) { loginInternal(account, password, portalUrl) }
 
     private suspend fun loginInternal(account: String, password: String, portalUrl: String): Boolean {
+        // ⓪ **先做廉价可达性探测**（4s 内连不上就整链放弃）：
+        // 门户整体挂掉时（2026-11-13 实测：连 TCP 都不响应），不探测的话每笔教务
+        // 请求都会陪门户白等 3×8s，这正是"课表等很久才显示"的主要来源之一。
+        if (!portalReachable(portalUrl.toHttpUrl())) {
+            Log.w(TAG, "门户不可达（4s 内连不上），跳过整条登录链")
+            return false
+        }
+
         // ① portal 链：建立网关会话 cookie（跟随 302 到 /authn/base/）。
-        // ⚠️ nox 门户**时通时断**（2026-11-12 实测：同一设备 20 分钟内先通后超时），
-        // 疑似负载均衡部分后端不可达——重试几次能撞上活的。
+        // ⚠️ 门户可能部分后端不可达：**连接失败→直接放弃**（同一 IP，重试无意义）；
+        // 只有拿到 HTTP 响应的非 2xx 才值得重试（可能撞上别的后端）。
         val landed = (1..PORTAL_ATTEMPTS).firstNotNullOfOrNull { attempt ->
-            val ok = httpGet(portalUrl)
-            if (ok == null) {
-                Log.w(TAG, "portal 链第 $attempt 次失败")
-                Thread.sleep(PORTAL_RETRY_DELAY_MS)
-                null
-            } else {
-                ok
+            val result = httpGetRaw(portalUrl)
+            when {
+                result.code == null -> {
+                    Log.w(TAG, "portal 连接失败（第 $attempt 次），不再重试")
+                    null
+                }
+                result.code in 200..299 -> result.body
+                else -> {
+                    Log.w(TAG, "portal HTTP $result.code（第 $attempt 次）")
+                    Thread.sleep(PORTAL_RETRY_DELAY_MS)
+                    null
+                }
             }
         }
         Log.i(TAG, "portal 链落地：${landed != null}")
@@ -224,8 +247,8 @@ class NoxGatewayClient(private val store: TokenStore) {
         val redirectUrl = loginJson.optJSONObject("data")
             ?.optJSONObject("toUrls")?.optString("redirectUrl")
         if (!redirectUrl.isNullOrBlank()) {
-            val follow = httpGet(redirectUrl)
-            Log.i(TAG, "login 后回跳 ${redirectUrl.take(120)} → ${if (follow != null) "已到达" else "未完成"}")
+            val follow = httpGetRaw(redirectUrl)
+            Log.i(TAG, "login 后回跳 ${redirectUrl.take(120)} → ${if (follow.code in 200..399) "已到达" else "未完成(${follow.code ?: "连接失败"})"}")
         } else {
             Log.i(TAG, "login 响应无 toUrls.redirectUrl（可能网关侧流程变化）")
         }
@@ -245,17 +268,32 @@ class NoxGatewayClient(private val store: TokenStore) {
         return localFallback
     }
 
-    private fun httpGet(url: String): String? = try {
-        client.newCall(Request.Builder().url(url.toHttpUrl()).get().build()).execute().use { r ->
-            val body = r.body?.string()
-            if (!r.isSuccessful) Log.w(TAG, "GET 非成功状态：HTTP ${r.code} $url")
-            body?.takeIf { r.isSuccessful }
-        }
-    } catch (e: Exception) {
-        Log.w(TAG, "GET 失败：$url", e); null
+    /** HTTP 结果：code=null 表示**连接失败**（TCP 都没建起来，重试同一目标无意义） */
+    private class HttpResult(val code: Int?, val body: String?) {
+        val isHttpFailure: Boolean get() = code != null && code !in 200..299
     }
 
-    private fun httpGetBody(url: String): String? = httpGet(url)
+    private fun httpGetRaw(url: String): HttpResult = try {
+        client.newCall(Request.Builder().url(url.toHttpUrl()).get().build()).execute().use { r ->
+            HttpResult(r.code, r.body?.string()).also { result ->
+                if (result.code != null && result.code !in 200..299) {
+                    Log.w(TAG, "GET 非成功状态：HTTP ${r.code} $url")
+                }
+            }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "GET 连接失败：$url", e)
+        HttpResult(code = null, body = null)
+    }
+
+    private fun httpGetBody(url: String): String? = httpGetRaw(url).takeIf { it.code in 200..299 }?.body
+
+    /** 门户可达性探测：4s 内 TCP 建不起来 = 整个门户挂了，后续一切自动认证直接放弃 */
+    private fun portalReachable(url: HttpUrl): Boolean = try {
+        probeClient.newCall(Request.Builder().url(url).head().build()).execute().use { true }
+    } catch (e: Exception) {
+        false
+    }
 
     private fun httpPostJson(url: String, body: String): String? = try {
         val request = Request.Builder()

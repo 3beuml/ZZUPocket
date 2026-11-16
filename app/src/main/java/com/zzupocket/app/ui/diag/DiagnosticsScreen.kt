@@ -143,16 +143,6 @@ class DiagnosticsViewModel : ViewModel() {
                 gmsLoggedIn = AppGraph.gmsScheduleSource.hasSession(),
                 gmsLoginAt = AppGraph.gmsScheduleSource.loginAt(),
                 libSessionAt = AppGraph.libSessionSource.capturedAt(),
-                // 小组件几何卡 release 不再显示（与自检同策略），也就不必采集
-                widgetReport = if (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE) {
-                    runCatching {
-                        AppGraph.appContextOrNull()?.let {
-                            com.zzupocket.app.ui.widget.WidgetDiagnostics.collect(it)
-                        } ?: "applicationContext 未初始化"
-                    }.getOrElse { e -> e.message ?: e.toString() }
-                } else {
-                    ""
-                },
             )
         }
     }

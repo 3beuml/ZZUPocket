@@ -57,6 +57,15 @@ data class RoomUiState(
     val rawRoom: RoomRow? = null,
     val hiddenVirtual: Int = 0,
     /**
+     * 本地快照清单（筛选面板"本地保存"区）：按日期聚合（教室数/楼栋数/抓取时间）。
+     * bootstrap 与打开筛选面板时刷新，手动保存后也会刷新。
+     */
+    val localSnapshots: List<com.zzupocket.app.data.db.RoomSnapshotSummary> = emptyList(),
+    /** 正在手动保存的日期（非空 = 保存进行中，按钮转文字）；null = 空闲 */
+    val savingDay: java.time.LocalDate? = null,
+    /** 手动保存的结果提示（失败时显示在"本地保存"区）；null = 无 */
+    val saveResult: String? = null,
+    /**
      * error 是"校园网安全网关要求认证"类提示时置 true：界面据此给
      * 「去补录密码」按钮（跳登录页）——老用户已登录且无登出功能，
      * 这是他们把密码交给自动认证的唯一路径（2026-11-12）。
@@ -127,6 +136,7 @@ class RoomViewModel : ViewModel() {
             // ⚠️ 快照渲染必须放在任何网络调用之前：断网时 campuses() 会抛，
             // 走不到快照渲染的话明明有数据也整页红条（2026-11-05 用户蜂窝实测，#15 复发）。
             val shownFromCache = renderCachedSnapshot()
+            runCatching { refreshLocalSnapshots() } // 筛选面板"本地保存"区的数据源
             Log.i(
                 TAG,
                 "bootstrap：快照渲染 shown=$shownFromCache rows=${_state.value.loadedRooms} " +
@@ -261,7 +271,7 @@ class RoomViewModel : ViewModel() {
         _state.update { it.copy(buildings = derived) }
     }
 
-    private fun degradeToCache(e: Throwable) {
+    private suspend fun degradeToCache(e: Throwable) {
         Log.w(TAG, "空教室降级：快照兜底 rows=${allRooms.size} auth=${e is com.zzupocket.app.core.AppError.ReLoginRequired}", e)
         if (allRooms.isNotEmpty()) {
             // 鉴权失效必须亮出来（红条）：温和的"获取于 HH:mm · 点此刷新"会把它
@@ -288,10 +298,33 @@ class RoomViewModel : ViewModel() {
                 )
             }
         } else {
+            // 断网/被拦且**当前日期没有本地数据**：把"本地已有的快照日期"就地列出——
+            // 直接回答"存没存、存了哪几天"（2026-11-15 用户反馈的黑盒问题）。
+            val localDays = runCatching {
+                val today = java.time.LocalDate.now()
+                AppGraph.scheduleRepository.roomSnapshotSummary()
+                    .sortedBy { it.date }
+                    .joinToString("、") { s ->
+                        val d = java.time.LocalDate.parse(s.date)
+                        val label = when (java.time.temporal.ChronoUnit.DAYS.between(today, d)) {
+                            0L -> "今天"
+                            1L -> "明天"
+                            2L -> "后天"
+                            -1L -> "昨天"
+                            else -> d.format(java.time.format.DateTimeFormatter.ofPattern("M月d日"))
+                        }
+                        "$label（${s.rooms} 间）"
+                    }
+            }.getOrNull().orEmpty()
             _state.update {
                 it.copy(
                     loading = false,
-                    error = e.toUserMessage(),
+                    error = e.toUserMessage() +
+                        if (localDays.isNotBlank()) {
+                            "\n本地已有快照：$localDays\n（详情见首页右上角的登录状态页 →「空教室本地快照」）"
+                        } else {
+                            ""
+                        },
                     errorNeedsRelogin = e is com.zzupocket.app.core.AppError.ZeroTrustAuthRequired,
                 )
             }
@@ -531,16 +564,52 @@ class RoomViewModel : ViewModel() {
         }
     }
 
-    private suspend fun prefetchDay(campusId: Long, buildingIds: List<Long>, date: LocalDate) {
-        // 该天已有"今天抓的"快照就跳过（预取只在成功联网后跑，快照即新鲜）
+    /** 手动保存某一天（筛选面板"本地保存"区）：与自动预取共用同一条全量管线 */
+    fun saveDay(date: java.time.LocalDate) {
+        if (_state.value.savingDay != null) return // 一次只存一天
+        viewModelScope.launch {
+            _state.update { it.copy(savingDay = date, saveResult = null) }
+            val s = _state.value
+            val ok = runCatching {
+                val campusId = s.campusId ?: error("校区字典未就绪，无法保存")
+                val buildingIds = s.buildings.map { it.id }
+                if (buildingIds.isEmpty()) error("楼栋字典未就绪，无法保存")
+                fetchAndSaveDay(campusId, buildingIds, date)
+                true
+            }.getOrElse { e ->
+                Log.w(TAG, "手动保存 $date 失败", e)
+                false
+            }
+            refreshLocalSnapshots()
+            _state.update {
+                it.copy(
+                    savingDay = null,
+                    saveResult = if (ok) {
+                        null
+                    } else {
+                        "${date.monthValue}-${date.dayOfMonth} 保存未成功（需要联网，且门户/教务正常）"
+                    },
+                )
+            }
+        }
+    }
+
+    /**
+     * 抓取某一天的**全量**教室占用并落库——自动预取与手动保存共用。
+     * 攒齐所有页再一次性落库：按页落库会互相覆盖（根因见 saveRoomSnapshot 的注释）。
+     * 返回是否真的存上了（该天已有当天抓取的快照时直接返回 true 视作已保存）。
+     */
+    private suspend fun fetchAndSaveDay(
+        campusId: Long,
+        buildingIds: List<Long>,
+        date: LocalDate,
+    ): Boolean {
         val existing = scheduleRepo.cachedRoomSnapshot(date.toString(), campusId)
         if (existing != null && java.time.Instant.ofEpochMilli(existing.fetchedAt)
                 .atZone(java.time.ZoneId.systemDefault()).toLocalDate() == LocalDate.now()
         ) {
-            return
+            return true
         }
-        // 攒齐该日期的**所有页**再一次性落库——按页落库会互相覆盖，
-        // 快照只剩最后一页的教室（根因见 saveRoomSnapshot 的 replace 注释）。
         val allRows = mutableListOf<com.zzupocket.app.data.repo.RoomCacheRow>()
         var page = 1
         while (true) {
@@ -555,13 +624,17 @@ class RoomViewModel : ViewModel() {
             if (page >= totalPages) break
             page++
         }
-        runCatching {
-            AppGraph.scheduleRepository.saveRoomSnapshot(
-                date = date.toString(),
-                campusId = campusId,
-                rows = allRows,
-            )
-        }
+        if (allRows.isEmpty()) return false
+        AppGraph.scheduleRepository.saveRoomSnapshot(
+            date = date.toString(),
+            campusId = campusId,
+            rows = allRows,
+        )
+        return true
+    }
+
+    private suspend fun prefetchDay(campusId: Long, buildingIds: List<Long>, date: LocalDate) {
+        fetchAndSaveDay(campusId, buildingIds, date)
     }
 
     private fun rebuildGroups(
@@ -686,9 +759,19 @@ class RoomViewModel : ViewModel() {
         }
     }
 
-    fun openFilter() = _state.update { it.copy(showFilter = true) }
+    fun openFilter() {
+        _state.update { it.copy(showFilter = true) }
+        // 打开筛选面板时刷新一次清单——"本地保存"区要显示最新的存了哪几天
+        viewModelScope.launch { refreshLocalSnapshots() }
+    }
 
     fun closeFilter() = _state.update { it.copy(showFilter = false) }
+
+    private suspend fun refreshLocalSnapshots() {
+        val list = runCatching { AppGraph.scheduleRepository.roomSnapshotSummary() }
+            .getOrDefault(emptyList())
+        _state.update { it.copy(localSnapshots = list) }
+    }
 
     fun openDatePicker() = _state.update { it.copy(showDatePicker = true) }
 

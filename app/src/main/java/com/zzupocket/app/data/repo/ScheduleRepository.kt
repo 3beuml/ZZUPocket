@@ -715,6 +715,10 @@ class ScheduleRepository(
         return rowsToSnapshot(date, rows)
     }
 
+    /** 本地快照清单（诊断页"空教室本地快照"卡）：哪几天有、各存了多少间/多少栋 */
+    suspend fun roomSnapshotSummary(): List<com.zzupocket.app.data.db.RoomSnapshotSummary> =
+        db.roomOccupancyDao().summary()
+
     /**
      * 读某一天的快照，**不指定校区**（多校区时取最近抓取的那组）。
      *

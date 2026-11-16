@@ -658,6 +658,17 @@ cacheNoticeNeedsLogin = expired,
     fun dismissNotice() = _state.update { it.copy(notice = null) }
 
     /** 载入某学期的数据；没有缓存、缓存过期或强制刷新时才联网 */
+    /**
+     * 加载某学期的课表——**缓存先上屏，同步放后台**（stale-while-revalidate）。
+     *
+     * 为什么这么改：数据一直就在本地库里，旧实现却把网络同步挡在渲染前面——
+     * 统一验证网关黑洞期每笔请求要吃满 15~30s 超时，"联网后半天才显示课表"
+     * 就是这么来的（2026-11-15 实测）。现在进页毫秒级先画缓存（过期就配一行
+     * 灰字），同步在后台静默跑，完成后再刷新画面。
+     *
+     * 例外：**本地完全没有数据**（新装/清数据）时必须同步才能画，失败直接报错
+     * （2026-11-12 修的"无限转圈"保持不变）。
+     */
     private suspend fun loadSemester(semester: Semester, loggedIn: Boolean, forceSync: Boolean) {
         val fetchedAt = runCatching {
             repo.lastFetchedAt(ScheduleRepository.SOURCE_EAS, semester.id)
@@ -667,44 +678,71 @@ cacheNoticeNeedsLogin = expired,
             lastFetchedAt = fetchedAt,
             ttlMs = EAS_TTL_MS,
         )
-        var refreshFailed = false
-        try {
-            if (loggedIn && (forceSync || !repo.hasCourseData(semester.id) || stale)) {
-                // 兜底超时：蜂窝/弱网下 CAS 刷新会挂很久，没这层的话页面一直转圈
-                // （研究生链路同款做法）。超时走下面的缓存兜底，不白等。
+        val hasData = repo.hasCourseData(semester.id)
+
+        // ① 缓存立即上屏（过期就配一行灰字，点击走 refresh()）
+        val staleNotice = when {
+            !hasData -> null
+            fetchedAt == null -> "暂时连不上教务系统 · 点此重试"
+            stale -> "显示的是 ${hhmm(fetchedAt)} 的课表 · 点此重试"
+            else -> null
+        }
+        renderLocal(semester, staleNotice)
+
+        val needSync = loggedIn && (forceSync || !hasData || stale)
+        if (!needSync) return
+
+        // ② 本地无数据：同步必须在渲染前完成（否则画不出来），失败报错
+        if (!hasData) {
+            try {
                 kotlinx.coroutines.withTimeout(EAS_SYNC_TIMEOUT_MS) {
                     repo.refreshCourseTable(semester.id)
                 }
-            }
-        } catch (e: Throwable) {
-            // 用户离开页面导致的协程取消不是"刷新失败"，原样上抛让协程正常收尾
-            if (e is kotlinx.coroutines.CancellationException &&
-                e !is kotlinx.coroutines.TimeoutCancellationException
-            ) {
-                throw e
-            }
-            refreshFailed = true
-            if (repo.hasCourseData(semester.id)) {
-                val at = fetchedAt?.let { hhmm(it) }
-                _state.update {
-                    it.copy(
-                        cacheNotice = if (at != null) {
-                            "显示的是 $at 的课表 · 点此重试"
-                        } else {
-                            "暂时连不上教务系统 · 点此重试"
-                        },
-                        error = null,
-                    )
+            } catch (e: Throwable) {
+                // 用户离开页面导致的协程取消不是"刷新失败"，原样上抛让协程正常收尾
+                if (e is kotlinx.coroutines.CancellationException &&
+                    e !is kotlinx.coroutines.TimeoutCancellationException
+                ) {
+                    throw e
                 }
-            } else {
-                _state.update { it.copy(error = e.toUserMessage()) }
+                _state.update { it.copy(loading = false, error = e.toUserMessage()) }
+                return
             }
+            // 节次是渲染网格表头必需的，但 refreshCourseTable 不带它——同步成功后补一次
+            if (repo.periods().isEmpty()) runCatching { repo.refreshPeriods() }
+            renderLocal(semester, null)
+            return
         }
-        var periods = repo.periods()
-        if (periods.isEmpty() && loggedIn) {
-            runCatching { repo.refreshPeriods() }
-            periods = repo.periods()
+
+        // ③ 有缓存：后台静默刷新，不阻塞首屏；完成后若还停留在这个学期，静默更新画面
+        viewModelScope.launch {
+            var refreshFailed = false
+            try {
+                kotlinx.coroutines.withTimeout(EAS_SYNC_TIMEOUT_MS) {
+                    repo.refreshCourseTable(semester.id)
+                }
+                // 同上：节次缺失时顺手补齐
+                if (repo.periods().isEmpty()) runCatching { repo.refreshPeriods() }
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException &&
+                    e !is kotlinx.coroutines.TimeoutCancellationException
+                ) {
+                    throw e
+                }
+                refreshFailed = true
+            }
+            // 用户可能已切走学期（viewModelScope 取消会自动带走这里，这里只防切学期）
+            if (_state.value.selectedSemester?.id != semester.id) return@launch
+            renderLocal(semester, if (refreshFailed) staleNotice else null)
         }
+    }
+
+    /**
+     * 只读本地库并渲染一帧课表（周期/周次/课程/计划全部来自本地，**无教务请求**）。
+     * [cacheNotice] 传 null = 保留现有提示（后台刷新成功清掉过期提示正是靠它）。
+     */
+    private suspend fun renderLocal(semester: Semester, cacheNotice: String?) {
+        val periods = repo.periods()
         val today = LocalDate.now()
         // 周次参数：按学期存；教务给了学期起始日就直接当权威值填进去（不需要用户确认）
         val settings = resolveWeekSettings(
@@ -745,8 +783,8 @@ cacheNoticeNeedsLogin = expired,
                 dataFetchedAt = runCatching {
                     repo.lastFetchedAt(ScheduleRepository.SOURCE_EAS, semester.id)
                 }.getOrNull(),
-                // 刷新成功就清掉旧的"显示的是…"提示；失败时保留上面写进去的那行
-                cacheNotice = if (refreshFailed) it.cacheNotice else null,
+                // 传入 null = 保留现有提示（后台刷新成功清掉过期提示正是靠它）
+                cacheNotice = cacheNotice ?: it.cacheNotice,
             )
         }
     }
@@ -1076,27 +1114,47 @@ cacheNoticeNeedsLogin = expired,
         val semester = _state.value.selectedSemester
         viewModelScope.launch {
             _state.update { it.copy(loading = true, error = null) }
-            if (auth.isLoggedIn()) {
-                runCatching { repo.refreshSemesters() }
-                val all = repo.semesters()
-                val (visible, notice) = applyYearFilter(all)
-                val cur = _state.value.selectedSemester
-                val sel = visible.firstOrNull { it.id == cur?.id } ?: visible.firstOrNull()
-                _state.update {
-                    it.copy(
-                        allSemesters = all,
-                        semesters = visible,
-                        notice = notice,
-                        selectedSemester = sel,
-                    )
-                }
-                if (sel != null) loadSemester(sel, true, forceSync = true) else _state.update { it.copy(loading = false) }
-            } else {
+            if (!auth.isLoggedIn()) {
                 _state.update { it.copy(loading = false, error = "未登录，无法刷新课表") }
+                return@launch
+            }
+            // ① 先把缓存画出来（loadSemester 渲染本地 + 同步放后台）：
+            // 旧顺序是学期列表网络请求在前、loadSemester 在后，验证网关黑洞期光第一笔
+            // 就吃满 15s 连接超时，期间整页 spinner 毫无变化——点刷新没反应
+            // （2026-11-15 用户实测）就是这么来的。
+            val cached = repo.semesters()
+            val cachedSel = semester
+                ?: cached.firstOrNull { it.isCurrent }
+                ?: cached.firstOrNull()
+            if (cachedSel != null) loadSemester(cachedSel, true, forceSync = true)
+
+            // ② 学期列表刷新：结果只影响学期清单，不影响首屏课表
+            runCatching { repo.refreshSemesters() }
+            val all = repo.semesters()
+            val (visible, notice) = applyYearFilter(all)
+            val cur = _state.value.selectedSemester
+            val sel = visible.firstOrNull { it.id == cur?.id } ?: visible.firstOrNull()
+            _state.update {
+                it.copy(
+                    allSemesters = all,
+                    semesters = visible,
+                    notice = notice,
+                    selectedSemester = sel,
+                )
+            }
+
+            // ③ 兜底：全新账号（本地没有任何学期）必须同步学期才能加载；
+            //    学期清单刷新后当前学期变了（罕见）也要补载
+            when {
+                sel == null && visible.isEmpty() ->
+                    _state.update {
+                        it.copy(loading = false, error = "暂时获取不到学期列表，请稍后重试")
+                    }
+                sel != null && sel.id != cachedSel?.id ->
+                    loadSemester(sel, true, forceSync = false)
             }
         }
     }
-
     fun openDetail(course: Course) {
         viewModelScope.launch {
             val ovs = runCatching {

@@ -366,6 +366,10 @@ fun RoomScreen(
             campusId = state.campusId,
             buildings = state.buildings,
             selected = state.selectedBuildings,
+            localSnapshots = state.localSnapshots,
+            savingDay = state.savingDay,
+            saveResult = state.saveResult,
+            onSaveDay = vm::saveDay,
             onCampus = vm::setCampus,
             onApply = { vm.setBuildings(it); vm.closeFilter() },
             onDismiss = vm::closeFilter,
@@ -628,7 +632,7 @@ private fun LoadingRow() {
     }
 }
 
-/** 筛选面板：校区（单选）+ 楼栋（多选，北1–5/南1–5 置顶） */
+/** 筛选面板：校区（单选）+ 楼栋（多选，北1–5/南1–5 置顶）+ 本地快照（哪几天有/手动保存） */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun FilterSheet(
@@ -636,6 +640,10 @@ private fun FilterSheet(
     campusId: Long?,
     buildings: List<EasClient.BuildingDto>,
     selected: Set<Long>,
+    localSnapshots: List<com.zzupocket.app.data.db.RoomSnapshotSummary>,
+    savingDay: java.time.LocalDate?,
+    saveResult: String?,
+    onSaveDay: (java.time.LocalDate) -> Unit,
     onCampus: (Long) -> Unit,
     onApply: (Set<Long>) -> Unit,
     onDismiss: () -> Unit,
@@ -673,6 +681,16 @@ private fun FilterSheet(
                     .padding(top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                // ── 本地保存（收起一行 / 展开见哪几天 + 按天补存）───────────────
+                // 这是给用户看的：只回答"哪几天有、断网能不能看"，
+                // 不摆房间数/楼栋数这类开发细节（2026-11-15 用户要求）。
+                LocalSnapshotSection(
+                    snapshots = localSnapshots,
+                    savingDay = savingDay,
+                    saveResult = saveResult,
+                    onSaveDay = onSaveDay,
+                )
+
                 if (campuses.size > 1) {
                     Text(
                         text = "校区",
@@ -723,4 +741,108 @@ private fun derivedLoadMore(state: LazyListState) = derivedStateOf {
     val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
     val total = state.layoutInfo.totalItemsCount
     total > 0 && last >= total - 3
+}
+
+/**
+ * 筛选面板里的「本地保存」区（2026-11-15 用户设计确认）：
+ * 收起态只有一行（不挤占 61 栋楼的长列表），展开才看哪几天有/没有，
+ * 未保存的日子可以按天补存（复用自动预取的同一条全量管线）。
+ *
+ * 措辞原则：给用户看的，只说"哪几天有、断网能不能看"，不摆房间数/楼栋数。
+ */
+@Composable
+private fun LocalSnapshotSection(
+    snapshots: List<com.zzupocket.app.data.db.RoomSnapshotSummary>,
+    savingDay: java.time.LocalDate?,
+    saveResult: String?,
+    onSaveDay: (java.time.LocalDate) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val today = java.time.LocalDate.now()
+    // 保留窗口：昨天 ~ 今天+5（与后端 pruneOutside 一致；窗口外永远存不住）
+    val window = (-1..5).map { today.plusDays(it.toLong()) }
+    val savedDates = snapshots.mapNotNull { runCatching { java.time.LocalDate.parse(it.date) }.getOrNull() }.toSet()
+    val savedInWindow = window.filter { it in savedDates }
+
+    fun label(d: java.time.LocalDate): String = when (java.time.temporal.ChronoUnit.DAYS.between(today, d)) {
+        0L -> "今天"
+        1L -> "明天"
+        2L -> "后天"
+        -1L -> "昨天"
+        else -> d.format(java.time.format.DateTimeFormatter.ofPattern("M月d日"))
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (savedInWindow.isEmpty()) {
+                    "本地未保存快照"
+                } else {
+                    "本地已存 ${savedInWindow.size} 天" +
+                        "（${label(savedInWindow.first())}~${label(savedInWindow.last())}）"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = if (expanded) "▴" else "▾",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        if (expanded) {
+            window.forEach { d ->
+                val saved = d in savedDates
+                val saving = savingDay == d
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = if (saved) "✓" else "—",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (saved) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "${label(d)}（${d.monthValue}-${d.dayOfMonth}）",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    when {
+                        saved -> Text(
+                            "已保存",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        saving -> Text(
+                            "正在保存…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        else -> TextButton(
+                            onClick = { onSaveDay(d) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        ) {
+                            Text("保存这一天", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+            Text(
+                "断网也能看已保存的这几天；保存一天需要联网拉取全校区数据",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            saveResult?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
 }
