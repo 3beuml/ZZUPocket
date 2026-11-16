@@ -710,8 +710,63 @@ class RoomViewModel : ViewModel() {
                 _state.update { it.copy(buildings = buildings) }
                 fetch(reset = true)
             }.onFailure { e ->
-                if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                // 切校区离线：内存里的行属于旧校区，不能套用；读新校区快照，
+                // 没有就明确空态（别把旧校区的数据留在屏上冒充新校区）。
+                if (!renderSnapshotForCurrentState()) {
+                    showNoSnapshotNotice("这个校区还没有本地快照 · 联网后自动重试")
+                }
             }
+        }
+    }
+
+    /**
+     * 离线切换楼栋筛选：在**内存快照**（[allRooms]）上本地过滤，保证"已选 N 栋"
+     * 与屏幕内容一致。返回 true = 已处理（含"所选楼栋在本地快照里没有数据"的空态，
+     * 此时给明确说明，而不是把旧的全量数据留在屏上）；false = 内存里也没有数据。
+     */
+    private fun filterInMemoryBySelection(): Boolean {
+        if (allRooms.isEmpty()) return false
+        val s = _state.value
+        val filtered = if (s.selectedBuildings.isEmpty()) {
+            allRooms
+        } else {
+            allRooms.filter { it.buildingId in s.selectedBuildings }
+        }
+        val groups = rebuildGroups(filtered, s.buildings.map { it.id }, s.selectedUnits)
+        _state.update {
+            it.copy(
+                loading = false,
+                loadingMore = false,
+                error = null,
+                groups = groups,
+                loadedRooms = filtered.size,
+                fromCache = true,
+                notice = if (filtered.isEmpty()) {
+                    "本地快照里没有所选楼栋的数据 · 联网后自动重试"
+                } else {
+                    noticeOf(it.lastFetchedAt)
+                },
+            )
+        }
+        return true
+    }
+
+    /**
+     * 离线切到没有快照的日期/校区：清空表格并给出明确说明。
+     * 比"保留旧数据 + 新筛选/新日期标签"诚实得多——那会造成"显示的还是默认界面"的错觉。
+     */
+    private fun showNoSnapshotNotice(text: String) {
+        allRooms = emptyList()
+        _state.update {
+            it.copy(
+                loading = false,
+                loadingMore = false,
+                error = null,
+                groups = emptyList(),
+                loadedRooms = 0,
+                fromCache = true,
+                notice = text,
+            )
         }
     }
 
@@ -720,7 +775,13 @@ class RoomViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching { fetch(reset = true) }
                 .onFailure { e ->
-                    if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                    // 离线兜底顺序：先在**内存快照**上按新筛选本地过滤——
+                    // "已选 N 栋"必须和屏幕内容一致。从前直接 renderSnapshot 失败就保留
+                    // 旧的全量数据，界面成了"已选 2 栋 + 显示全部楼栋"的假象
+                    // （2026-11-16 用户实测：校外筛选后看不到具体教室情况）。
+                    if (!filterInMemoryBySelection()) {
+                        if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                    }
                 }
         }
     }
@@ -730,7 +791,14 @@ class RoomViewModel : ViewModel() {
         viewModelScope.launch {
             runCatching { fetch(reset = true) }
                 .onFailure { e ->
-                    if (!renderSnapshotForCurrentState()) degradeToCache(e)
+                    // 切日期离线：内存里的行属于**旧日期**，不能套用；读新日期快照，
+                    // 没有就显示明确空态（不要把旧日期的数据留在屏上冒充新日期）。
+                    if (!renderSnapshotForCurrentState()) {
+                        showNoSnapshotNotice(
+                            "这一天的空教室还没有本地快照 · 联网后自动重试" +
+                                "（联网时可在筛选面板「保存这一天」）",
+                        )
+                    }
                 }
         }
     }

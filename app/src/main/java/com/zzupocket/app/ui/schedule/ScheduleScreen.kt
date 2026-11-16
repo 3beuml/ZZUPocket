@@ -179,6 +179,16 @@ fun ScheduleScreen(
 
             // 缓存提示：一行小灰字，点了重试。刻意不用红色 —— 红色错误会让人以为账号出问题
             // （历史 issue #2 反复重登就是这么来的）。刷新成功且内容没变时这里是 null，什么都不显示。
+            // 后台同步进行中优先给"正在同步…"：缓存先行后没有整页转圈，
+            // 不给轻反馈的话内容没变化时用户会以为"点刷新没反应"（2026-11-16 实测）。
+            if (state.syncing) {
+                Text(
+                    text = "正在同步课表…",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
             state.cacheNotice?.let { msg ->
                 Text(
                     text = msg,

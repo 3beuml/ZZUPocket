@@ -90,17 +90,26 @@ class NoxGatewayClient(private val store: TokenStore) {
     suspend fun probeJwxt(): GatewayProbe = withContext(Dispatchers.IO) {
         val probeClient = HttpClients.eas // followRedirects=false：要看 302 本身
         try {
-            val request = Request.Builder()
-                .url(PROBE_URL)
-                .get()
-                .build()
-            probeClient.newCall(request).execute().use { r ->
-                when {
-                    r.code in 300..399 -> GatewayProbe.BLOCKED
-                    r.isSuccessful -> GatewayProbe.OPEN
-                    else -> GatewayProbe.OPEN // 401/403 = 网关放行、教务鉴权层拒绝（正常）
-                }
-            }
+            // ⚠️ 必须**同时探 GET 和 POST**：网关对两类请求的策略可能不同——
+            // 2026-11-12 实测 GET（字典）放行、POST（教室）被 302 拦截。
+            // 只探 GET 会把"课表同步被拦"误报成"可达"（2026-11-16 用户实测：
+            // 检测显示可达、实际同步失败）。
+            val get = probeClient.newCall(
+                Request.Builder().url(PROBE_URL).get().build(),
+            ).execute().use { it.code }
+            if (get in 300..399) return@withContext GatewayProbe.BLOCKED
+
+            val post = probeClient.newCall(
+                Request.Builder()
+                    .url("https://jwxt.zzu.edu.cn/eams-micro-server/api/v1/room/place/rooms")
+                    .post(
+                        "{\"currentPage\":1,\"pageSize\":1,\"buildingIds\":[],\"date\":\"${java.time.LocalDate.now()}\"}"
+                            .toRequestBody("application/json; charset=utf-8".toMediaType()),
+                    )
+                    .build(),
+            ).execute().use { it.code }
+            if (post in 300..399) return@withContext GatewayProbe.BLOCKED
+            GatewayProbe.OPEN // 401/403 = 网关放行、教务鉴权层拒绝（正常）
         } catch (e: Exception) {
             Log.w(TAG, "探测教务可达性失败（网络不通）", e)
             GatewayProbe.UNREACHABLE
