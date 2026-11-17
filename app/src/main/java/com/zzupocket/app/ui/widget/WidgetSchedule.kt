@@ -744,7 +744,8 @@ object WidgetSchedule {
         val base = rowNaturalHeightDp(nameLines)
         // 竖排比两行式多一行小字（地点、时间段各自成行）；+16dp 与 2×2 账本的
         // stacked−compact 差一致（方向：宁可多记）
-        return if (rowStyle == ROW_MODE_STACKED) base + NAME_LINE_EXTRA_DP else base
+        val stackedExtra = if (rowStyle == ROW_MODE_STACKED) NAME_LINE_EXTRA_DP else 0
+        return base + stackedExtra
     }
 
     /**

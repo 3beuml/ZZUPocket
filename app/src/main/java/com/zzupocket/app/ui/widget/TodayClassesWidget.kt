@@ -210,7 +210,15 @@ class TodayClassesWidget : AppWidgetProvider() {
                 val (nameDp, subDp) = WidgetSchedule.rowFontSizes(heightDp)
                 val naturals = column.rows.map {
                     WidgetSchedule.twoDayRowNaturalHeightDp(
-                        WidgetSchedule.nameLineCount(it.course.name, columnWidthDp, nameDp),
+                        // ⚠️ 行数测量用**更窄的安全宽度**（−4dp）：账本按理论列宽测行数，
+                        // 真机实际渲染宽度可能略窄（启动器/圆角/边距漂移）——边界课名
+                        // 真机换成 2 行而账本记 1 行 → 行高不足 → 底部 padding 区裁字
+                        // （2026-11-16 用户实测）。多记方向安全：多出的高度变成 stretch 留白。
+                        WidgetSchedule.nameLineCount(
+                            it.course.name,
+                            (columnWidthDp - 4).coerceAtLeast(1),
+                            nameDp,
+                        ),
                         rowStyle,
                     )
                 }
