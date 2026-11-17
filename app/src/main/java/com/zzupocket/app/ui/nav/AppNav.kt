@@ -126,7 +126,12 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = Destination.entries.any { it.route == currentRoute }
+    val context = LocalContext.current
+    val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
+    val dockDestinations = Destination.entries.filter {
+        it != Destination.FOCUS || prefs.showFocusInDock
+    }
+    val showBottomBar = dockDestinations.any { it.route == currentRoute }
 
     /**
      * 切到某个 tab。
@@ -165,9 +170,6 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
             navController.navigate(initialRoute)
         }
     }
-
-    val context = LocalContext.current
-    val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
 
     // 壁纸只认「课表」这一页；切到别的 tab 就不画
     val wallpaperActive = currentRoute == Destination.SCHEDULE.route &&
@@ -229,6 +231,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
             // 底部由覆盖层自己的 navigationBarsPadding 处理。
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onSurface,
         ) { innerPadding ->
             Box(Modifier.fillMaxSize().padding(innerPadding)) {
                 NavHost(
@@ -425,7 +428,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                 Modifier.fillMaxSize(),
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                             ) {
-                                Destination.entries.forEach { destination ->
+                                dockDestinations.forEach { destination ->
                                     val selected = currentRoute == destination.route
                                     Box(
                                         modifier = Modifier

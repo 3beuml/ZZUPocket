@@ -178,6 +178,24 @@ fun CampusScreen(
                         )
                     },
                 )
+                ListItem(
+                    headlineContent = { Text("底栏显示「专注」") },
+                    // 专注页只有底栏这一个入口：关掉之后就真的进不去了。说明必须写出来，
+                    // 否则用户会以为是"藏起来了"，找不到别的地方进。
+                    supportingContent = if (prefs.showDescriptions) {
+                        { DescriptionText("关闭后底栏不再显示「专注」，专注页也没有别的入口") }
+                    } else {
+                        null
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = prefs.showFocusInDock,
+                            onCheckedChange = {
+                                scope.launch { AppGraph.uiPrefsStore.setShowFocusInDock(it) }
+                            },
+                        )
+                    },
+                )
             }
 
             GroupTitle("小组件")
