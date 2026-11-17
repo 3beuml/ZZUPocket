@@ -77,8 +77,8 @@ data class TodayTimelineUi(
     val nextHint: String? = null,
     /** 今天一节课也没有时："明天 08:00《…》" —— 空态也能回答"那我下节课是啥" */
     val tomorrowHint: String? = null,
-    /** 有课日子的脚注："明天 3 节 · 第一节 08:00《…》" */
-    val tomorrowSummary: String? = null,
+    /** 今天课全结束后，横线下方用同款行样式展示的明天第一节课 */
+    val tomorrowFirst: TimelineEntry? = null,
     /** 今天**自己加的**日程（课表里的自定义日程），单独列一张卡，不和教务课程混在一起 */
     val customEntries: List<TimelineEntry> = emptyList(),
 )
@@ -144,13 +144,8 @@ class TodayTimelineViewModel(
         } else {
             null
         }
-        val tomorrowSummary = if (courseEntries.isNotEmpty()) {
-            tomorrowEntries.takeIf { it.isNotEmpty() }?.let { list ->
-                "明天 ${list.size} 节 · 第一节 ${TodayTimeline.clock(list.first().startMin)}《${list.first().title}》"
-            }
-        } else {
-            null
-        }
+        val allFinished = courseEntries.isNotEmpty() && nowMin >= courseEntries.maxOf { it.endMin }
+        val tomorrowFirst = if (allFinished) tomorrowEntries.firstOrNull() else null
 
         _state.value = TodayTimelineUi(
             loaded = true,
@@ -169,7 +164,7 @@ class TodayTimelineViewModel(
             focusCount = records.count { it.completed },
             nextHint = TodayTimeline.nextCourseHint(courseEntries, nowMin),
             tomorrowHint = tomorrowHint,
-            tomorrowSummary = tomorrowSummary,
+            tomorrowFirst = tomorrowFirst,
             customEntries = customEntries,
         )
     }
@@ -308,13 +303,16 @@ fun TodayTimelineCard(
             } else {
                 HorizontalDivider(Modifier.padding(top = 2.dp))
                 TimelineList(state)
-                // 脚注：明天概览（空态的"明天第一节"已经给过了，这里只给有课的日子）
-                state.tomorrowSummary?.let {
+                state.tomorrowFirst?.let { first ->
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     Text(
-                        text = it,
+                        text = "明天第一节",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.height(6.dp))
+                    // 1441 保证明天的课不会被判成「进行中」
+                    TimelineRow(entry = first, nowMin = 1441)
                 }
             }
         }

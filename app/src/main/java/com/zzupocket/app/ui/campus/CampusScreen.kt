@@ -178,6 +178,17 @@ fun CampusScreen(
                         )
                     },
                 )
+                ListItem(
+                    headlineContent = { Text("底栏显示「专注」") },
+                    trailingContent = {
+                        Switch(
+                            checked = prefs.showFocusInDock,
+                            onCheckedChange = {
+                                scope.launch { AppGraph.uiPrefsStore.setShowFocusInDock(it) }
+                            },
+                        )
+                    },
+                )
             }
 
             GroupTitle("小组件")
