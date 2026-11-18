@@ -3,7 +3,9 @@ package com.zzupocket.app.data.repo
 import com.zzupocket.app.data.db.DisplayOverrideEntity
 import com.zzupocket.app.domain.Session
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -170,5 +172,38 @@ class DisplayOverrideTest {
         assertNull(ScheduleRepository.parseWeeks(null))
         assertNull(ScheduleRepository.parseWeeks(""))
         assertNull(ScheduleRepository.parseWeeks("x,y")) // 全非法 → 全部周兜底
+    }
+
+    // ── 保存教室覆盖前的清场决定（roomOverrideClears）────────────────────
+
+    @Test
+    fun `全部周覆盖写前整体清场（清空同理）`() {
+        val save = ScheduleRepository.roomOverrideClears(weeks = null, hasValue = true)
+        assertTrue(save.clearSlot)
+        assertFalse(save.deleteAllRow)
+        assertFalse(save.deleteExactRow)
+
+        val clear = ScheduleRepository.roomOverrideClears(weeks = null, hasValue = false)
+        assertTrue(clear.clearSlot)
+        assertFalse(clear.deleteAllRow)
+        assertFalse(clear.deleteExactRow)
+    }
+
+    @Test
+    fun `分周覆盖带值只清全部周那条`() {
+        val plan = ScheduleRepository.roomOverrideClears(weeks = listOf(1, 3, 5), hasValue = true)
+        assertFalse(plan.clearSlot)
+        assertTrue(plan.deleteAllRow)
+        assertFalse(plan.deleteExactRow)
+    }
+
+    @Test
+    fun `分周覆盖清空必须连本组的行一起删`() {
+        // 回归（2026-11-18）：清空分周教室此前只删「全部周」那条，本组的行残留——
+        // 编辑框标着「清空恢复默认」，实际旧值阴魂不散
+        val plan = ScheduleRepository.roomOverrideClears(weeks = listOf(1, 3, 5), hasValue = false)
+        assertFalse(plan.clearSlot)
+        assertTrue(plan.deleteAllRow)
+        assertTrue(plan.deleteExactRow)
     }
 }

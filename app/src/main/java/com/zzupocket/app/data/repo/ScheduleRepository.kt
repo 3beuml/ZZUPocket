@@ -654,11 +654,17 @@ class ScheduleRepository(
         value: String?,
     ): String? {
         val v = value?.trim().orEmpty()
-        if (weeks == null) {
+        val plan = roomOverrideClears(weeks, v.isNotEmpty())
+        if (plan.clearSlot) {
             // 「全部周」是该时段的唯一真相：先清光分周条目再落这一条
             db.displayOverrideDao().deleteRoomBySlot(semesterId, courseCode, weekday, startUnit)
-        } else {
+        }
+        if (plan.deleteAllRow) {
             db.displayOverrideDao().deleteById(roomOverrideId(semesterId, courseCode, weekday, startUnit, null))
+        }
+        if (plan.deleteExactRow) {
+            // 分周覆盖清空 = 恢复教务原值：这一组的行必须删掉，否则清空悄悄失效
+            db.displayOverrideDao().deleteById(roomOverrideId(semesterId, courseCode, weekday, startUnit, weeks))
         }
         if (v.isNotEmpty()) {
             db.displayOverrideDao().upsert(
@@ -853,6 +859,29 @@ class ScheduleRepository(
             csv?.takeIf { it.isNotBlank() }
                 ?.split(',')?.mapNotNull { it.trim().toIntOrNull() }
                 ?.takeIf { it.isNotEmpty() }?.toSet()
+
+        /** 分周教室覆盖保存前的清场计划（纯函数，单测见 DisplayOverrideTest） */
+        internal data class RoomOverrideClears(
+            /** 清掉该时段**全部**行（「全部周」覆盖写前清场） */
+            val clearSlot: Boolean,
+            /** 只删「全部周」那一条 */
+            val deleteAllRow: Boolean,
+            /** 只删带周次的那一条（分周覆盖清空时） */
+            val deleteExactRow: Boolean,
+        )
+
+        /**
+         * 教室覆盖保存前删什么（纯函数）：
+         * - 全部周覆盖（weeks == null）：该时段整体清场——它要是该时段的唯一真相；
+         * - 分周覆盖带值：只清「全部周」那一条，再落本组的行；
+         * - 分周覆盖清空（编辑框「清空恢复默认」）：全部周那条与**本组的行**都删——
+         *   漏掉后者的话清空悄悄失效，旧值阴魂不散（2026-11-18 白天班修复）。
+         */
+        internal fun roomOverrideClears(weeks: List<Int>?, hasValue: Boolean): RoomOverrideClears = when {
+            weeks == null -> RoomOverrideClears(clearSlot = true, deleteAllRow = false, deleteExactRow = false)
+            hasValue -> RoomOverrideClears(clearSlot = false, deleteAllRow = true, deleteExactRow = false)
+            else -> RoomOverrideClears(clearSlot = false, deleteAllRow = true, deleteExactRow = true)
+        }
 
         /**
          * 课表缓存结构版本；改字段就 +1，旧缓存会被当作不存在。
