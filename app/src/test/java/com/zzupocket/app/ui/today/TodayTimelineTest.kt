@@ -1,6 +1,7 @@
 package com.zzupocket.app.ui.today
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -127,5 +128,24 @@ class TodayTimelineTest {
         assertEquals(null, TodayTimeline.minuteOfDay(""))
         assertEquals(null, TodayTimeline.minuteOfDay("abc"))
         assertEquals(null, TodayTimeline.minuteOfDay("25:00"))
+    }
+
+    @Test
+    fun `课全上完的判定`() {
+        val courses = listOf(course(480, 525), course(600, 645)) // 最后一节 11:45 下课
+        assertFalse(TodayTimeline.allCoursesFinished(courses, 644))
+        assertTrue(TodayTimeline.allCoursesFinished(courses, 645)) // 下课那一分钟就算上完
+        assertTrue(TodayTimeline.allCoursesFinished(courses, 1441))
+    }
+
+    @Test
+    fun `今天没课不算上完`() {
+        // 没课的日子首页走「明天第一节」的空态提示，不能再叠一条"课后预告"
+        assertFalse(TodayTimeline.allCoursesFinished(emptyList(), 1200))
+    }
+
+    @Test
+    fun `课全上完后 nextCourseHint 给出已上完`() {
+        assertEquals("今天的课已上完", TodayTimeline.nextCourseHint(listOf(course(480, 525)), 600))
     }
 }

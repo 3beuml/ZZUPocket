@@ -144,8 +144,12 @@ class TodayTimelineViewModel(
         } else {
             null
         }
-        val allFinished = courseEntries.isNotEmpty() && nowMin >= courseEntries.maxOf { it.endMin }
-        val tomorrowFirst = if (allFinished) tomorrowEntries.firstOrNull() else null
+        // 课上完之后才预告明天第一节；"今天没课"归空态提示管，别两处都说一遍
+        val tomorrowFirst = if (TodayTimeline.allCoursesFinished(courseEntries, nowMin)) {
+            tomorrowEntries.firstOrNull()
+        } else {
+            null
+        }
 
         _state.value = TodayTimelineUi(
             loaded = true,
@@ -311,8 +315,10 @@ fun TodayTimelineCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(6.dp))
-                    // 1441 保证明天的课不会被判成「进行中」
-                    TimelineRow(entry = first, nowMin = 1441)
+                    // 明天的课永远不该被判成「进行中」：传一个比任何时刻都大的值，
+                    // covers() 恒为 false。写 Int.MAX_VALUE 是为了让意图自解释，
+                    // 而不是靠 1441 这种"一天有 1440 分钟"的隐式约定。
+                    TimelineRow(entry = first, nowMin = Int.MAX_VALUE)
                 }
             }
         }

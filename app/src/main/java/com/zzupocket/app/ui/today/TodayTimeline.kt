@@ -98,8 +98,17 @@ object TodayTimeline {
             return if (next.hasUnresolvedConflict) "下一时段 ${clock(next.startMin)} 有课程冲突 · ${gapText}后"
                 else "下一节 ${clock(next.startMin)}《${next.title}》· ${gapText}后"
         }
-        return if (courses.isEmpty()) null else "今天的课已上完"
+        return if (allCoursesFinished(courses, nowMin)) "今天的课已上完" else null
     }
+
+    /**
+     * 今天的课是不是全部上完了。
+     *
+     * 首页据此决定要不要在时间轴下面预告明天的第一节课（issue #16）。
+     * 一节课都没有的日子不算"上完"——那种日子归空态提示管，不能再叠一行明天的课。
+     */
+    fun allCoursesFinished(courses: List<TimelineEntry>, nowMin: Int): Boolean =
+        courses.isNotEmpty() && nowMin >= courses.maxOf { it.endMin }
 
     /**
      * 把课程与专注记录合成一根时间轴。
