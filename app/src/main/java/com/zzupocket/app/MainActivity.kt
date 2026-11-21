@@ -102,6 +102,13 @@ class MainActivity : ComponentActivity() {
         consumeWidgetRoute(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // App 回到前台时重排一次上课提醒：闹钟可能被 ROM 回收、课表可能在后台更新，
+        // 这也是国产省电策略下最廉价的一道补偿（无常驻服务）。
+        com.zzupocket.app.reminder.ClassReminderScheduler.rescheduleAsync(this)
+    }
+
     private fun consumeWidgetRoute(intent: Intent?) {
         val route = intent?.getStringExtra(AppRoutes.EXTRA_ROUTE) ?: return
         // 读完就把 extra 从 Intent 里删掉：这条 Intent 会被系统留着，

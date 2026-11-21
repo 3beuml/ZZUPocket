@@ -741,6 +741,10 @@ cacheNoticeNeedsLogin = expired,
             // 节次是渲染网格表头必需的，但 refreshCourseTable 不带它——同步成功后补一次
             if (repo.periods().isEmpty()) runCatching { repo.refreshPeriods() }
             renderLocal(semester, null)
+            // 课表数据变了：上课提醒的"下一节"要跟着重算（关着开关时只会撤旧闹钟）
+            AppGraph.appContextOrNull()?.let {
+                com.zzupocket.app.reminder.ClassReminderScheduler.rescheduleAsync(it)
+            }
             return
         }
 
@@ -772,6 +776,10 @@ cacheNoticeNeedsLogin = expired,
                 // （2026-11-16 用户实测：网关可达、同步成功，旧提示却清不掉；反向也要避免误报）
                 cacheNotice = if (failure != null) noticeForSyncFailure(failure, staleNotice) else null,
             )
+            // 后台同步完课表：重排上课提醒（无网络，只读刚落库的数据）
+            AppGraph.appContextOrNull()?.let {
+                com.zzupocket.app.reminder.ClassReminderScheduler.rescheduleAsync(it)
+            }
         }
     }
 

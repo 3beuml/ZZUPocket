@@ -14,6 +14,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- 上课提醒：精确闹钟（Android 12+，用户可在「闹钟和提醒」里授权）。
+         不申请这个权限也能提醒，只是省电状态下系统可能延后几分钟；设置页会显示授权状态。 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- 开机后重排上课提醒闹钟（否则重启后一次性闹钟全没了） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:name=".ZZUPocketApp"
         android:allowBackup="true"
@@ -102,6 +108,22 @@
         <receiver
             android:name=".ui.widget.WidgetRefreshReceiver"
             android:exported="false" />
+
+        <!-- 上课提醒：闹钟触发 + 开机/时间/时区/语言变化后重排。
+             都是系统广播或本 App 的显式广播，exported=false 防止外部伪造。 -->
+        <receiver
+            android:name=".reminder.ClassReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.zzupocket.app.reminder.FIRE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!-- 番茄钟前台服务。计时本身不依赖它（时间用墙钟算），
              它的作用是不让系统回收进程 + 显示常驻倒计时通知。
