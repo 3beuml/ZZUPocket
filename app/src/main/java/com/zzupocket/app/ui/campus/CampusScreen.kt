@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.EventSeat
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MeetingRoom
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.VpnKey
@@ -90,6 +91,7 @@ fun CampusScreen(
     onOpenAbout: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
     onOpenWidgetSettings: () -> Unit = {},
+    onOpenClassReminder: () -> Unit = {},
 ) {
     var loggedIn by remember { mutableStateOf(AppGraph.authRepository.isLoggedIn()) }
     // 从登录页返回时重新读一次：这一页没有自己的 ViewModel，否则会一直显示"登录 / 切换账号"
@@ -146,6 +148,16 @@ fun CampusScreen(
             EntryCard {
                 Entry(Icons.Filled.MeetingRoom, "教室占用", "按楼查空教室", onOpenRooms)
                 Entry(Icons.Filled.EventSeat, "图书馆座位预约", "学校原版网页", onOpenLibrary)
+                Entry(
+                    Icons.Filled.NotificationsActive,
+                    "课程提醒",
+                    if (prefs.classReminderEnabled) {
+                        "已开启 · 课前 ${prefs.classReminderLeadMinutes} 分钟通知"
+                    } else {
+                        "上课前弹一条通知（默认关）"
+                    },
+                    onOpenClassReminder,
+                )
             }
 
             GroupTitle("生活服务")
