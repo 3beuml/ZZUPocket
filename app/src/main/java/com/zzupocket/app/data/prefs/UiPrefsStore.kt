@@ -124,6 +124,13 @@ data class UiPrefs(
     val showDescriptions: Boolean = true,
     /** dock 上是否保留「专注」这一格 */
     val showFocusInDock: Boolean = true,
+    /**
+     * 上课提醒：是否在上课前推送通知（默认关 —— 主动开启时才申请通知权限，不打扰新用户）。
+     * 只弹普通通知，不响铃/不振屏之外的额外打扰；走系统闹钟做按需唤醒，无常驻服务。
+     */
+    val classReminderEnabled: Boolean = false,
+    /** 上课提醒提前分钟数（默认 15） */
+    val classReminderLeadMinutes: Int = 15,
     /** 小组件时间显示为节次（「第3-4节」）；false（默认）= 时刻（10:10-11:50） */
     val widgetTimeAsPeriod: Boolean = false,
     /**
@@ -248,6 +255,8 @@ class UiPrefsStore(context: Context) {
             // 老用户的 DataStore 里没有这个键 → 默认 true，不需要迁移
             showDescriptions = p[KEY_SHOW_DESCRIPTIONS] ?: true,
             showFocusInDock = p[KEY_SHOW_FOCUS_IN_DOCK] ?: true,
+            classReminderEnabled = p[KEY_CLASS_REMINDER_ENABLED] ?: false,
+            classReminderLeadMinutes = p[KEY_CLASS_REMINDER_LEAD]?.takeIf { it in 1..60 } ?: 15,
             widgetTimeAsPeriod = p[KEY_WIDGET_TIME_AS_PERIOD] ?: false,
             widgetRowMode = p[KEY_WIDGET_ROW_MODE]?.takeIf { it.isNotBlank() } ?: "auto",
             widgetShowPlace = p[KEY_WIDGET_SHOW_PLACE] ?: true,
@@ -344,6 +353,24 @@ class UiPrefsStore(context: Context) {
     suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
 
     suspend fun setShowFocusInDock(v: Boolean) = store.edit { p -> p[KEY_SHOW_FOCUS_IN_DOCK] = v }
+
+    suspend fun setClassReminderEnabled(v: Boolean) = store.edit { p -> p[KEY_CLASS_REMINDER_ENABLED] = v }
+
+    suspend fun setClassReminderLeadMinutes(v: Int) = store.edit { p ->
+        p[KEY_CLASS_REMINDER_LEAD] = v.coerceIn(1, 60)
+    }
+
+    /**
+     * 上课提醒的「已提醒去重键」（课程唯一键 + 开始时间戳）。
+     *
+     * 不进 [UiPrefs]：它每次触发都会变，进 data class 会让全 App 无谓重组。
+     * 闹钟触发后写一次，重排程时跳过已提醒过的那一节，避免同一节课被反复弹。
+     */
+    suspend fun classReminderLastKey(): String? = store.data.first()[KEY_CLASS_REMINDER_LAST_KEY]
+
+    suspend fun setClassReminderLastKey(v: String) = store.edit { p ->
+        p[KEY_CLASS_REMINDER_LAST_KEY] = v
+    }
 
     /** 首页模块自定义（issue #19）：显示顺序 + 隐藏集合一起写 */
     suspend fun setTodayModules(order: List<String>, hidden: Set<String>) = store.edit { p ->
@@ -477,6 +504,9 @@ class UiPrefsStore(context: Context) {
         val KEY_WIDGET_HEADER_STYLE = stringPreferencesKey("widget_header_style")
         val KEY_SHOW_DESCRIPTIONS = booleanPreferencesKey("show_descriptions")
         val KEY_SHOW_FOCUS_IN_DOCK = booleanPreferencesKey("show_focus_in_dock")
+        val KEY_CLASS_REMINDER_ENABLED = booleanPreferencesKey("class_reminder_enabled")
+        val KEY_CLASS_REMINDER_LEAD = intPreferencesKey("class_reminder_lead_minutes")
+        val KEY_CLASS_REMINDER_LAST_KEY = stringPreferencesKey("class_reminder_last_key")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")

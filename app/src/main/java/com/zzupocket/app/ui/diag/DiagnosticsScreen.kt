@@ -1,5 +1,6 @@
 ﻿package com.zzupocket.app.ui.diag
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -49,6 +51,7 @@ import com.zzupocket.app.core.net.HttpClients
 import com.zzupocket.app.data.auth.AuthRepository
 import com.zzupocket.app.data.gms.GmsProbe
 import com.zzupocket.app.data.lib.LibProbe
+import com.zzupocket.app.reminder.ClassReminderScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -398,6 +401,7 @@ fun DiagnosticsScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val status = state.status
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -627,6 +631,32 @@ fun DiagnosticsScreen(
             }
 
             if (state.probesOpen && (BuildConfig.DEBUG || SHOW_PROBES_IN_RELEASE)) {
+                // 测试通知：与其他自检工具一起收起/展开
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (!ClassReminderScheduler.hasNotificationPermission(context)) {
+                                    Toast.makeText(context, "没有通知权限，先去开启", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    AppGraph.classReminderNotifications.notifyTest()
+                                    Toast.makeText(context, "已发出测试通知", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "测试弹出的通知",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text("点我", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("一卡通接口自检", style = MaterialTheme.typography.titleSmall)
