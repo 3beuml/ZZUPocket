@@ -84,6 +84,11 @@ android {
             "/META-INF/DEPENDENCIES",
         )
     }
+
+    sourceSets {
+        // MigrationTestHelper 从 androidTest/assets 读取 Room 导出的 schema。
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
 }
 
 kotlin {
@@ -144,5 +149,6 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation(libs.androidx.room.testing)
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
