@@ -123,6 +123,8 @@ dependencies {
     // 网络（不用 Retrofit：接口少，且 CAS 登录的 POST 走 query string，裸 OkHttp 更直接）
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+    // 校园官网只有 HTML 栏目页；Jsoup 仅用于公开资讯的列表/正文解析，不承载登录会话。
+    implementation(libs.jsoup)
     implementation(libs.kotlinx.serialization.json)
 
     // 本地存储
