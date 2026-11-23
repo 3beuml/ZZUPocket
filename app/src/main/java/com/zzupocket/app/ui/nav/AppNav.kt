@@ -1,6 +1,8 @@
 package com.zzupocket.app.ui.nav
 
+import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,11 +24,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +40,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,9 +63,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.data.prefs.UiPrefs
+import com.zzupocket.app.domain.news.NewsArticle
+import com.zzupocket.app.ui.news.NewsDetailScreen
+import com.zzupocket.app.ui.news.NewsScreen
+import com.zzupocket.app.ui.news.NewsViewModel
 import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
 import com.zzupocket.app.ui.about.AboutScreen
+import com.zzupocket.app.ui.settings.AiProviderScreen
 import com.zzupocket.app.ui.settings.WidgetSettingsScreen
 import com.zzupocket.app.ui.theme.rememberEffectiveDark
 import com.zzupocket.app.ui.components.LocalShowDescriptions
@@ -92,7 +102,7 @@ enum class Destination(
 ) {
     TODAY(AppRoutes.TODAY, "首页", Icons.Filled.Today, Icons.Outlined.Today),
     SCHEDULE(AppRoutes.SCHEDULE, "课表", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-    FOCUS(AppRoutes.FOCUS, "专注", Icons.Filled.Timer, Icons.Outlined.Timer),
+    NEWS(AppRoutes.NEWS, "雷达", Icons.Filled.Radar, Icons.Outlined.Radar),
     CAMPUS(AppRoutes.CAMPUS, "更多", Icons.Filled.Apps, Icons.Outlined.Apps),
 }
 
@@ -117,6 +127,7 @@ private const val ROUTE_LIB_RECORDS = "library_records"
 private const val ROUTE_ABOUT = "about"
 private const val ROUTE_APPEARANCE = "appearance"
 private const val ROUTE_WIDGET_SETTINGS = "widget_settings"
+private const val ROUTE_AI_PROVIDER = "ai_provider"
 
 /** "重新裁剪"时用这个占位值代替相册 URI */
 private const val CROP_SOURCE_SAVED = "saved"
@@ -128,10 +139,12 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val currentRoute = backStackEntry?.destination?.route
     val context = LocalContext.current
     val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
-    val dockDestinations = Destination.entries.filter {
-        it != Destination.FOCUS || prefs.showFocusInDock
-    }
-    val showBottomBar = dockDestinations.any { it.route == currentRoute }
+    val dockDestinations = Destination.entries
+    // 资讯雷达是 tab，但文章详情是全屏页：详情打开时隐藏 dock，否则会压在正文上。
+    // 状态放在 NavHost 外面，才能参与 showBottomBar 的计算。
+    var newsDetailArticle by remember { mutableStateOf<NewsArticle?>(null) }
+    val showBottomBar = dockDestinations.any { it.route == currentRoute } &&
+        (currentRoute != Destination.NEWS.route || newsDetailArticle == null)
 
     /**
      * 切到某个 tab。
@@ -145,6 +158,8 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
      * 从专注页点今天又被弹回课表页）。对照组：正常从今天页点课表再点回来，一切正常。
      */
     fun switchTab(route: String) {
+        // 从雷达详情切走再回来，应该回到列表，而不是残留上一篇的详情。
+        newsDetailArticle = null
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
@@ -180,10 +195,10 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
         version = prefs.backgroundVersion,
     )
     val transparentBar = wallpaperActive && wallpaper != null && prefs.wallpaperNavBar
-    // dock 胶囊的透明度：壁纸模式尊重"透明导航栏"偏好（更透），其余页面 0.5 ——
-    // 半透明 + 细描边 + 无阴影，是所有页面同一套配方：胶囊融进页面底色，
-    // 不再出现"一圈不是背景色的色带"（surfaceContainerHighest 实底 + 渐变衬底的教训）。
-    val dockAlpha = if (transparentBar) 0.35f else 0.5f
+    // dock 胶囊的透明度：壁纸模式尊重"透明导航栏"偏好（更透）；其余页面用接近实底。
+    // 实测 0.5 时，滚动到 dock 下方的卡片文字会透上来，和图标叠在一起像坏了；
+    // 0.97 只留极轻的玻璃感，基本不会干扰图标。壁纸模式仍保持 0.35。
+    val dockAlpha = if (transparentBar) 0.35f else 0.97f
     // dock 同样跟「生效深浅」同口径：深色非壁纸档直接用页面的 surface（保留颜色/
     // 对比度染色后也一致），无手工混合。rc6 又拆掉两处深色暗源：
     // ① 6dp 投影在深底上是一圈"更黑的晕"，深色非壁纸档降到 1dp tonal 微浮起；
@@ -247,6 +262,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenCard = { navController.navigate(ROUTE_CARD) },
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
                         onOpenRooms = { navController.navigate(ROUTE_ROOMS) },
+                        onOpenFocus = { navController.navigate(AppRoutes.FOCUS) },
                     )
                 }
                 composable(Destination.SCHEDULE.route) {
@@ -258,8 +274,11 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenDisplaySettings = { navController.navigate(ROUTE_DISPLAY) },
                     )
                 }
-                composable(Destination.FOCUS.route) {
-                    FocusScreen(onOpenStats = { navController.navigate(ROUTE_FOCUS_STATS) })
+                composable(AppRoutes.FOCUS) {
+                    FocusScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenStats = { navController.navigate(ROUTE_FOCUS_STATS) },
+                    )
                 }
                 composable(Destination.CAMPUS.route) {
                     CampusScreen(
@@ -270,6 +289,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenCard = { navController.navigate(ROUTE_CARD) },
                         onOpenRooms = { navController.navigate(ROUTE_ROOMS) },
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
+                        onOpenAiProvider = { navController.navigate(ROUTE_AI_PROVIDER) },
                         onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                         onOpenAppearance = { navController.navigate(ROUTE_APPEARANCE) },
                         onOpenWidgetSettings = { navController.navigate(ROUTE_WIDGET_SETTINGS) },
@@ -289,6 +309,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                 }
                 composable(ROUTE_ABOUT) {
                     AboutScreen(onBack = { navController.popBackStack() })
+                }
+                composable(ROUTE_AI_PROVIDER) {
+                    AiProviderScreen(onBack = { navController.popBackStack() })
                 }
                 composable(
                     route = "$ROUTE_OVERVIEW/{semesterId}",
@@ -361,6 +384,99 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                             navController.navigate(ROUTE_LIBRARY) { launchSingleTop = true }
                         },
                     )
+                }
+                composable(Destination.NEWS.route) { entry ->
+                    val vm: NewsViewModel = viewModel(entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    val aiConfigured by vm.aiConfigured.collectAsStateWithLifecycle()
+                    val aiDetails by vm.aiDetails.collectAsStateWithLifecycle()
+                    val aiOverview by vm.aiOverview.collectAsStateWithLifecycle()
+                    var detailLoading by remember { mutableStateOf(false) }
+                    var detailError by remember { mutableStateOf<String?>(null) }
+                    val openOriginal: (String) -> Unit = { url ->
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                    }
+                    if (newsDetailArticle == null) {
+                        NewsScreen(
+                            state = state,
+                            onCategorySelected = vm::selectCategory,
+                            onToggleInterest = vm::toggleInterest,
+                            onRefresh = vm::refresh,
+                            onApplyPending = vm::applyPendingNews,
+                            onResetFilters = vm::resetFilters,
+                            onOpenArticle = {
+                                detailError = null
+                                detailLoading = false
+                                newsDetailArticle = it
+                            },
+                            onOpenOriginal = { openOriginal(it.url) },
+                            onBack = null,
+                            isTab = true,
+                            aiOverview = aiOverview,
+                            onAiOverview = {
+                                if (aiConfigured) {
+                                    vm.generateAiOverview(state.articles)
+                                } else {
+                                    navController.navigate(ROUTE_AI_PROVIDER)
+                                }
+                            },
+                            onDismissAiOverview = vm::clearAiOverview,
+                        )
+                    } else {
+                        val article = newsDetailArticle!!
+                        // 列表的匹配分/分类变化也同步到详情；正文只在切换文章时请求一次。
+                        // 首屏预取可能比用户点开更快地补上正文/要点；这里合并最新快照，
+                        // 避免详情页重复请求，也避免"列表已有摘要、详情却是空的"。
+                        val displayed = state.articles.firstOrNull { it.id == article.id }?.let { matched ->
+                            article.copy(
+                                matchScore = matched.matchScore,
+                                matchReasons = matched.matchReasons,
+                                category = matched.category,
+                                body = matched.body.ifBlank { article.body },
+                                excerpt = matched.excerpt.ifBlank { article.excerpt },
+                                keyPoints = matched.keyPoints.ifEmpty { article.keyPoints },
+                                eventDate = matched.eventDate ?: article.eventDate,
+                                eventPlace = matched.eventPlace ?: article.eventPlace,
+                            )
+                        } ?: article
+                        val ai = aiDetails[article.id]
+                        NewsDetailScreen(
+                            article = displayed,
+                            loading = detailLoading,
+                            error = detailError,
+                            aiConfigured = aiConfigured,
+                            aiSummary = ai?.text,
+                            aiLoading = ai?.loading == true,
+                            aiError = ai?.error,
+                            aiModel = ai?.model.orEmpty(),
+                            onGenerateAi = {
+                                if (aiConfigured) {
+                                    vm.generateAiDetail(displayed)
+                                } else {
+                                    navController.navigate(ROUTE_AI_PROVIDER)
+                                }
+                            },
+                            onOpenAiSettings = { navController.navigate(ROUTE_AI_PROVIDER) },
+                            onBack = { newsDetailArticle = null },
+                            onOpenOriginal = openOriginal,
+                        )
+                        LaunchedEffect(article.id) {
+                            if (article.body.isNotBlank()) return@LaunchedEffect
+                            detailLoading = true
+                            detailError = null
+                            try {
+                                newsDetailArticle = vm.detail(article)
+                            } catch (e: Exception) {
+                                detailError = e.message ?: "正文加载失败"
+                            } finally {
+                                detailLoading = false
+                            }
+                        }
+                    }
+                    // 系统返回键与页面返回按钮一致：先退回资讯列表，而不是直接退出雷达。
+                    BackHandler(enabled = newsDetailArticle != null) {
+                        newsDetailArticle = null
+                    }
                 }
                 composable(ROUTE_LOGIN) {
                     LoginScreen(

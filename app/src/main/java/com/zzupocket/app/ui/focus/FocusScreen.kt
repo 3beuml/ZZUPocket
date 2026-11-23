@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -77,7 +78,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zzupocket.app.data.db.FocusTagEntity
 import com.zzupocket.app.data.prefs.TimerPreset
 import com.zzupocket.app.domain.FocusRecord
-import com.zzupocket.app.ui.nav.DOCK_CLEARANCE
 import com.zzupocket.app.domain.FocusStats
 import com.zzupocket.app.domain.Phase
 import com.zzupocket.app.domain.PomodoroClock
@@ -88,6 +88,8 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FocusScreen(
+    /** 非空表示这是从首页进入的普通子页，顶部显示返回箭头 */
+    onBack: (() -> Unit)? = null,
     onOpenStats: () -> Unit = {},
     vm: FocusViewModel = viewModel(),
 ) {
@@ -117,6 +119,13 @@ fun FocusScreen(
         topBar = {
             TopAppBar(
                 title = { Text("专注") },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    }
+                },
                 actions = {
                     IconButton(onClick = onOpenStats) {
                         Icon(Icons.Filled.Insights, contentDescription = "学习统计")
@@ -134,8 +143,8 @@ fun FocusScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                // 悬浮 dock 是覆盖层：垫出尾部余量，「今天」统计卡能完整滚出胶囊
-                .padding(bottom = DOCK_CLEARANCE),
+                // 专注已从底栏移到首页：这里是全屏子页，不显示 dock。
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Spacer(Modifier.height(2.dp))
