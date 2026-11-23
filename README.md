@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/3beuml/ZZUPocket?style=flat&label=release)](../../releases)
 [![Android](https://img.shields.io/badge/Android-12%2B-3ddc84?style=flat&logo=android&logoColor=white)](#构建)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7f52ff?style=flat&logo=kotlin&logoColor=white)](#技术栈)
-[![Tests](https://img.shields.io/badge/unit%20tests-445-brightgreen?style=flat)](#参与贡献)
+[![Tests](https://img.shields.io/badge/unit%20tests-467-brightgreen?style=flat)](#参与贡献)
 
 > ⚠️ 本项目是非官方项目。
 > 接口来自公开网页的协议整理与社区项目经验，**随时可能失效或被学校调整**；
@@ -21,7 +21,16 @@
   课程总览、自定义课表背景图（含模糊与浓淡调节）、格子内容与密度可调
 - **今天**：一条时间轴看"我这一天长什么样"——上课、已完成的专注；冲突提示沿用课表按周显示选择；外加宿舍电量、校园卡余额与今日消费
 - **专注（番茄钟）**：计时引擎 + 前台服务 + 常驻通知，标签管理，周 / 月 / 年统计与热力图
+  （入口在首页「专注」卡片，不再占底栏一格）
 - **教室占用**：按楼筛选，每间教室哪几节有课（数据来自教务系统）
+
+**资讯**
+
+- **校园资讯雷达**：底栏「雷达」聚合通知公告、要闻速递、教学科研、基层动态与学术预告
+  五个公开栏目；分类与兴趣筛选、本地快照离线可读、文章详情与原文跳转
+- **AI 摘要（可选）**：「更多 → 账号 → AI 提供商」支持 DeepSeek 或任意 OpenAI 兼容接口，
+  可对单篇生成要点、对最近 5 条生成「今日速览」；API Key 加密存本机、不参与备份/换机，
+  不配置也能使用全部资讯功能
 
 **生活**
 
@@ -57,6 +66,18 @@
   本组（如 1,3,5 周）的旧教室值仍残留；现在本组行一并删除，恢复教务原值。
 - 单测 428 → 445（新增 17 项：分批方案、续跑判定、面板文案、浏览落库条件、覆盖清场）；
   真机验证完整快照 1039 间渲染、分页不再写库、断网跳批续跑；无 Room 迁移，覆盖安装数据保留。
+
+**0.37.0（待发布）**
+
+- **校园资讯雷达**：底栏新增「雷达」，聚合通知公告、要闻速递、教学科研、基层动态与学术预告
+  五个公开栏目；分类 / 兴趣筛选、本地快照离线可读、详情正文与原文跳转；只抓公开网页，
+  不携带登录态
+- **AI 摘要（可选）**：支持 DeepSeek 或任意 OpenAI 兼容接口；单篇「AI 提炼」与最近 5 条
+  「AI 速览」；只在点击时发送文章，Key 加密存本机、不参与备份/换机，不配置也能用全部资讯
+- **专注入口迁入首页**：底栏第三格由「专注」换成「雷达」；首页时间轴下方新增专注卡片
+  （始终显示、可调序），专注页改为带返回的子页，原「底栏显示专注」开关移除
+- **其他**：dock 胶囊不透明度 0.5→0.97，滚动内容不再透出干扰图标；Room v11 新增资讯快照表，
+  旧数据不受影响；全量单测 467 项通过
 
 **0.36.5（2026-11-17）**
 
@@ -209,7 +230,10 @@
    - 数据里**确实没有**对应关系的楼栋（如松园部分楼的 `2222`/`3333` 占位号）会如实说明，
      并建议改用「在线选房间」（那是学校服务器给的确切编号），而不是让你手抄；
    - 有些楼只有一套表（如留学生公寓），只填一路即可，不会一直提示"还没设置"。
-3. **离线可用**：课表、专注记录、电费历史都是本地数据，断网也能看；
+3. **资讯与 AI（可选）**：底栏「雷达」不用登录就能看学校官网公开栏目；要 AI 摘要，到
+   「更多 → 账号 → AI 提供商」填 Base URL、模型与 API Key（默认 DeepSeek）。Key 只加密保存
+   在本机，不参与备份/换机；不配置也能正常看资讯。
+4. **离线可用**：课表、专注记录、电费历史都是本地数据，断网也能看；
    教室占用、图书馆、校园卡需要联网。
 
 ## 项目结构
@@ -223,15 +247,18 @@ app/src/main/java/com/zzupocket/app/
 │   ├── eas/         教务系统（课表、节次、教室占用）
 │   ├── ecard/       一卡通（电费、校园卡流水）
 │   ├── lib/         图书馆（WebView 会话与探测）
+│   ├── ai/          AI 摘要（OpenAI 兼容配置与客户端）
+│   ├── news/        校园资讯抓取、解析与本地快照
 │   ├── db/          Room 实体与 DAO
-│   ├── prefs/       DataStore（界面偏好、专注偏好、登录冷却）+ 加密令牌
+│   ├── prefs/       DataStore（界面偏好、专注偏好、资讯偏好、登录冷却）+ 加密令牌
 │   ├── room/        宿舍楼房间表（assets/rooms.json）
 │   ├── repo/        Repository：把接口与本地库缝在一起
 │   └── work/        定时采样电量（WorkManager）
-├── domain/          纯数据模型与统计口径（课表、用电、专注、校园卡、周次对齐）
+├── domain/          纯数据模型与统计口径（课表、用电、专注、校园卡、周次对齐、资讯分类）
 ├── focus/           番茄钟引擎、通知、前台服务
-└── ui/              Compose 界面：today / schedule / focus / campus / library /
-                     widget（桌面小组件）/ login / about / diag / theme / nav
+└── ui/              Compose 界面：today / schedule / news / focus / campus / library /
+                     settings（含 AI 提供商）/ widget（桌面小组件）/ login / about / diag /
+                     theme / nav
 
 app/src/main/res/    资源：布局（含 widget_* 小组件布局）、配色、字符串、预览图
 docs/                项目文档（接口契约、实测坑、设计推演），见下方「文档」
@@ -244,18 +271,22 @@ tools/               开发脚本（如按真机几何生成小组件预览图�
 | --- | --- |
 | 语言 / UI | Kotlin 2.0 + Jetpack Compose + Material 3（含 Material You 动态取色与 8 套预设配色） |
 | 依赖注入 | **手写**（`core/AppGraph.kt`）—— 依赖不多，P1 最大的风险是接口协议而不是 DI |
-| 网络 | OkHttp + kotlinx.serialization（**不用 Retrofit**：接口少，且 CAS 登录的 POST 参数走 query string，裸 OkHttp 更直接） |
-| 本地存储 | Room（课表 / 专注 / 电量采样 / 流水）、DataStore（偏好）、EncryptedSharedPreferences + Tink（令牌） |
+| 网络 | OkHttp + kotlinx.serialization（**不用 Retrofit**：接口少，且 CAS 登录的 POST 参数走 query string，裸 OkHttp 更直接）；Jsoup 只解析公开资讯页，不承载登录会话 |
+| 本地存储 | Room（课表 / 专注 / 电量采样 / 流水 / 资讯快照）、DataStore（偏好）、EncryptedSharedPreferences + Tink（令牌、AI Key） |
 | 后台 | WorkManager（每 4 小时采样一次电量）+ 前台服务（番茄钟）+ AlarmManager（小组件在上下课时刻刷新） |
 | 桌面小组件 | AppWidgetProvider + RemoteViews + XML（**不用 Glance**，理由见 `docs/design/UI与登录设计.md` §2.6） |
-| 后端 | **没有**。不经过任何自建中转服务器，账号凭据与数据只在设备和学校系统之间流动 |
+| 后端 | **没有自建后端**。账号凭据与校园数据只在设备和学校系统之间流动；可选的 AI 摘要由手机直连你自己配置的服务商，不经过本项目 |
 
 
 ## 隐私与边界
 
 - **不保存密码**。登录只走学校统一身份认证，本机仅保存加密后的登录令牌；退出登录会清除。
 - **数据只在本机**：课表、专注记录、电费采样、校园卡流水都存在本机数据库，
-  **没有自建服务器，也不会上传**。卸载 App 会一并清掉。
+  **没有自建服务器，也不会上传**（启用 AI 摘要时除外，见下面两条）。卸载 App 会一并清掉。
+- **资讯只读公开网页**：不带登录态 / Cookie，只抓学校官网公开栏目，本地只缓存公开内容。
+- **AI 摘要默认不启用、按次发送**：只有你点「AI 提炼 / AI 速览」时，才把当前文章（或最近
+  5 条的标题与摘要）发给你配置的 AI 服务商；API Key 加密存本机、不参与云备份/换机，
+  不配置也不影响任何其它功能。
 - **只读接口**：不做电费充值、不做校园卡转账、**不做自动抢座**；教室占用只显示"是否被占用"。
 - **不采集**：没有统计 SDK、没有崩溃上报、没有广告。
 - 仓库本身**不接收**任何把账号密码、令牌、个人房间号写进代码或文档的提交。
@@ -270,6 +301,8 @@ tools/               开发脚本（如按真机几何生成小组件预览图�
 | [`docs/interfaces/接口现状核查.md`](docs/interfaces/接口现状核查.md) | 逐个接口的实测结果（含字段、单位、坑） |
 | [`docs/interfaces/接口实测坑.md`](docs/interfaces/接口实测坑.md) | 金额单位、必填字段、不存在的接口 |
 | [`docs/interfaces/图书馆WebView灰屏.md`](docs/interfaces/图书馆WebView灰屏.md) | 图书馆网页在 WebView 里的机制、排除过程与有效修法 |
+| [`docs/interfaces/news-sources.md`](docs/interfaces/news-sources.md) | 五个资讯源的列表 / 详情选择器、抓取边界与改版排查 |
+| [`docs/interfaces/ai-provider.md`](docs/interfaces/ai-provider.md) | AI 摘要的配置、加密与备份排除、请求形状、错误映射与渲染边界 |
 | [`docs/design/`](docs/design/) | 可行性与开发方案、Android 接入设计、UI 与登录设计、功能与工具清单 |
 
 
