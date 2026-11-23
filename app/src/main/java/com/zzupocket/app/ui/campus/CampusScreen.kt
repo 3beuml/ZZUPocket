@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.SettingsInputAntenna
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.EventSeat
@@ -87,6 +88,7 @@ fun CampusScreen(
     onOpenCard: () -> Unit = {},
     onOpenRooms: () -> Unit = {},
     onOpenLibrary: () -> Unit = {},
+    onOpenAiProvider: () -> Unit = {},
     onOpenAbout: () -> Unit = {},
     onOpenAppearance: () -> Unit = {},
     onOpenWidgetSettings: () -> Unit = {},
@@ -140,6 +142,12 @@ fun CampusScreen(
                     "学校统一身份验证的状态与手动处理",
                     onOpenGateway,
                 )
+                Entry(
+                    Icons.Filled.AutoAwesome,
+                    "AI 提供商",
+                    "资讯摘要 · DeepSeek 或兼容接口",
+                    onOpenAiProvider,
+                )
             }
 
             GroupTitle("学习空间")
@@ -174,24 +182,6 @@ fun CampusScreen(
                             checked = prefs.showDescriptions,
                             onCheckedChange = {
                                 scope.launch { AppGraph.uiPrefsStore.setShowDescriptions(it) }
-                            },
-                        )
-                    },
-                )
-                ListItem(
-                    headlineContent = { Text("底栏显示「专注」") },
-                    // 专注页只有底栏这一个入口：关掉之后就真的进不去了。说明必须写出来，
-                    // 否则用户会以为是"藏起来了"，找不到别的地方进。
-                    supportingContent = if (prefs.showDescriptions) {
-                        { DescriptionText("关闭后底栏不再显示「专注」，专注页也没有别的入口") }
-                    } else {
-                        null
-                    },
-                    trailingContent = {
-                        Switch(
-                            checked = prefs.showFocusInDock,
-                            onCheckedChange = {
-                                scope.launch { AppGraph.uiPrefsStore.setShowFocusInDock(it) }
                             },
                         )
                     },
