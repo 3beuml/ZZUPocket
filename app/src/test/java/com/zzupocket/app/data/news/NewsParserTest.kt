@@ -82,6 +82,59 @@ class NewsParserTest {
     }
 
     @Test
+    fun `新闻网列表过滤纯 SEO 关键词摘要`() {
+        val html = """
+            <div class="new-item">
+              <div class="new-center">
+                <h3><a href="http://www.zzu.edu.cn/info/1217/89461.htm" title="新闻标题">新闻标题</a></h3>
+                <p><a href="http://www.zzu.edu.cn/info/1217/89461.htm">郑州大学, Zhengzhou University,郑大, ZZU</a></p>
+              </div>
+              <div class="new-date">2026-11-23</div>
+            </div>
+        """.trimIndent()
+
+        val articles = parser.newsList(html, "https://news.zzu.edu.cn/ywsd.htm", NewsSection.HEADLINES)
+
+        assertEquals(1, articles.size)
+        assertEquals("", articles.single().excerpt)
+    }
+
+    @Test
+    fun `详情页 SEO 关键词摘要退回正文第一段`() {
+        val html = """
+            <meta name="description" content="郑州大学, Zhengzhou University,郑大, ZZU">
+            <h3 class="notice-detail-title">关于举办摄影比赛的通知</h3>
+            <div id="vsb_content_4">
+              <div class="v_news_content">
+                <p>各学院、各单位：</p>
+                <p>为丰富校园文化生活，学校决定举办摄影比赛，现将有关事项通知如下。</p>
+              </div>
+            </div>
+        """.trimIndent()
+
+        val detail = parser.detail(html, "https://www.zzu.edu.cn/info/1442/89356.htm")
+
+        assertTrue(detail.excerpt.startsWith("为丰富校园文化生活"))
+    }
+
+    @Test
+    fun `详情页单行字段摘要退回正文第一段`() {
+        val html = """
+            <meta name="description" content="主办单位：中国文物报社、对外经济贸易大学">
+            <h3 class="notice-detail-title">关于举办文博活动的通知</h3>
+            <div id="vsb_content_4">
+              <div class="v_news_content">
+                <p>为贯彻落实文化强国战略任务，推动中华优秀传统文化创造性转化与创新性发展，现举办文博活动，现将有关事项通知如下：</p>
+              </div>
+            </div>
+        """.trimIndent()
+
+        val detail = parser.detail(html, "https://www.zzu.edu.cn/info/1442/89177.htm")
+
+        assertTrue(detail.excerpt.startsWith("为贯彻落实文化强国战略任务"))
+    }
+
+    @Test
     fun `详情页提取标题来源日期和分段正文`() {
         val html = """
             <meta name="description" content="这是官网摘要。">

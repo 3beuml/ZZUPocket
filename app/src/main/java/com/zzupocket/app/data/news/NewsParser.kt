@@ -50,7 +50,7 @@ class NewsParser internal constructor() {
                 title = null,
                 publishedAt = item.selectFirst(".new-date")?.text().dateOrEmpty(),
                 section = section,
-                excerpt = item.selectFirst(".new-center p a")?.text().clean().clip(180),
+                excerpt = item.selectFirst(".new-center p a")?.text().cleanExcerpt().clip(180),
             )
         }
         if (current.isNotEmpty()) return current
@@ -103,8 +103,19 @@ class NewsParser internal constructor() {
             ?: document.selectFirst("#vsb_content, .notice-detail-content, .article-content")
         val body = content?.let(::readableText).orEmpty()
         // Jsoup 的属性选择器不支持 CSS 的 `i` 大小写标志；官网固定使用小写 name。
-        val description = document.selectFirst("meta[name=description]")?.attr("content").clean()
-        val excerpt = (description.ifBlank { body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty() })
+        val description = document.selectFirst("meta[name=description]")?.attr("content").cleanExcerpt()
+        // 通知公告的 meta description 常是「郑州大学, Zhengzhou University,郑大, ZZU」这类
+        // SEO 关键词，或只有「主办单位：…」「报告时间：…」一行；清洗后为空/不像摘要时
+        // 退回正文第一段，列表才不会满屏都是校名或单一机构名。
+        val bodyFallback = body.lineSequence()
+            .map { it.trim() }
+            .firstOrNull {
+                it.length >= 20 && !(it.length < 60 && (it.endsWith('：') || it.endsWith(':')))
+            }
+            ?: body.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }
+        val excerpt = (if (description.looksLikeLabelSummary()) bodyFallback else description.ifBlank { bodyFallback })
+            .orEmpty()
+            .cleanExcerpt()
             .clip(180)
         return Detail(
             title = title.orEmpty(),
@@ -113,7 +124,8 @@ class NewsParser internal constructor() {
             body = body,
             publishedAt = publishedAt,
             eventDate = document.selectFirst(".xsyg-detail-time")?.text().dateOrNull(),
-            eventPlace = document.selectFirst(".xsyg-detail-address")?.text().clean(),
+            eventPlace = document.selectFirst(".xsyg-detail-address")?.text().clean()
+                .takeIf { it.isNotBlank() },
         )
     }
 
@@ -158,6 +170,34 @@ class NewsParser internal constructor() {
     private fun String?.clean() = orEmpty().replace(Regex("\\s+"), " ").trim()
 
     /**
+     * 官网列表/详情摘要清洗。
+     *
+     * 通知公告的 meta description 实测是「郑州大学, Zhengzhou University,郑大, ZZU」
+     * 这类 SEO 关键词；纯关键词返回空（交给正文第一段兜底），带正文的前缀则去掉关键词列表。
+     * 真正的正文摘要（如「11月20日，郑州大学…」）没有关键词分隔符，不会被误删。
+     */
+    private fun String?.cleanExcerpt(): String {
+        val text = clean()
+        if (text.isBlank()) return ""
+        if (KEYWORD_ONLY.matches(text)) return ""
+        val stripped = LEADING_KEYWORDS.replace(text, "")
+            .trim()
+            .trimStart('，', ',', '、', '；', ';', '：', ':')
+            .trim()
+        if (stripped.isBlank()) return ""
+        val keywordCount = SITE_KEYWORD.findAll(text).count()
+        if (keywordCount >= 2 && stripped.length < 8) return ""
+        return stripped
+    }
+
+    /** 「主办单位：…」「报告时间：…」这种单行字段不是文章摘要，应退回正文第一段。 */
+    private fun String.looksLikeLabelSummary(): Boolean {
+        if (isBlank() || length > 80) return false
+        val colon = indexOfAny(charArrayOf('：', ':'))
+        return colon in 1..12
+    }
+
+    /**
      * 取「标签：值」中的值。
      *
      * ⚠️ 不能链式调用 `substringAfter("标签：", "").substringAfter("标签:", "")`：
@@ -187,5 +227,18 @@ class NewsParser internal constructor() {
 
     private companion object {
         val INFO_URL = Regex("https?://www\\.zzu\\.edu\\.cn(/info/(\\d+)/(\\d+)\\.htm)$")
+        val LEADING_KEYWORDS = Regex(
+            "^(?:(?:郑州大学|Zhengzhou\\s*University|郑大|ZZU)\\s*[,，、;；]\\s*)+" +
+                "(?:郑州大学|Zhengzhou\\s*University|郑大|ZZU)?\\s*",
+            RegexOption.IGNORE_CASE,
+        )
+        val KEYWORD_ONLY = Regex(
+            "^(?:\\s*(?:郑州大学|Zhengzhou\\s*University|郑大|ZZU)\\s*[,，、;；]?\\s*)+$",
+            RegexOption.IGNORE_CASE,
+        )
+        val SITE_KEYWORD = Regex(
+            "郑州大学|Zhengzhou\\s*University|郑大|ZZU",
+            RegexOption.IGNORE_CASE,
+        )
     }
 }
