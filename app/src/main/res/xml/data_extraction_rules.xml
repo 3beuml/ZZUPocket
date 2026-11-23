@@ -4,8 +4,10 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="secure_prefs.xml" />
+        <exclude domain="sharedpref" path="ai_provider_prefs.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="secure_prefs.xml" />
+        <exclude domain="sharedpref" path="ai_provider_prefs.xml" />
     </device-transfer>
 </data-extraction-rules>
