@@ -8,7 +8,11 @@ import com.zzupocket.app.domain.news.NewsArticle
 import com.zzupocket.app.domain.news.NewsCategory
 import com.zzupocket.app.domain.news.NewsSection
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -119,6 +123,16 @@ class NewsRepository(
     private var lastAutoRefreshAt = 0L
     private val refreshMutex = Mutex()
 
+    /**
+     * 同一篇文章的详情只发一次请求。
+     *
+     * 预取与用户点开可能同时命中同一篇：先到的那次请求在仓库自己的 scope 里跑，
+     * 后到的直接 await 结果；用户取消预取也不会把已经在途的请求一起取消。
+     */
+    private val detailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val detailFlights = mutableMapOf<String, Deferred<NewsArticle>>()
+    private val detailFlightsLock = Mutex()
+
     /** 打开雷达时先调用：有缓存就立刻显示，不等待网络。 */
     suspend fun loadCached(): List<NewsArticle> = withContext(Dispatchers.IO) {
         val rows = dao.all()
@@ -227,8 +241,32 @@ class NewsRepository(
     }
 
     /** 补齐真实信息来源、正文及摘要；学校未提供摘要时取正文首段。 */
-    suspend fun detail(article: NewsArticle): NewsArticle {
-        val parsed = client.detail(article.url)
+    suspend fun detail(
+        article: NewsArticle,
+        priority: NewsRequestPriority = NewsRequestPriority.USER,
+    ): NewsArticle {
+        val flight = detailFlightsLock.withLock {
+            detailFlights[article.id] ?: detailScope
+                .async(start = CoroutineStart.LAZY) {
+                    try {
+                        fetchDetail(article, priority)
+                    } finally {
+                        detailFlightsLock.withLock { detailFlights.remove(article.id) }
+                    }
+                }
+                .also { deferred ->
+                    detailFlights[article.id] = deferred
+                    deferred.start()
+                }
+        }
+        return flight.await()
+    }
+
+    private suspend fun fetchDetail(
+        article: NewsArticle,
+        priority: NewsRequestPriority,
+    ): NewsArticle {
+        val parsed = client.detail(article.url, priority)
         val detailed = article.copy(
             title = parsed.title.ifBlank { article.title },
             // 列表可能已有摘要/来源/正文；详情页缺字段时不要用空值把已有内容冲掉。

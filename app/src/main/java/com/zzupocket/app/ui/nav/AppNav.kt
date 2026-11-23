@@ -393,6 +393,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     val aiOverview by vm.aiOverview.collectAsStateWithLifecycle()
                     var detailLoading by remember { mutableStateOf(false) }
                     var detailError by remember { mutableStateOf<String?>(null) }
+                    var detailReloadKey by remember { mutableStateOf(0) }
                     val openOriginal: (String) -> Unit = { url ->
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                     }
@@ -407,6 +408,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                             onOpenArticle = {
                                 detailError = null
                                 detailLoading = false
+                                detailReloadKey = 0
                                 newsDetailArticle = it
                             },
                             onOpenOriginal = { openOriginal(it.url) },
@@ -457,10 +459,11 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                 }
                             },
                             onOpenAiSettings = { navController.navigate(ROUTE_AI_PROVIDER) },
+                            onRetryDetail = { detailReloadKey++ },
                             onBack = { newsDetailArticle = null },
                             onOpenOriginal = openOriginal,
                         )
-                        LaunchedEffect(article.id) {
+                        LaunchedEffect(article.id, detailReloadKey) {
                             if (article.body.isNotBlank()) return@LaunchedEffect
                             detailLoading = true
                             detailError = null

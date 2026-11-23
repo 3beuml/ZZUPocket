@@ -26,6 +26,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +42,9 @@ import com.zzupocket.app.domain.news.NewsSection
 import com.zzupocket.app.ui.components.GlassCard
 import com.zzupocket.app.ui.components.HintText
 import com.zzupocket.app.ui.theme.ZZUPocketTheme
+import kotlinx.coroutines.delay
+
+private const val SLOW_HINT_MS = 4_000L
 
 /** 正文由主 agent 更新到 article.body；加载失败时保留已有正文。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,10 +60,21 @@ fun NewsDetailScreen(
     aiModel: String = "",
     onGenerateAi: () -> Unit = {},
     onOpenAiSettings: () -> Unit = {},
+    onRetryDetail: () -> Unit = {},
     onBack: () -> Unit,
     onOpenOriginal: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 4 秒还没回来就提示可以读摘要/打开原文，避免看起来像卡死。
+    var slow by remember(article.id) { mutableStateOf(false) }
+    LaunchedEffect(article.id, loading) {
+        slow = false
+        if (loading) {
+            delay(SLOW_HINT_MS)
+            slow = true
+        }
+    }
+
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -101,13 +120,32 @@ fun NewsDetailScreen(
             }
 
             if (loading && article.body.isBlank()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator()
-                    SpacedText("正在加载正文…")
+                GlassCard(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            SpacedText("正在加载正文…")
+                        }
+                        // 列表已经拿到摘要：正文没回来前先把摘要显示出来，
+                        // 点开不是一片空白，也不会因为限速队列看起来像卡死。
+                        article.excerpt.takeIf { it.isNotBlank() }?.let { excerpt ->
+                            Text(
+                                text = excerpt,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            HintText("先显示列表摘要，完整正文加载完成后替换")
+                        }
+                        if (slow) {
+                            Text(
+                                text = "官网响应较慢，可以先读上面的摘要，或点「打开官网原文」。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
             error?.takeIf { it.isNotBlank() }?.let { message ->
@@ -126,6 +164,10 @@ fun NewsDetailScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = onRetryDetail) { Text("重试") }
+                            TextButton(onClick = { onOpenOriginal(article.url) }) { Text("打开原文") }
+                        }
                     }
                 }
             }

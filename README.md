@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/3beuml/ZZUPocket?style=flat&label=release)](../../releases)
 [![Android](https://img.shields.io/badge/Android-12%2B-3ddc84?style=flat&logo=android&logoColor=white)](#构建)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7f52ff?style=flat&logo=kotlin&logoColor=white)](#技术栈)
-[![Tests](https://img.shields.io/badge/unit%20tests-479-brightgreen?style=flat)](#参与贡献)
+[![Tests](https://img.shields.io/badge/unit%20tests-482-brightgreen?style=flat)](#参与贡献)
 
 > ⚠️ 本项目是非官方项目。
 > 接口来自公开网页的协议整理与社区项目经验，**随时可能失效或被学校调整**；
@@ -79,7 +79,7 @@
 - **专注入口迁入首页**：底栏第三格由「专注」换成「雷达」；首页时间轴下方新增专注卡片
   （始终显示、可调序），专注页改为带返回的子页，原「底栏显示专注」开关移除
 - **其他**：dock 胶囊不透明度 0.5→0.97，滚动内容不再透出干扰图标；Room v11 新增资讯快照表，
-  旧数据不受影响；全量单测 479 项通过
+  旧数据不受影响；全量单测 482 项通过
 
 **0.36.5（2026-11-17）**
 
