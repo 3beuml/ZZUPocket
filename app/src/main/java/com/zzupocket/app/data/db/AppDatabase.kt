@@ -345,7 +345,7 @@ abstract class AppDatabase : RoomDatabase() {
          *
          * 打开雷达先读这张表，再后台刷新；正文/要点也在这里，避免每次点详情都重新抓。
          */
-        private val MIGRATION_10_11 = object : Migration(10, 11) {
+        internal val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `news_articles` (" +
