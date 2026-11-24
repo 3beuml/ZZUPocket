@@ -2,9 +2,11 @@ package com.zzupocket.app.ui.nav
 
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -45,15 +47,19 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -99,6 +105,7 @@ import com.zzupocket.app.ui.schedule.WallpaperLayers
 import com.zzupocket.app.ui.schedule.rememberScheduleBackground
 import com.zzupocket.app.ui.today.TodayScreen
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 enum class Destination(
     val route: String,
@@ -138,6 +145,17 @@ private const val ROUTE_AI_PROVIDER = "ai_provider"
 
 /** "重新裁剪"时用这个占位值代替相册 URI */
 private const val CROP_SOURCE_SAVED = "saved"
+
+/**
+ * 资讯详情退场：跟随返回手势缩到 75%、压暗 30%、圆角 26dp、投影 24dp。
+ *
+ * 缩放锚点偏左、位移仍按整屏宽算，卡片会先"脱离"右边缘再整张抽走；
+ * 实机若觉得 75% 太小，先只调 [DETAIL_EXIT_SCALE]。
+ */
+private const val DETAIL_EXIT_SCALE = 0.75f
+private const val DETAIL_EXIT_DIM = 0.30f
+private val DETAIL_EXIT_RADIUS = 26.dp
+private val DETAIL_EXIT_SHADOW = 24.dp
 
 @Composable
 fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
@@ -401,6 +419,11 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     var detailLoading by remember { mutableStateOf(false) }
                     var detailError by remember { mutableStateOf<String?>(null) }
                     var detailReloadKey by remember { mutableStateOf(0) }
+                    // 详情返回手势进度：0 完全盖住列表，1 完全移出屏幕。
+                    val detailBackProgress = remember { Animatable(0f) }
+                    val backScope = rememberCoroutineScope()
+                    // 换文章或关掉详情时把进度归零，避免下一次打开带着上一张卡片的位移。
+                    LaunchedEffect(newsDetailArticle?.id) { detailBackProgress.snapTo(0f) }
                     val openOriginal: (String) -> Unit = { url ->
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                     }
@@ -471,6 +494,26 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                             Box(
                                 Modifier
                                     .fillMaxSize()
+                                    // 返回手势进度驱动整张详情右移、缩小并压暗，像卡片被抽走。
+                                    .graphicsLayer {
+                                        val p = detailBackProgress.value
+                                        val scale = 1f - (1f - DETAIL_EXIT_SCALE) * p
+                                        transformOrigin = TransformOrigin(0.42f, 0.48f)
+                                        translationX = size.width * p
+                                        scaleX = scale
+                                        scaleY = scale
+                                        shape = RoundedCornerShape(DETAIL_EXIT_RADIUS * p)
+                                        clip = true
+                                        shadowElevation = DETAIL_EXIT_SHADOW.toPx() * p
+                                    }
+                                    // 压暗在绘制阶段读进度，避免每帧重组。
+                                    .drawWithContent {
+                                        drawContent()
+                                        drawRect(
+                                            Color.Black,
+                                            alpha = DETAIL_EXIT_DIM * detailBackProgress.value,
+                                        )
+                                    }
                                     .background(MaterialTheme.colorScheme.surface),
                             ) {
                                 // 详情完全盖住列表，空白区域的点按/滑动也不能漏给后面的列表。
@@ -497,7 +540,12 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                     },
                                     onOpenAiSettings = { navController.navigate(ROUTE_AI_PROVIDER) },
                                     onRetryDetail = { detailReloadKey++ },
-                                    onBack = { newsDetailArticle = null },
+                                    onBack = {
+                                        backScope.launch {
+                                            detailBackProgress.animateTo(1f, tween(160))
+                                            newsDetailArticle = null
+                                        }
+                                    },
                                     onOpenOriginal = openOriginal,
                                 )
                             }
@@ -526,9 +574,22 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                             }
                         }
                     }
-                    // 系统返回键与页面返回按钮一致：先退回资讯列表，而不是直接退出雷达。
-                    BackHandler(enabled = newsDetailArticle != null) {
-                        newsDetailArticle = null
+                    // 系统返回键/手势与页面返回按钮一致：先退回资讯列表，而不是直接退出雷达。
+                    // 手势进度驱动详情右移缩小；松手完成关闭，取消则弹回。
+                    PredictiveBackHandler(enabled = newsDetailArticle != null) { events ->
+                        try {
+                            events.collect { detailBackProgress.snapTo(it.progress) }
+                            detailBackProgress.animateTo(1f, tween(120))
+                            newsDetailArticle = null
+                        } catch (e: CancellationException) {
+                            backScope.launch {
+                                detailBackProgress.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+                                )
+                            }
+                            throw e
+                        }
                     }
                 }
                 composable(ROUTE_LOGIN) {
