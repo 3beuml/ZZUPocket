@@ -400,11 +400,13 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     if (newsDetailArticle == null) {
                         NewsScreen(
                             state = state,
-                            onCategorySelected = vm::selectCategory,
-                            onToggleInterest = vm::toggleInterest,
+                            onToggleTopic = vm::toggleTopic,
+                            onOnlyFollowedChange = vm::setOnlyFollowed,
+                            onSortModeChange = vm::setSortMode,
                             onRefresh = vm::refresh,
                             onApplyPending = vm::applyPendingNews,
                             onResetFilters = vm::resetFilters,
+                            onClearFilters = vm::clearFilters,
                             onOpenArticle = {
                                 detailError = null
                                 detailLoading = false

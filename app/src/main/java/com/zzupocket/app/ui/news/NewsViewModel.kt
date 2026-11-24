@@ -12,8 +12,10 @@ import com.zzupocket.app.domain.news.NewsArticle
 import com.zzupocket.app.domain.news.NewsCategory
 import com.zzupocket.app.domain.news.NewsClassifier
 import com.zzupocket.app.domain.news.NewsDigestExtractor
-import com.zzupocket.app.domain.news.NewsMatcher
-import com.zzupocket.app.domain.news.NewsProfile
+import com.zzupocket.app.domain.news.NewsFeedFilter
+import com.zzupocket.app.domain.news.NewsFeedPolicy
+import com.zzupocket.app.domain.news.NewsSortMode
+import com.zzupocket.app.domain.news.NewsTopic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -54,7 +56,7 @@ class NewsViewModel : ViewModel() {
     private val prefs = AppGraph.newsPrefsStore
     private val aiStore = AppGraph.aiProviderStore
     private val aiClient = AiSummaryClient()
-    private val selectedCategory = MutableStateFlow(NewsCategory.ALL)
+    private val filterOverride = MutableStateFlow<NewsFeedFilter?>(null)
 
     /** 后台预取任务；用户点开任一详情时取消，避免正文排队。 */
     private var prefetchJob: Job? = null
@@ -82,37 +84,19 @@ class NewsViewModel : ViewModel() {
         BaseState(articles, refreshing, error, updated)
     }
 
+    private val filter = combine(prefs.filter, filterOverride) { saved, local -> local ?: saved }
+
     val state = combine(
         base,
-        selectedCategory,
-        prefs.profile,
+        filter,
         repository.cacheState,
-    ) { base, category, profile, cache ->
-        val enriched = base.articles.map { article ->
-            val classified = if (article.category == NewsCategory.OTHER) {
-                article.copy(category = NewsClassifier.classify(article.title, article.body))
-            } else article
-            // 列表阶段没有正文时，用列表摘要参与匹配；否则只有标题命中，
-            // "AI 相关新闻"这类正文信息会全部漏掉。
-            val scoring = if (classified.body.isBlank() && classified.excerpt.isNotBlank()) {
-                classified.copy(body = classified.excerpt)
-            } else {
-                classified
-            }
-            val match = NewsMatcher.match(scoring, profile)
-            classified.copy(matchScore = match.matchScore, matchReasons = match.matchReasons)
-        }.sortedWith(
-            compareByDescending<NewsArticle> { it.matchScore }
-                .thenByDescending { it.publishedAt }
-                .thenByDescending { it.id },
-        )
+    ) { base, filter, cache ->
         NewsUiState(
-            articles = if (category == NewsCategory.ALL) enriched else enriched.filter { it.category == category },
+            articles = NewsFeedPolicy.build(base.articles, filter),
             refreshing = base.refreshing,
             error = base.error,
             lastUpdated = base.updated,
-            selectedCategory = category,
-            interests = profile.interests,
+            filter = filter,
             pendingCount = cache.pendingCount,
             usingCache = cache.usingCache,
         )
@@ -131,15 +115,34 @@ class NewsViewModel : ViewModel() {
         }
     }
 
-    fun selectCategory(category: NewsCategory) {
-        selectedCategory.value = category
+    fun toggleTopic(topic: NewsTopic) {
+        val current = filterOverride.value ?: state.value.filter
+        filterOverride.value = current.copy(
+            topics = if (topic in current.topics) current.topics - topic else current.topics + topic,
+        )
+        viewModelScope.launch {
+            prefs.updateFilter { saved ->
+                saved.copy(topics = if (topic in saved.topics) saved.topics - topic else saved.topics + topic)
+            }
+            filterOverride.value = null
+        }
     }
 
-    fun toggleInterest(interest: String) {
+    fun setOnlyFollowed(onlyFollowed: Boolean) {
+        val current = filterOverride.value ?: state.value.filter
+        filterOverride.value = current.copy(onlyFollowed = onlyFollowed)
         viewModelScope.launch {
-            val current = state.value.interests
-            val next = if (interest in current) current - interest else current + interest
-            prefs.setInterests(next)
+            prefs.updateFilter { it.copy(onlyFollowed = onlyFollowed) }
+            filterOverride.value = null
+        }
+    }
+
+    fun setSortMode(sortMode: NewsSortMode) {
+        val current = filterOverride.value ?: state.value.filter
+        filterOverride.value = current.copy(sortMode = sortMode)
+        viewModelScope.launch {
+            prefs.updateFilter { it.copy(sortMode = sortMode) }
+            filterOverride.value = null
         }
     }
 
@@ -161,8 +164,20 @@ class NewsViewModel : ViewModel() {
     }
 
     fun resetFilters() {
-        selectedCategory.value = NewsCategory.ALL
-        viewModelScope.launch { prefs.setInterests(NewsProfile.DEFAULT_INTERESTS) }
+        filterOverride.value = NewsFeedFilter()
+        viewModelScope.launch {
+            prefs.setFilter(NewsFeedFilter())
+            filterOverride.value = null
+        }
+    }
+
+    fun clearFilters() {
+        val current = filterOverride.value ?: state.value.filter
+        filterOverride.value = current.copy(topics = emptySet(), onlyFollowed = false)
+        viewModelScope.launch {
+            prefs.setFilter(NewsFeedFilter(topics = emptySet()))
+            filterOverride.value = null
+        }
     }
 
     /**
@@ -261,7 +276,7 @@ class NewsViewModel : ViewModel() {
             )
         }
         if (items.isEmpty()) {
-            _aiOverview.value = NewsAiOverviewUi(error = "当前分类还没有可速览的资讯")
+            _aiOverview.value = NewsAiOverviewUi(error = "当前筛选下还没有可速览的资讯")
             return
         }
 

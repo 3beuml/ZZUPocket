@@ -37,6 +37,8 @@ data class NewsArticle(
     /** 0..100 的可解释规则匹配分；未设置画像时仍按时效给基础分。 */
     val matchScore: Int = 0,
     val matchReasons: List<String> = emptyList(),
+    /** 当前关注配置的主题命中；运行态，不写入 Room。 */
+    val matchedTopics: Set<NewsTopic> = emptySet(),
     val keyPoints: List<String> = emptyList(),
     val eventDate: String? = null,
     val eventPlace: String? = null,
@@ -49,14 +51,11 @@ data class NewsDigest(
     val eventPlace: String? = null,
 )
 
-/** 第一版只保存兴趣词；院系/专业以后可从 CAS 画像补入。 */
+/** 旧的自由兴趣仍保留给匹配器；新界面使用 [NewsFeedFilter]。 */
 data class NewsProfile(
     val interests: List<String> = DEFAULT_INTERESTS,
 ) {
     companion object {
         val DEFAULT_INTERESTS = listOf("学科竞赛", "人工智能", "创新创业")
-        val SUGGESTED_INTERESTS = listOf(
-            "学科竞赛", "人工智能", "创新创业", "奖学金", "保研", "学术讲座", "就业实习", "体育运动",
-        )
     }
 }

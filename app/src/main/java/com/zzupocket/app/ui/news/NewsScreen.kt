@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -44,6 +45,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -65,8 +67,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.zzupocket.app.domain.news.NewsArticle
 import com.zzupocket.app.domain.news.NewsCategory
-import com.zzupocket.app.domain.news.NewsProfile
+import com.zzupocket.app.domain.news.NewsFeedFilter
 import com.zzupocket.app.domain.news.NewsSection
+import com.zzupocket.app.domain.news.NewsSortMode
+import com.zzupocket.app.domain.news.NewsTopic
 import com.zzupocket.app.ui.components.GlassCard
 import com.zzupocket.app.ui.components.RelativeTime
 import com.zzupocket.app.ui.nav.DOCK_CLEARANCE
@@ -78,8 +82,7 @@ data class NewsUiState(
     val refreshing: Boolean = false,
     val error: String? = null,
     val lastUpdated: Long? = null,
-    val selectedCategory: NewsCategory = NewsCategory.ALL,
-    val interests: List<String> = NewsProfile.DEFAULT_INTERESTS,
+    val filter: NewsFeedFilter = NewsFeedFilter(),
     /** 后台已经拉到、但用户还没点「有新新闻」的条数 */
     val pendingCount: Int = 0,
     /** 当前列表是否来自上次缓存 */
@@ -90,8 +93,9 @@ data class NewsUiState(
 @Composable
 fun NewsScreen(
     state: NewsUiState,
-    onCategorySelected: (NewsCategory) -> Unit,
-    onToggleInterest: (String) -> Unit,
+    onToggleTopic: (NewsTopic) -> Unit,
+    onOnlyFollowedChange: (Boolean) -> Unit,
+    onSortModeChange: (NewsSortMode) -> Unit,
     onRefresh: () -> Unit,
     onApplyPending: () -> Unit,
     onOpenArticle: (NewsArticle) -> Unit,
@@ -99,6 +103,7 @@ fun NewsScreen(
     /** null = 底栏 tab 模式，不显示返回箭头 */
     onBack: (() -> Unit)? = null,
     onResetFilters: () -> Unit = {},
+    onClearFilters: () -> Unit = {},
     aiOverview: NewsAiOverviewUi = NewsAiOverviewUi(),
     onAiOverview: () -> Unit = {},
     onDismissAiOverview: () -> Unit = {},
@@ -138,8 +143,6 @@ fun NewsScreen(
             scrollToTopWhenApplied = false
         }
     }
-
-    val filterCount = newsFilterCount(state.interests, state.selectedCategory)
 
     Scaffold(
         modifier = modifier,
@@ -189,7 +192,7 @@ fun NewsScreen(
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             NewsFilterBar(
-                filterCount = filterCount,
+                filterActive = state.filter.isActive,
                 lastUpdated = state.lastUpdated,
                 refreshing = state.refreshing,
                 onOpenFilters = { showFilters = true },
@@ -241,8 +244,9 @@ fun NewsScreen(
                             NewsEmptyContent(
                                 refreshing = state.refreshing,
                                 hasError = !state.error.isNullOrBlank(),
-                                filtered = state.selectedCategory != NewsCategory.ALL,
+                                filtered = state.filter.onlyFollowed && state.filter.topics.isNotEmpty(),
                                 onRefresh = onRefresh,
+                                onClearFilters = onClearFilters,
                             )
                         }
                     } else {
@@ -282,10 +286,10 @@ fun NewsScreen(
 
     if (showFilters) {
         NewsFilterSheet(
-            interests = state.interests,
-            selectedCategory = state.selectedCategory,
-            onToggleInterest = onToggleInterest,
-            onCategorySelected = onCategorySelected,
+            filter = state.filter,
+            onToggleTopic = onToggleTopic,
+            onOnlyFollowedChange = onOnlyFollowedChange,
+            onSortModeChange = onSortModeChange,
             onReset = onResetFilters,
             onDismiss = { showFilters = false },
         )
@@ -348,15 +352,10 @@ fun NewsScreen(
     }
 }
 
-/** 筛选按钮上的条件数：分类不是「全部」算 1，兴趣改过默认值算 1。 */
-internal fun newsFilterCount(interests: List<String>, category: NewsCategory): Int =
-    (if (category != NewsCategory.ALL) 1 else 0) +
-        (if (interests.sorted() != NewsProfile.DEFAULT_INTERESTS.sorted()) 1 else 0)
-
 /** 顶部固定条：只留一个「筛选」入口 + 更新时间，兴趣/分类都收进弹层。 */
 @Composable
 private fun NewsFilterBar(
-    filterCount: Int,
+    filterActive: Boolean,
     lastUpdated: Long?,
     refreshing: Boolean,
     onOpenFilters: () -> Unit,
@@ -370,6 +369,14 @@ private fun NewsFilterBar(
         OutlinedButton(
             onClick = onOpenFilters,
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+            colors = if (filterActive) {
+                ButtonDefaults.outlinedButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            } else {
+                ButtonDefaults.outlinedButtonColors()
+            },
         ) {
             Icon(
                 Icons.Filled.Tune,
@@ -377,10 +384,7 @@ private fun NewsFilterBar(
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.width(6.dp))
-            Text(
-                text = if (filterCount > 0) "筛选 · $filterCount" else "筛选",
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Text("筛选", style = MaterialTheme.typography.labelLarge)
         }
         Spacer(Modifier.weight(1f))
         val status = when {
@@ -399,22 +403,18 @@ private fun NewsFilterBar(
     }
 }
 
-/** 兴趣画像 + 分类合并成一个底部弹层；选择即时生效。 */
+/** 统一关注主题；默认优先推荐，用户显式开启后才隐藏其他资讯。 */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun NewsFilterSheet(
-    interests: List<String>,
-    selectedCategory: NewsCategory,
-    onToggleInterest: (String) -> Unit,
-    onCategorySelected: (NewsCategory) -> Unit,
+    filter: NewsFeedFilter,
+    onToggleTopic: (NewsTopic) -> Unit,
+    onOnlyFollowedChange: (Boolean) -> Unit,
+    onSortModeChange: (NewsSortMode) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val suggestions = (interests + NewsProfile.SUGGESTED_INTERESTS)
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .distinct()
-    // 筛选内容比半屏高：直接全展开，避免用户还要再上滑才看得到分类和「完成」。
+    // 筛选内容比半屏高：直接全展开，避免用户还要再上滑才看得到开关和「完成」。
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -432,12 +432,29 @@ private fun NewsFilterSheet(
                 TextButton(onClick = onReset) { Text("重置") }
             }
             Text(
-                "兴趣画像",
+                "排序方式",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NewsSortMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = filter.sortMode == mode,
+                        onClick = { onSortModeChange(mode) },
+                        label = { Text(mode.label) },
+                        enabled = mode == NewsSortMode.DATE || filter.topics.isNotEmpty(),
+                        modifier = Modifier.height(36.dp),
+                    )
+                }
+            }
             Text(
-                "只影响排序，不隐藏资讯。",
+                "关注内容",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            Text(
+                "选择你关心的主题，可多选。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -445,32 +462,40 @@ private fun NewsFilterSheet(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                suggestions.forEach { interest ->
+                NewsTopic.entries.forEach { topic ->
                     FilterChip(
-                        selected = interest in interests,
-                        onClick = { onToggleInterest(interest) },
-                        label = { Text(interest) },
+                        selected = topic in filter.topics,
+                        onClick = { onToggleTopic(topic) },
+                        label = { Text(topic.label) },
                         modifier = Modifier.height(36.dp),
                     )
                 }
             }
-            Text(
-                "分类",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
             ) {
-                NewsCategory.entries.forEach { category ->
-                    FilterChip(
-                        selected = selectedCategory == category,
-                        onClick = { onCategorySelected(category) },
-                        label = { Text(category.label) },
-                        modifier = Modifier.height(36.dp),
-                    )
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("只看关注内容", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (filter.topics.isEmpty()) {
+                                "未选主题时显示全部资讯"
+                            } else if (filter.onlyFollowed) {
+                                "隐藏无关资讯，只显示所选主题"
+                            } else {
+                                "相关资讯优先，其他资讯仍然保留"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(checked = filter.onlyFollowed, onCheckedChange = onOnlyFollowedChange)
                 }
             }
             Button(
@@ -521,6 +546,7 @@ private fun NewsEmptyContent(
     hasError: Boolean,
     filtered: Boolean,
     onRefresh: () -> Unit,
+    onClearFilters: () -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 36.dp),
@@ -536,19 +562,23 @@ private fun NewsEmptyContent(
             )
         } else {
             Text(
-                text = if (filtered) "当前分类暂无资讯" else "暂无资讯",
+                text = if (filtered) "当前关注内容暂无资讯" else "暂无资讯",
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
                 text = when {
                     hasError -> "请检查网络后重试，或稍后再来查看。"
-                    filtered -> "可切换其他分类，或刷新获取最新公开资讯。"
+                    filtered -> "可更换关注主题，或清除筛选查看全部资讯。"
                     else -> "还没有可显示的公开资讯，可点击刷新重试。"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            OutlinedButton(onClick = onRefresh) { Text("刷新") }
+            if (filtered) {
+                OutlinedButton(onClick = onClearFilters) { Text("清除筛选") }
+            } else {
+                OutlinedButton(onClick = onRefresh) { Text("刷新") }
+            }
         }
     }
 }
@@ -658,8 +688,9 @@ private fun NewsScreenPreview() {
                 lastUpdated = System.currentTimeMillis(),
                 pendingCount = 3,
             ),
-            onCategorySelected = {},
-            onToggleInterest = {},
+            onToggleTopic = {},
+            onOnlyFollowedChange = {},
+            onSortModeChange = {},
             onRefresh = {},
             onApplyPending = {},
             onOpenArticle = {},

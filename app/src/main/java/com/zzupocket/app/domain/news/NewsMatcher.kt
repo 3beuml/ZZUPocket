@@ -78,6 +78,27 @@ object NewsMatcher {
         return NewsMatch(score.coerceIn(0, 100), reasons)
     }
 
+    /** 分类主题复用分类器的完整召回，跨分类主题再用标题/正文关键词补充。 */
+    fun matchTopics(
+        title: String,
+        body: String,
+        excerpt: String = "",
+        category: NewsCategory,
+        topics: Set<NewsTopic>,
+    ): Set<NewsTopic> {
+        val text = normalize("$title\n$excerpt\n$body")
+        return topics.filterTo(mutableSetOf()) { topic ->
+            topic.category == category || topic.aliases.any { alias ->
+                val normalized = normalize(alias)
+                if (normalized == "ai") {
+                    AI_TOKEN.containsMatchIn(text)
+                } else {
+                    text.contains(normalized)
+                }
+            }
+        }
+    }
+
     private fun parseDate(value: String): LocalDate? = try {
         LocalDate.parse(value.trim())
     } catch (_: DateTimeParseException) {
@@ -96,4 +117,5 @@ object NewsMatcher {
     }
 
     private val WHITESPACE = Regex("\\s+")
+    private val AI_TOKEN = Regex("(?<![a-z0-9])ai(?![a-z0-9])")
 }
