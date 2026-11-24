@@ -69,10 +69,67 @@ object RoomBuildingOrder {
         return if (index >= 0) index else PINNED.size
     }
 
+    /** 是否置顶核心楼（北1–5、南1–5）——快照分批抓取的"第一批"判定与这里同源 */
+    fun isPinned(name: String): Boolean = rank(name) < PINNED.size
+
     /** 稳定排序：置顶项按 [PINNED] 顺序，其余保持原相对顺序 */
     fun <T> sorted(items: List<T>, nameOf: (T) -> String): List<T> =
         items.sortedBy { rank(nameOf(it)) }
 }
+
+/**
+ * 空教室快照的全量抓取计划（纯逻辑，单测见 RoomSnapshotPlanTest）。
+ *
+ * 把"整校区所有楼栋"切成**批**，逐批抓、逐批落库（2026-11-24 拍板）：
+ *  - 批 1 固定是置顶核心楼（北1–5、南1–5）——用户查空教室的高频楼栋，
+ *    中途断网时保证这批已经落库；
+ *  - 其余楼栋按 [REST_BATCH_SIZE] 块分，保持字典原相对顺序。
+ *
+ * 为什么是"批"而不是"每楼一个请求"：61 次串行往返太慢；为什么不是"一次全量"：
+ * 一次全量攒齐才落库，中断 = 什么都没存（残缺快照的根源之一）。
+ */
+object RoomSnapshotPlan {
+
+    /** 核心楼之外的楼栋，每批最多这么多栋 */
+    const val REST_BATCH_SIZE = 30
+
+    /** 预取（自动全量落库）的天数窗口：今天 ~ 今天+[PREFETCH_DAYS] */
+    const val PREFETCH_DAYS = 5
+
+    /**
+     * [buildings]：楼栋字典 (id, 展示名)（展示名 = nameZh，空则 code，与筛选置顶同一口径）。
+     * 返回：首批 = 置顶核心楼（按北1..南5 顺序），后续批 = 其余楼栋切块；空输入返回空。
+     */
+    fun batches(buildings: List<Pair<Long, String>>): List<List<Long>> {
+        if (buildings.isEmpty()) return emptyList()
+        val pinned = buildings.filter { RoomBuildingOrder.isPinned(it.second) }
+            .sortedBy { RoomBuildingOrder.rank(it.second) }
+            .map { it.first }
+        val rest = buildings.filterNot { RoomBuildingOrder.isPinned(it.second) }.map { it.first }
+        return buildList {
+            if (pinned.isNotEmpty()) add(pinned)
+            rest.chunked(REST_BATCH_SIZE).forEach { add(it) }
+        }
+    }
+}
+
+/** 一天快照的分批抓取结果：几批、落了几批、跳了几批（跳 = 该批楼栋当天已抓过） */
+data class RoomDayResult(
+    val totalBatches: Int,
+    val savedBatches: Int,
+    val skippedBatches: Int,
+) {
+    /** 全部落库或跳过才算这天完整 */
+    val complete: Boolean
+        get() = totalBatches > 0 && savedBatches + skippedBatches == totalBatches
+}
+
+/**
+ * 预取轮的续跑判定：连续 [consecutiveFailures] 天没抓完整就停（多半断网了，别白打请求）。
+ * 单天失败/不完整继续下一天——核心批在最前，先保住高频楼栋再谈更远的日期。
+ */
+fun shouldContinuePrefetch(consecutiveFailures: Int, maxConsecutive: Int = 2): Boolean =
+    consecutiveFailures < maxConsecutive
 
 /**
  * 教室占用表的纯逻辑。

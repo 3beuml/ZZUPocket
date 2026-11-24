@@ -111,6 +111,9 @@ class RoomViewModel : ViewModel() {
     /** 全量教室（未按节次过滤），改节次筛选时不用重新请求 */
     private var allRooms: List<RoomRow> = emptyList()
 
+    /** 与 [allRooms] 平行的原始行（未算格子），随分页累积——翻到最后一页时一次性落库 */
+    private var allRawRows: List<com.zzupocket.app.data.repo.RoomCacheRow> = emptyList()
+
     /** 一次动作里最多自动续几页（防止"筛出来的太少"时无限拉） */
     private var autoFills = 0
 
@@ -466,25 +469,25 @@ class RoomViewModel : ViewModel() {
             )
         }
         allRooms = if (reset) newRows else (allRooms + newRows).distinctBy { it.id }
-        // 落当天快照：教务挂了/断网时还能看到"上次抓到的状态 + 时间"。
-        // reset（第一页）= replace；续页 = append 累积——否则"今天"的快照
-        // 永远只有第一页（2026-11-11 自检发现）。
-        // ⚠️ **筛选态不落快照**：快照的语义是"该日期+校区的全量占用"，
-        // 把只含所选楼栋的结果 replace 进去会覆盖全量快照——之后所有
-        // 快照渲染（冷启动断网兜底、切换兜底）都只剩那栋楼，看起来像
-        // "app 记住了我上次选的楼"（2026-11-12 用户实测）。
-        if (s.selectedBuildings.isEmpty()) {
+        // 原始行同步累积（与 allRooms 同口径：剔除虚拟教室）——翻到最后一页时一次性落库
+        val pageRawRows = roomRowsToCacheRows(result, s.buildings)
+        allRawRows = if (reset) pageRawRows else (allRawRows + pageRawRows).distinctBy { it.roomId }
+        val totalPages = result.page?.totalPages ?: 1
+        val currentPage = result.page?.currentPage ?: page
+        // ⚠️ **完整才落库**：旧实现在这里逐页落库——reset（第一页，30 间）就会把
+        // 当天快照 replace 成残缺，还带着最新 fetchedAt，面板显示"已保存"但表格
+        // 空（2026-11-24 用户实测"以为保留完了实际没保留完全"）。现在只有
+        // "无筛选且真的翻到最后一页"才一次性落库；预取/手动保存走 RoomPrefetch
+        // 的分批管线。筛选态永不落库（快照语义 = 该日期+校区的全量占用）。
+        if (shouldSaveSnapshotOnBrowse(s.selectedBuildings.isEmpty(), currentPage, totalPages)) {
             runCatching {
                 AppGraph.scheduleRepository.saveRoomSnapshot(
                     date = s.date.toString(),
                     campusId = campusId,
-                    rows = toCacheRows(result, s.buildings),
-                    replace = reset,
+                    rows = allRawRows,
                 )
             }
         }
-        val totalPages = result.page?.totalPages ?: 1
-        val currentPage = result.page?.currentPage ?: page
         val order = s.buildings.map { it.id }
         val groups = rebuildGroups(allRooms, order, s.selectedUnits)
         _state.update {
@@ -514,143 +517,49 @@ class RoomViewModel : ViewModel() {
         }
     }
 
-    /** 接口一页教室 → 快照行（当天快照与预取共用同一转换，口径才不会分叉） */
-    private fun toCacheRows(
-        result: EasClient.ClassroomPageDto,
-        buildings: List<EasClient.BuildingDto>,
-    ): List<com.zzupocket.app.data.repo.RoomCacheRow> {
-        val buildingNames = buildings.associate { it.id to it.nameZh }
-        return result.data.filterNot { it.virtual }.map { room ->
-            com.zzupocket.app.data.repo.RoomCacheRow(
-                roomId = room.id,
-                code = RoomNames.numberOf(room.nameZh, room.code),
-                buildingId = room.buildingId,
-                buildingName = buildingNames[room.buildingId] ?: "未知楼栋",
-                campusName = room.campusNameZh.orEmpty(),
-                occupations = room.roomOccupationInfoVms.map {
-                    RoomOccupation(it.startTime, it.endTime, it.activityType.orEmpty())
-                },
-            )
-        }
-    }
-
-    /** 一次进页只做一轮预取（filter 切换/翻日不触发，失败当天内不反复重试） */
-    private var prefetchJob: kotlinx.coroutines.Job? = null
-
     /**
-     * 进页联网成功后，把**今天 ~ 今天+3** 的占用**完整**（所有页）预取落库
-     * （2026-11-11 用户拍板收窄到 3 天：目标是应对教务系统临时出问题，
-     * 完整比天数重要——此前的分页覆盖 bug 正是"求天数不求完整性"的产物。
-     * 7 天保留窗口不变，昨天与浏览过的日期照旧在窗口内保留）。
-     *
-     * 串行、低优先、逐日跳过当天已抓过的：二次进页零请求；中途断网就整轮停掉。
+     * 一次进页只触发一轮预取（app 级跑完，管线见 [RoomPrefetch]）：
+     * 只有浏览"今天"才预取（切到别的日期不触发）；手动保存走 [saveDay]。
      */
     private fun startPrefetchIfOnline() {
-        if (prefetchJob?.isActive == true) return
+        if (RoomPrefetch.isRunning) return
         val s = _state.value
         if (s.date != LocalDate.now()) return
         val campusId = s.campusId ?: return
-        val buildingIds = s.buildings.map { it.id }
-        if (buildingIds.isEmpty()) return
-        prefetchJob = viewModelScope.launch {
-            // ⚠️ **offset 从 0 开始（含今天）**：快照保存跟随 UI 分页，无筛选抓取
-            // 第一页（30 间）就会落库，可见数 ≥15 时不会续页——今天的快照会永远
-            // 只有 30 间，用户校外换流量筛选别的楼栋必然空态（2026-11-16 实测抓到）。
-            // 所以"今天"也要走一遍全量管线（跳过条件带完整性检查，不会白跑）。
-            for (offset in 0..PREFETCH_DAYS) {
-                val day = LocalDate.now().plusDays(offset.toLong())
-                runCatching { prefetchDay(campusId, buildingIds, day) }
-                    .onFailure {
-                        Log.w(TAG, "预取 $day 教室占用失败，本轮到此为止", it)
-                        return@launch
-                    }
-            }
-        }
+        if (s.buildings.isEmpty()) return
+        RoomPrefetch.start(campusId, s.buildings)
     }
 
-    /** 手动保存某一天（筛选面板"本地保存"区）：与自动预取共用同一条全量管线 */
+    /** 手动保存某一天（筛选面板"本地保存"区）：与自动预取共用同一条分批管线 */
     fun saveDay(date: java.time.LocalDate) {
         if (_state.value.savingDay != null) return // 一次只存一天
         viewModelScope.launch {
             _state.update { it.copy(savingDay = date, saveResult = null) }
             val s = _state.value
-            val ok = runCatching {
+            val result = runCatching {
                 val campusId = s.campusId ?: error("校区字典未就绪，无法保存")
-                val buildingIds = s.buildings.map { it.id }
-                if (buildingIds.isEmpty()) error("楼栋字典未就绪，无法保存")
-                fetchAndSaveDay(campusId, buildingIds, date)
-                true
+                if (s.buildings.isEmpty()) error("楼栋字典未就绪，无法保存")
+                RoomPrefetch.fetchAndSaveDay(campusId, s.buildings, date)
             }.getOrElse { e ->
                 Log.w(TAG, "手动保存 $date 失败", e)
-                false
+                null
             }
             refreshLocalSnapshots()
             _state.update {
                 it.copy(
                     savingDay = null,
-                    saveResult = if (ok) {
-                        null
-                    } else {
-                        "${date.monthValue}-${date.dayOfMonth} 保存未成功（需要联网，且门户/教务正常）"
+                    // 诚实反馈：中断留下的部分快照也要说清存了几批（核心楼在最前）
+                    saveResult = when {
+                        result?.complete == true -> null
+                        result != null && result.savedBatches > 0 ->
+                            "${date.monthValue}-${date.dayOfMonth} 已保存部分" +
+                                "（${result.savedBatches}/${result.totalBatches} 批）· 联网后自动补全"
+                        else ->
+                            "${date.monthValue}-${date.dayOfMonth} 保存未成功（需要联网，且门户/教务正常）"
                     },
                 )
             }
         }
-    }
-
-    /**
-     * 抓取某一天的**全量**教室占用并落库——自动预取与手动保存共用。
-     * 攒齐所有页再一次性落库：按页落库会互相覆盖（根因见 saveRoomSnapshot 的注释）。
-     * 返回是否真的存上了（该天已有当天抓取的快照时直接返回 true 视作已保存）。
-     */
-    private suspend fun fetchAndSaveDay(
-        campusId: Long,
-        buildingIds: List<Long>,
-        date: LocalDate,
-    ): Boolean {
-        val existing = scheduleRepo.cachedRoomSnapshot(date.toString(), campusId)
-        if (existing != null && java.time.Instant.ofEpochMilli(existing.fetchedAt)
-                .atZone(java.time.ZoneId.systemDefault()).toLocalDate() == LocalDate.now()
-        ) {
-            // ⚠️ **完整性检查**：少于 100 间视为不完整——UI 分页只落第一页（30 间）
-            // 是常态，不能当成"已存好"跳过，必须重新全量拉取
-            // （2026-11-16 实测：30 间的快照导致校外筛选别的楼栋必然空态）。
-            if (existing.rows.size >= SNAPSHOT_COMPLETE_MIN_ROOMS) return true
-        }
-        val allRows = mutableListOf<com.zzupocket.app.data.repo.RoomCacheRow>()
-        var page = 1
-        while (true) {
-            val result = repo.roomsPage(
-                date = date,
-                buildingIds = buildingIds,
-                page = page,
-                pageSize = RoomRepository.PAGE_SIZE_LARGE,
-            )
-            allRows += toCacheRows(result, _state.value.buildings)
-            val totalPages = result.page?.totalPages ?: 1
-            if (page >= totalPages) break
-            page++
-        }
-        if (allRows.isEmpty()) return false
-        // 诊断（仅 debug 包）：请求了全量楼栋，服务端实际返回了哪些楼、各多少间——
-        // 2026-11-16 实测全量查询只回来 ~30 间，需要这份证据定位是服务端
-        // 过滤/截断还是请求问题。
-        if (com.zzupocket.app.BuildConfig.DEBUG) {
-            val byBuilding = allRows.groupBy { it.buildingId }
-                .map { (b, rows) -> "b$b:${rows.size}" }
-                .sorted()
-            Log.i(TAG, "全量拉取 $date：共 ${allRows.size} 间 / ${byBuilding.size} 栋 [${byBuilding.joinToString(",")}]")
-        }
-        AppGraph.scheduleRepository.saveRoomSnapshot(
-            date = date.toString(),
-            campusId = campusId,
-            rows = allRows,
-        )
-        return true
-    }
-
-    private suspend fun prefetchDay(campusId: Long, buildingIds: List<Long>, date: LocalDate) {
-        fetchAndSaveDay(campusId, buildingIds, date)
     }
 
     private fun rebuildGroups(
@@ -797,7 +706,12 @@ class RoomViewModel : ViewModel() {
                 loadedRooms = filtered.size,
                 fromCache = true,
                 notice = if (filtered.isEmpty()) {
-                    "本地快照里没有所选楼栋的数据 · 联网后自动重试"
+                    if (allRooms.size < ScheduleRepository.SNAPSHOT_COMPLETE_MIN_ROOMS) {
+                        // 残缺快照（旧版分页残留）缺楼很常见：照实说，别让人以为"没有排课信息"
+                        "本地快照不完整（仅 ${allRooms.size} 间，可能缺所选楼栋）· 联网后自动重试"
+                    } else {
+                        "本地快照里没有所选楼栋的数据 · 联网后自动重试"
+                    }
                 } else {
                     noticeOf(it.lastFetchedAt)
                 },
@@ -812,6 +726,7 @@ class RoomViewModel : ViewModel() {
      */
     private fun showNoSnapshotNotice(text: String) {
         allRooms = emptyList()
+        allRawRows = emptyList()
         _state.update {
             it.copy(
                 loading = false,
@@ -929,14 +844,16 @@ class RoomViewModel : ViewModel() {
 
         /** 过滤后少于这个数就自动续页 */
         const val MIN_VISIBLE = 15
-
-        /** 预取天数：今天 ~ 今天+3（与保留窗口"昨天~今天+5"配套） */
-        const val PREFETCH_DAYS = 3
-
-        /**
-         * 快照"完整"的最少教室数：全量校园远超此数；UI 分页只落第一页（30 间）
-         * 会被判为不完整并重新全量拉取（2026-11-16 实测的残缺快照根源）。
-         */
-        const val SNAPSHOT_COMPLETE_MIN_ROOMS = 100
     }
 }
+
+/**
+ * UI 浏览路径的落库条件（纯函数，单测见 RoomSnapshotPanelTest）：
+ * 无楼栋筛选且**真的翻到最后一页**（小校区教室少也算完整）。
+ * 预取/手动保存走 RoomPrefetch 的分批管线，不经过这里。
+ */
+internal fun shouldSaveSnapshotOnBrowse(
+    buildingFilterEmpty: Boolean,
+    page: Int,
+    totalPages: Int,
+): Boolean = buildingFilterEmpty && totalPages > 0 && page >= totalPages

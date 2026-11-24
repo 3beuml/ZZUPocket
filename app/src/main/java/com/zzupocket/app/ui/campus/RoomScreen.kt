@@ -736,6 +736,37 @@ private fun FilterSheet(
     }
 }
 
+/**
+ * 该日期的面板展示口径：多校区时取间数最多的一组（单校区场景即唯一一组）。
+ * （纯函数，单测见 RoomSnapshotPlanTest。）
+ */
+internal fun snapshotSummaryFor(
+    snapshots: List<com.zzupocket.app.data.db.RoomSnapshotSummary>,
+    date: java.time.LocalDate,
+): com.zzupocket.app.data.db.RoomSnapshotSummary? =
+    snapshots.filter { runCatching { java.time.LocalDate.parse(it.date) }.getOrNull() == date }
+        .maxByOrNull { it.rooms }
+
+/** "已保存"行的状态文案（纯函数）：完整标抓取日期，残缺标间数，让"部分保存"自己说话 */
+internal fun snapshotSavedLabel(rooms: Int, fetchedAt: Long): String {
+    // fetchedAt<=0（无行/异常）不带日期，别显示 1970
+    val day = if (fetchedAt > 0) {
+        runCatching {
+            java.time.Instant.ofEpochMilli(fetchedAt)
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                .format(java.time.format.DateTimeFormatter.ofPattern("M-d"))
+        }.getOrDefault("")
+    } else {
+        ""
+    }
+    val atDay = if (day.isBlank()) "" else " · $day 抓"
+    return if (rooms >= com.zzupocket.app.data.repo.ScheduleRepository.SNAPSHOT_COMPLETE_MIN_ROOMS) {
+        "已保存$atDay"
+    } else {
+        "已保存部分 · ${rooms}间$atDay"
+    }
+}
+
 /** 滑到接近底部就请求下一页 */
 private fun derivedLoadMore(state: LazyListState) = derivedStateOf {
     val last = state.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
@@ -815,11 +846,17 @@ private fun LocalSnapshotSection(
                     )
                     Spacer(Modifier.weight(1f))
                     when {
-                        saved -> Text(
-                            "已保存",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        saved -> {
+                            // 诚实标注：完整快照（≥SNAPSHOT_COMPLETE_MIN_ROOMS）显示抓取日期；
+                            // 残缺（旧版分页残留/抓取中断留下的部分快照）标"部分 N 间"，
+                            // 不再让"已保存"冒充完整——那正是 2026-11-24"以为存完了实际没存完"的教训
+                            val summary = snapshotSummaryFor(snapshots, d)
+                            Text(
+                                text = snapshotSavedLabel(summary?.rooms ?: 0, summary?.fetchedAt ?: 0L),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         saving -> Text(
                             "正在保存…",
                             style = MaterialTheme.typography.labelSmall,

@@ -322,6 +322,13 @@ interface RoomOccupancyDao {
     @Query("DELETE FROM room_occupancy WHERE date = :date AND campusId = :campusId")
     suspend fun deleteByDateAndCampus(date: String, campusId: Long)
 
+    /** 分批落库前先清掉同一天同校区**本批楼栋**的旧行（绝不 replace 整天，防批间互删） */
+    @Query(
+        "DELETE FROM room_occupancy WHERE date = :date AND campusId = :campusId " +
+            "AND buildingId IN (:buildingIds)",
+    )
+    suspend fun deleteByDateCampusBuildings(date: String, campusId: Long, buildingIds: List<Long>)
+
     /** 只保留 [minDate, maxDate] 窗口内的快照（空教室保留 7 天用） */
     @Query("DELETE FROM room_occupancy WHERE date < :minDate OR date > :maxDate")
     suspend fun pruneOutside(minDate: String, maxDate: String)

@@ -23,6 +23,9 @@ import com.zzupocket.app.data.repo.ScheduleRepository
 import com.zzupocket.app.core.net.HttpClients
 import com.zzupocket.app.focus.PomodoroEngine
 import com.zzupocket.app.focus.PomodoroNotifications
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 
 /**
@@ -38,6 +41,18 @@ object AppGraph {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+    }
+
+    /**
+     * 应用级协程作用域：给"离开页面也要跑完"的后台任务用（空教室快照预取）。
+     *
+     * 为什么不用 viewModelScope：预取跑一半用户翻出页面，作用域即被取消——
+     * 分批管线"逐批落库"的设计本可保住已完成批，但"补全其余批"就只剩下次进页了；
+     * 放 app scope 让一轮预取完整跑完。进程被杀属尽力而为，下次进页按批自愈。
+     * （先例：UpdateCenter 自带 scope 的模式，AppUpdate.kt。）
+     */
+    val applicationScope: CoroutineScope by lazy {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     /**

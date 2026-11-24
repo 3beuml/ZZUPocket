@@ -748,13 +748,57 @@ class ScheduleRepository(
             // 今天起 6 天）。昨天也要留 —— 断网时翻回去能看"昨天此时"的占用。
             // ⚠️ 必须按**今天**算，不能按"这次抓取的日期"算 —— 否则切到未来某天抓一次，
             // 会把今天的快照顺手删掉（旧实现正是这样）。
-            run {
-                val today = java.time.LocalDate.now()
-                db.roomOccupancyDao().pruneOutside(
-                    minDate = today.minusDays(1).toString(),
-                    maxDate = today.plusDays(ROOM_KEEP_DAYS - 2L).toString(),
-                )
-            }
+            pruneOutsideRetentionWindow()
+        }
+    }
+
+    /** 保留窗口清理：只保留 [昨天, 今天+ROOM_KEEP_DAYS-2]；调用方须在事务内 */
+    private suspend fun pruneOutsideRetentionWindow() {
+        val today = java.time.LocalDate.now()
+        db.roomOccupancyDao().pruneOutside(
+            minDate = today.minusDays(1).toString(),
+            maxDate = today.plusDays(ROOM_KEEP_DAYS - 2L).toString(),
+        )
+    }
+
+    /**
+     * 分批落库：某一天、某校区、**某一批楼栋**的占用快照（全量分批管线用）。
+     *
+     * ⚠️ 事务内只删/写**本批楼栋**的行 —— 整天 replace 会把其他批已落库的行删掉，
+     * 2026-11-11"预取每页互相覆盖"的教训在批粒度上同样成立。各批都落库后
+     * 该天就是完整快照；中途断网时已完成批（核心楼在最前）保留。
+     *
+     * 空结果不写：把好数据删了又没有替代行等于误删（空响应多为瞬态），
+     * 该批留给调用方标成"未完成"、下次重试。
+     */
+    suspend fun saveRoomSnapshotBatch(
+        date: String,
+        campusId: Long,
+        buildingIds: List<Long>,
+        rows: List<RoomCacheRow>,
+        fetchedAt: Long = System.currentTimeMillis(),
+    ) {
+        if (buildingIds.isEmpty() || rows.isEmpty()) return
+        db.withTransaction {
+            db.roomOccupancyDao().deleteByDateCampusBuildings(date, campusId, buildingIds)
+            db.roomOccupancyDao().upsertAll(
+                rows.map { r ->
+                    RoomOccupancyEntity(
+                        date = date,
+                        roomId = r.roomId,
+                        campusId = campusId,
+                        code = r.code,
+                        buildingId = r.buildingId,
+                        buildingName = r.buildingName,
+                        campusName = r.campusName,
+                        occupations = r.occupations.joinToString(",") {
+                            "${it.startTime}-${it.endTime}"
+                        },
+                        fetchedAt = fetchedAt,
+                    )
+                },
+            )
+            pruneOutsideRetentionWindow()
         }
     }
 
@@ -763,6 +807,12 @@ class ScheduleRepository(
         val rows = db.roomOccupancyDao().byDateAndCampus(date, campusId)
         return rowsToSnapshot(date, rows)
     }
+
+    /** 某天某校区快照里各楼栋最后一次抓取时间（楼栋 → max(fetchedAt)）；没有该楼行则不在 map 里 */
+    suspend fun roomSnapshotFetchedAtByBuilding(date: String, campusId: Long): Map<Long, Long> =
+        db.roomOccupancyDao().byDateAndCampus(date, campusId)
+            .groupBy { it.buildingId }
+            .mapValues { (_, rows) -> rows.maxOf { it.fetchedAt } }
 
     /** 本地快照清单（诊断页"空教室本地快照"卡）：哪几天有、各存了多少间/多少栋 */
     suspend fun roomSnapshotSummary(): List<com.zzupocket.app.data.db.RoomSnapshotSummary> =
@@ -896,8 +946,16 @@ class ScheduleRepository(
         // v4：同课程同时间的理论/实验使用不同主键，重拉一次恢复旧版本被覆盖的记录。
         const val CACHE_VERSION = 4
 
-        /** 空教室快照保留天数（今天 + 往后 6 天） */
+        /** 空教室快照保留天数（昨天 1 天 + 今天起 6 天） */
         const val ROOM_KEEP_DAYS = 7
+
+        /**
+         * 快照"完整"的最少教室数：全量校园远超此数；少于它视为残缺
+         * （2026-11-16/24 实测：UI 分页只落第一页 30 间）。
+         * 纯启发式——只用于面板标注与补全跳过判定；分批管线落库的都是
+         * "完整才落库"的结果。
+         */
+        const val SNAPSHOT_COMPLETE_MIN_ROOMS = 100
 
         private const val TAG_GRID = "ScheduleGrid"
 
