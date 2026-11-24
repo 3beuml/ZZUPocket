@@ -116,6 +116,17 @@ fun NewsScreen(
     var scrollToTopWhenApplied by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
+    // 筛选条件实际变化后回到顶部；首次进入或单纯重组不改变用户当前位置。
+    var previousFilter by remember { mutableStateOf<NewsFeedFilter?>(null) }
+    LaunchedEffect(state.filter) {
+        val previous = previousFilter
+        previousFilter = state.filter
+        if (previous != null && previous != state.filter) {
+            withFrameNanos { }
+            listState.scrollToItem(0)
+        }
+    }
+
     // 首屏（缓存或第一次拉取）不播放入场动画；等第一个列表落位一帧后再开启，
     // 之后的刷新、点「有新新闻」才有淡入/上移。
     var animateItems by remember { mutableStateOf(false) }
@@ -439,13 +450,20 @@ private fun NewsFilterSheet(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 NewsSortMode.entries.forEach { mode ->
                     FilterChip(
-                        selected = filter.sortMode == mode,
+                        selected = filter.effectiveSortMode == mode,
                         onClick = { onSortModeChange(mode) },
                         label = { Text(mode.label) },
-                        enabled = mode == NewsSortMode.DATE || filter.topics.isNotEmpty(),
+                        enabled = mode != NewsSortMode.RELEVANCE || filter.canPrioritizeFollowed,
                         modifier = Modifier.height(36.dp),
                     )
                 }
+            }
+            if (!filter.canPrioritizeFollowed) {
+                Text(
+                    "选择关注主题后可使用「关注优先」。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Text(
                 "关注内容",
@@ -487,8 +505,10 @@ private fun NewsFilterSheet(
                                 "未选主题时显示全部资讯"
                             } else if (filter.onlyFollowed) {
                                 "隐藏无关资讯，只显示所选主题"
-                            } else {
+                            } else if (filter.effectiveSortMode == NewsSortMode.RELEVANCE) {
                                 "相关资讯优先，其他资讯仍然保留"
+                            } else {
+                                "按发布时间排列，严格筛选仍可单独开启"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -27,14 +27,14 @@ class NewsPrefsStore(private val context: Context) {
     }
 
     suspend fun setFilter(filter: NewsFeedFilter) {
-        context.newsDataStore.edit { prefs -> prefs.writeFilter(filter) }
+        context.newsDataStore.edit { prefs -> prefs.writeFilter(filter.normalized()) }
     }
 
     /** 在一次 edit 内读取最新配置，快速连点不会互相覆盖。 */
     suspend fun updateFilter(transform: (NewsFeedFilter) -> NewsFeedFilter) {
         context.newsDataStore.edit { prefs ->
             val current = readFilter(prefs, interestsKey, topicsKey, onlyFollowedKey, sortModeKey)
-            prefs.writeFilter(transform(current))
+            prefs.writeFilter(transform(current).normalized())
         }
     }
 
@@ -62,7 +62,7 @@ class NewsPrefsStore(private val context: Context) {
                 }.toSet()
             }
             val sortMode = NewsSortMode.entries.firstOrNull { it.name == prefs[sortModeKey] } ?: NewsSortMode.DATE
-            return NewsFeedFilter(topics, prefs[onlyFollowedKey] == true, sortMode)
+            return NewsFeedFilter(topics, prefs[onlyFollowedKey] == true, sortMode).normalized()
         }
     }
 }

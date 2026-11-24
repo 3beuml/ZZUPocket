@@ -3,6 +3,11 @@ package com.zzupocket.app.ui.nav
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -52,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -92,6 +98,7 @@ import com.zzupocket.app.ui.settings.AppearanceScreen
 import com.zzupocket.app.ui.schedule.WallpaperLayers
 import com.zzupocket.app.ui.schedule.rememberScheduleBackground
 import com.zzupocket.app.ui.today.TodayScreen
+import kotlinx.coroutines.CancellationException
 
 enum class Destination(
     val route: String,
@@ -397,7 +404,8 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                     val openOriginal: (String) -> Unit = { url ->
                         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                     }
-                    if (newsDetailArticle == null) {
+                    Box(Modifier.fillMaxSize()) {
+                        // 列表始终留在组合中：打开详情只覆盖，不销毁 LazyColumn/滚动位置。
                         NewsScreen(
                             state = state,
                             onToggleTopic = vm::toggleTopic,
@@ -407,11 +415,12 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                             onApplyPending = vm::applyPendingNews,
                             onResetFilters = vm::resetFilters,
                             onClearFilters = vm::clearFilters,
-                            onOpenArticle = {
+                            onOpenArticle = { article ->
                                 detailError = null
-                                detailLoading = false
+                                // 首帧就进入加载态，避免"空正文渲染一帧再显示加载中"。
+                                detailLoading = article.body.isBlank()
                                 detailReloadKey = 0
-                                newsDetailArticle = it
+                                newsDetailArticle = article
                             },
                             onOpenOriginal = { openOriginal(it.url) },
                             onBack = null,
@@ -425,56 +434,95 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                                 }
                             },
                             onDismissAiOverview = vm::clearAiOverview,
-                        )
-                    } else {
-                        val article = newsDetailArticle!!
-                        // 列表的匹配分/分类变化也同步到详情；正文只在切换文章时请求一次。
-                        // 首屏预取可能比用户点开更快地补上正文/要点；这里合并最新快照，
-                        // 避免详情页重复请求，也避免"列表已有摘要、详情却是空的"。
-                        val displayed = state.articles.firstOrNull { it.id == article.id }?.let { matched ->
-                            article.copy(
-                                matchScore = matched.matchScore,
-                                matchReasons = matched.matchReasons,
-                                category = matched.category,
-                                body = matched.body.ifBlank { article.body },
-                                excerpt = matched.excerpt.ifBlank { article.excerpt },
-                                keyPoints = matched.keyPoints.ifEmpty { article.keyPoints },
-                                eventDate = matched.eventDate ?: article.eventDate,
-                                eventPlace = matched.eventPlace ?: article.eventPlace,
-                            )
-                        } ?: article
-                        val ai = aiDetails[article.id]
-                        NewsDetailScreen(
-                            article = displayed,
-                            loading = detailLoading,
-                            error = detailError,
-                            aiConfigured = aiConfigured,
-                            aiSummary = ai?.text,
-                            aiLoading = ai?.loading == true,
-                            aiError = ai?.error,
-                            aiModel = ai?.model.orEmpty(),
-                            onGenerateAi = {
-                                if (aiConfigured) {
-                                    vm.generateAiDetail(displayed)
-                                } else {
-                                    navController.navigate(ROUTE_AI_PROVIDER)
-                                }
+                            modifier = if (newsDetailArticle != null) {
+                                Modifier.clearAndSetSemantics { }
+                            } else {
+                                Modifier
                             },
-                            onOpenAiSettings = { navController.navigate(ROUTE_AI_PROVIDER) },
-                            onRetryDetail = { detailReloadKey++ },
-                            onBack = { newsDetailArticle = null },
-                            onOpenOriginal = openOriginal,
                         )
-                        LaunchedEffect(article.id, detailReloadKey) {
-                            if (article.body.isNotBlank()) return@LaunchedEffect
-                            detailLoading = true
-                            detailError = null
-                            try {
-                                newsDetailArticle = vm.detail(article)
-                            } catch (e: Exception) {
-                                detailError = e.message ?: "正文加载失败"
-                            } finally {
-                                detailLoading = false
+                        AnimatedVisibility(
+                            visible = newsDetailArticle != null,
+                            enter = fadeIn(tween(180)) +
+                                slideInVertically(
+                                    animationSpec = tween(180),
+                                    initialOffsetY = { it / 12 },
+                                ),
+                            // 返回立即露出仍在组合中的列表，避免退场过程与底部导航栏抢帧。
+                            exit = ExitTransition.None,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            val article = newsDetailArticle ?: return@AnimatedVisibility
+                            // 列表的匹配分/分类变化也同步到详情；正文只在切换文章时请求一次。
+                            // 首屏预取可能比用户点开更快地补上正文/要点；这里合并最新快照，
+                            // 避免详情页重复请求，也避免"列表已有摘要、详情却是空的"。
+                            val displayed = state.articles.firstOrNull { it.id == article.id }?.let { matched ->
+                                article.copy(
+                                    matchScore = matched.matchScore,
+                                    matchReasons = matched.matchReasons,
+                                    category = matched.category,
+                                    body = matched.body.ifBlank { article.body },
+                                    excerpt = matched.excerpt.ifBlank { article.excerpt },
+                                    keyPoints = matched.keyPoints.ifEmpty { article.keyPoints },
+                                    eventDate = matched.eventDate ?: article.eventDate,
+                                    eventPlace = matched.eventPlace ?: article.eventPlace,
+                                )
+                            } ?: article
+                            val ai = aiDetails[article.id]
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.surface),
+                            ) {
+                                // 详情完全盖住列表，空白区域的点按/滑动也不能漏给后面的列表。
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .pointerInput(Unit) { detectTapGestures { } },
+                                )
+                                NewsDetailScreen(
+                                    article = displayed,
+                                    loading = detailLoading,
+                                    error = detailError,
+                                    aiConfigured = aiConfigured,
+                                    aiSummary = ai?.text,
+                                    aiLoading = ai?.loading == true,
+                                    aiError = ai?.error,
+                                    aiModel = ai?.model.orEmpty(),
+                                    onGenerateAi = {
+                                        if (aiConfigured) {
+                                            vm.generateAiDetail(displayed)
+                                        } else {
+                                            navController.navigate(ROUTE_AI_PROVIDER)
+                                        }
+                                    },
+                                    onOpenAiSettings = { navController.navigate(ROUTE_AI_PROVIDER) },
+                                    onRetryDetail = { detailReloadKey++ },
+                                    onBack = { newsDetailArticle = null },
+                                    onOpenOriginal = openOriginal,
+                                )
+                            }
+                            LaunchedEffect(article.id, detailReloadKey) {
+                                if (article.body.isNotBlank()) {
+                                    detailLoading = false
+                                    return@LaunchedEffect
+                                }
+                                detailLoading = true
+                                detailError = null
+                                try {
+                                    val loaded = vm.detail(article)
+                                    // 用户在请求期间已经返回时，不能把详情重新打开。
+                                    if (newsDetailArticle?.id == article.id) {
+                                        newsDetailArticle = loaded
+                                    }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    detailError = e.message ?: "正文加载失败"
+                                } finally {
+                                    if (newsDetailArticle?.id == article.id) {
+                                        detailLoading = false
+                                    }
+                                }
                             }
                         }
                     }

@@ -31,7 +31,7 @@ object NewsFeedPolicy {
     }.filter { article ->
         !filter.onlyFollowed || filter.topics.isEmpty() || article.matchedTopics.isNotEmpty()
     }.sortedWith(
-        if (filter.sortMode == NewsSortMode.RELEVANCE) {
+        if (filter.effectiveSortMode == NewsSortMode.RELEVANCE) {
             compareByDescending<NewsArticle> { it.matchScore }
                 .thenByDescending { it.publishedAt }
                 .thenByDescending { it.id }

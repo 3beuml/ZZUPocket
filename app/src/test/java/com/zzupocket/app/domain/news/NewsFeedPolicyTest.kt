@@ -38,6 +38,17 @@ class NewsFeedPolicyTest {
     }
 
     @Test
+    fun `空主题时关注优先仍按时间排序`() {
+        val newestOther = other.copy(id = "newest", publishedAt = "2026-11-24")
+        val oldestCompetition = competition.copy(id = "oldest", publishedAt = "2026-11-21")
+        val result = NewsFeedPolicy.build(
+            listOf(oldestCompetition, newestOther, career),
+            NewsFeedFilter(emptySet(), sortMode = NewsSortMode.RELEVANCE),
+        )
+        assertEquals(listOf(newestOther.id, career.id, oldestCompetition.id), result.map(NewsArticle::id))
+    }
+
+    @Test
     fun `严格模式按多主题并集过滤且结果不重复`() {
         val filter = NewsFeedFilter(setOf(NewsTopic.COMPETITION, NewsTopic.AI), onlyFollowed = true)
         val aiCompetition = competition.copy(title = "人工智能创新大赛")

@@ -117,13 +117,9 @@ class NewsViewModel : ViewModel() {
 
     fun toggleTopic(topic: NewsTopic) {
         val current = filterOverride.value ?: state.value.filter
-        filterOverride.value = current.copy(
-            topics = if (topic in current.topics) current.topics - topic else current.topics + topic,
-        )
+        filterOverride.value = current.toggleTopic(topic)
         viewModelScope.launch {
-            prefs.updateFilter { saved ->
-                saved.copy(topics = if (topic in saved.topics) saved.topics - topic else saved.topics + topic)
-            }
+            prefs.updateFilter { saved -> saved.toggleTopic(topic) }
             filterOverride.value = null
         }
     }
@@ -139,9 +135,9 @@ class NewsViewModel : ViewModel() {
 
     fun setSortMode(sortMode: NewsSortMode) {
         val current = filterOverride.value ?: state.value.filter
-        filterOverride.value = current.copy(sortMode = sortMode)
+        filterOverride.value = current.withSortMode(sortMode)
         viewModelScope.launch {
-            prefs.updateFilter { it.copy(sortMode = sortMode) }
+            prefs.updateFilter { it.withSortMode(sortMode) }
             filterOverride.value = null
         }
     }

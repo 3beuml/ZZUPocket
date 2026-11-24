@@ -3,6 +3,7 @@ package com.zzupocket.app.ui.news
 import com.zzupocket.app.domain.news.NewsFeedFilter
 import com.zzupocket.app.domain.news.NewsSortMode
 import com.zzupocket.app.domain.news.NewsTopic
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,9 +21,34 @@ class NewsFilterStateTest {
     }
 
     @Test
-    fun `严格模式和关注优先各自都会启用筛选状态`() {
+    fun `严格模式单独启用筛选状态`() {
         assertTrue(NewsFeedFilter(onlyFollowed = true).isActive)
-        assertTrue(NewsFeedFilter(sortMode = NewsSortMode.RELEVANCE).isActive)
+    }
+
+    @Test
+    fun `无主题时关注优先置灰并归一为按时间`() {
+        val filter = NewsFeedFilter(sortMode = NewsSortMode.RELEVANCE)
+        assertFalse(filter.canPrioritizeFollowed)
+        assertFalse(filter.isActive)
+        assertEquals(NewsSortMode.DATE, filter.effectiveSortMode)
+        assertEquals(NewsSortMode.DATE, filter.normalized().sortMode)
+        assertEquals(filter, filter.withSortMode(NewsSortMode.RELEVANCE))
+    }
+
+    @Test
+    fun `有主题时关注优先可启用`() {
+        val filter = NewsFeedFilter(setOf(NewsTopic.AI), sortMode = NewsSortMode.RELEVANCE)
+        assertTrue(filter.canPrioritizeFollowed)
+        assertTrue(filter.isActive)
+        assertEquals(NewsSortMode.RELEVANCE, filter.effectiveSortMode)
+    }
+
+    @Test
+    fun `取消最后一个主题时同时回退按时间`() {
+        val filter = NewsFeedFilter(setOf(NewsTopic.AI), sortMode = NewsSortMode.RELEVANCE).toggleTopic(NewsTopic.AI)
+        assertTrue(filter.topics.isEmpty())
+        assertEquals(NewsSortMode.DATE, filter.sortMode)
+        assertFalse(filter.isActive)
     }
 
     @Test

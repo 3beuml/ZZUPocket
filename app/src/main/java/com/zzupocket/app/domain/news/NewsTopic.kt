@@ -41,6 +41,24 @@ data class NewsFeedFilter(
     val onlyFollowed: Boolean = false,
     val sortMode: NewsSortMode = NewsSortMode.DATE,
 ) {
+    val canPrioritizeFollowed: Boolean
+        get() = topics.isNotEmpty()
+
+    /** 没有关注主题时，关注优先没有可排序的对象，统一落回按时间。 */
+    val effectiveSortMode: NewsSortMode
+        get() = if (canPrioritizeFollowed) sortMode else NewsSortMode.DATE
+
     val isActive: Boolean
-        get() = topics.isNotEmpty() || onlyFollowed || sortMode != NewsSortMode.DATE
+        get() = canPrioritizeFollowed || onlyFollowed || effectiveSortMode != NewsSortMode.DATE
+
+    fun normalized(): NewsFeedFilter =
+        if (sortMode == effectiveSortMode) this else copy(sortMode = effectiveSortMode)
+
+    fun toggleTopic(topic: NewsTopic): NewsFeedFilter = copy(
+        topics = if (topic in topics) topics - topic else topics + topic,
+    ).normalized()
+
+    fun withSortMode(mode: NewsSortMode): NewsFeedFilter =
+        if (mode == NewsSortMode.RELEVANCE && !canPrioritizeFollowed) this
+        else copy(sortMode = mode).normalized()
 }
