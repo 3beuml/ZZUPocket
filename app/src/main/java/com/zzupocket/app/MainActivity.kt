@@ -3,6 +3,7 @@ package com.zzupocket.app
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -15,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.data.prefs.DarkMode
 import com.zzupocket.app.data.prefs.UiPrefs
+import com.zzupocket.app.reminder.ClassReminderScheduler
 import com.zzupocket.app.ui.nav.AppNav
 import com.zzupocket.app.ui.nav.AppRoutes
 import com.zzupocket.app.ui.theme.ZZUPocketTheme
@@ -34,6 +36,9 @@ class MainActivity : ComponentActivity() {
      */
     private var widgetRoute by mutableStateOf<String?>(null)
     private var routeToken by mutableStateOf(0)
+
+    /** 回前台重排提醒的限流时间戳：60 秒内多次 onResume 只排一次，省掉重复的全量扫描 */
+    private var lastReminderResumeUptime = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,6 +105,18 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         consumeWidgetRoute(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // App 回到前台时重排一次课程提醒：闹钟可能被 ROM 回收、课表可能在后台更新，
+        // 这也是国产省电策略下最廉价的一道补偿（无常驻服务）。
+        // 60 秒限流：切 tab / 锁屏解锁会频繁触发 onResume，不必每次都重排。
+        val uptime = SystemClock.elapsedRealtime()
+        if (uptime - lastReminderResumeUptime >= 60_000L) {
+            lastReminderResumeUptime = uptime
+            ClassReminderScheduler.rescheduleAsync(this)
+        }
     }
 
     private fun consumeWidgetRoute(intent: Intent?) {

@@ -79,6 +79,7 @@ import com.zzupocket.app.ui.schedule.CourseOverviewScreen
 import com.zzupocket.app.ui.schedule.DisplaySettingsScreen
 import com.zzupocket.app.ui.schedule.ScheduleScreen
 import com.zzupocket.app.ui.settings.AppearanceScreen
+import com.zzupocket.app.ui.settings.ClassReminderSettingsScreen
 import com.zzupocket.app.ui.schedule.WallpaperLayers
 import com.zzupocket.app.ui.schedule.rememberScheduleBackground
 import com.zzupocket.app.ui.today.TodayScreen
@@ -117,6 +118,7 @@ private const val ROUTE_LIB_RECORDS = "library_records"
 private const val ROUTE_ABOUT = "about"
 private const val ROUTE_APPEARANCE = "appearance"
 private const val ROUTE_WIDGET_SETTINGS = "widget_settings"
+private const val ROUTE_CLASS_REMINDER = "class_reminder"
 
 /** "重新裁剪"时用这个占位值代替相册 URI */
 private const val CROP_SOURCE_SAVED = "saved"
@@ -273,6 +275,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                         onOpenAppearance = { navController.navigate(ROUTE_APPEARANCE) },
                         onOpenWidgetSettings = { navController.navigate(ROUTE_WIDGET_SETTINGS) },
+                        onOpenClassReminder = { navController.navigate(ROUTE_CLASS_REMINDER) },
                     )
                 }
                 composable(ROUTE_GATEWAY) {
@@ -286,6 +289,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                 }
                 composable(ROUTE_WIDGET_SETTINGS) {
                     WidgetSettingsScreen(onBack = { navController.popBackStack() })
+                }
+                composable(ROUTE_CLASS_REMINDER) {
+                    ClassReminderSettingsScreen(onBack = { navController.popBackStack() })
                 }
                 composable(ROUTE_ABOUT) {
                     AboutScreen(onBack = { navController.popBackStack() })

@@ -187,6 +187,11 @@ object AppGraph {
 
     val pomodoroNotifications: PomodoroNotifications by lazy { PomodoroNotifications(appContext) }
 
+    /** 课程提醒：普通通知（默认提示音，不抢占闹铃） */
+    val classReminderNotifications: com.zzupocket.app.reminder.ClassReminderNotifications by lazy {
+        com.zzupocket.app.reminder.ClassReminderNotifications(appContext)
+    }
+
     val pomodoroEngine: PomodoroEngine by lazy {
         PomodoroEngine(
             context = appContext,
