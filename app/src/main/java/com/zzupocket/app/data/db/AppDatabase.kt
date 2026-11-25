@@ -53,6 +53,30 @@ data class KvCacheEntity(
     val ttlSeconds: Long,
 )
 
+/**
+ * 资讯雷达的本地快照。
+ *
+ * 打开页面先读它再后台刷新；[body]、[keyPoints] 也缓存，避免每次点进详情都重新抓。
+ * 只存公开网页内容，不含任何登录态或个人信息。
+ */
+@Entity(tableName = "news_articles")
+data class NewsArticleEntity(
+    @androidx.room.PrimaryKey val id: String,
+    val title: String,
+    val url: String,
+    val publishedAt: String,
+    val section: String,
+    val publisher: String,
+    val excerpt: String,
+    val body: String,
+    val category: String,
+    /** JSON 字符串；为空时表示没有结构化要点 */
+    val keyPoints: String,
+    val eventDate: String?,
+    val eventPlace: String?,
+    val fetchedAt: Long,
+)
+
 // ── DAO ────────────────────────────────────────────────────────────────
 
 @Dao
@@ -111,6 +135,22 @@ interface KvCacheDao {
     suspend fun remove(key: String)
 }
 
+@Dao
+interface NewsArticleDao {
+
+    @Query("SELECT * FROM news_articles")
+    suspend fun all(): List<NewsArticleEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<NewsArticleEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: NewsArticleEntity)
+
+    @Query("DELETE FROM news_articles")
+    suspend fun clear()
+}
+
 // ── 数据库 ──────────────────────────────────────────────────────────────
 
 @Database(
@@ -128,8 +168,9 @@ interface KvCacheDao {
         TimetableSyncEntity::class,
         RoomOccupancyEntity::class,
         DisplayOverrideEntity::class,
+        NewsArticleEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -146,6 +187,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun timetableSyncDao(): TimetableSyncDao
     abstract fun roomOccupancyDao(): RoomOccupancyDao
     abstract fun displayOverrideDao(): DisplayOverrideDao
+    abstract fun newsArticleDao(): NewsArticleDao
 
     companion object {
         @Volatile
@@ -299,6 +341,24 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
+         * v11：资讯雷达本地快照。新表，不动旧数据。
+         *
+         * 打开雷达先读这张表，再后台刷新；正文/要点也在这里，避免每次点详情都重新抓。
+         */
+        internal val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `news_articles` (" +
+                        "`id` TEXT NOT NULL, `title` TEXT NOT NULL, `url` TEXT NOT NULL, " +
+                        "`publishedAt` TEXT NOT NULL, `section` TEXT NOT NULL, `publisher` TEXT NOT NULL, " +
+                        "`excerpt` TEXT NOT NULL, `body` TEXT NOT NULL, `category` TEXT NOT NULL, " +
+                        "`keyPoints` TEXT NOT NULL, `eventDate` TEXT, `eventPlace` TEXT, " +
+                        "`fetchedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+            }
+        }
+
+        /**
          * v8：course_sessions 加 `experiment` 列（issue #7）——print-data 补全的实验/见习排课
          * 要和 micro-server 主数据区分开。全是新列默认 0，不动旧数据。
          */
@@ -337,6 +397,7 @@ abstract class AppDatabase : RoomDatabase() {
                 MIGRATION_7_8,
                 MIGRATION_8_9,
                 MIGRATION_9_10,
+                MIGRATION_10_11,
             )
                 .build()
                 .also { instance = it }

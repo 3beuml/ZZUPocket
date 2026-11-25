@@ -3,4 +3,5 @@
      是否纳入备份由导入导出功能负责（本地数据以 JSON 导出为准）。 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="secure_prefs.xml" />
+    <exclude domain="sharedpref" path="ai_provider_prefs.xml" />
 </full-backup-content>

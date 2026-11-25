@@ -122,8 +122,6 @@ data class UiPrefs(
      * 这类补充信息。空态、错误、数值、状态不属于描述，任何情况下都不受它影响。
      */
     val showDescriptions: Boolean = true,
-    /** dock 上是否保留「专注」这一格 */
-    val showFocusInDock: Boolean = true,
     /** 小组件时间显示为节次（「第3-4节」）；false（默认）= 时刻（10:10-11:50） */
     val widgetTimeAsPeriod: Boolean = false,
     /**
@@ -247,7 +245,6 @@ class UiPrefsStore(context: Context) {
             darkTinted = p[KEY_DARK_TINTED] ?: false,
             // 老用户的 DataStore 里没有这个键 → 默认 true，不需要迁移
             showDescriptions = p[KEY_SHOW_DESCRIPTIONS] ?: true,
-            showFocusInDock = p[KEY_SHOW_FOCUS_IN_DOCK] ?: true,
             widgetTimeAsPeriod = p[KEY_WIDGET_TIME_AS_PERIOD] ?: false,
             widgetRowMode = p[KEY_WIDGET_ROW_MODE]?.takeIf { it.isNotBlank() } ?: "auto",
             widgetShowPlace = p[KEY_WIDGET_SHOW_PLACE] ?: true,
@@ -342,8 +339,6 @@ class UiPrefsStore(context: Context) {
 
     /** 「更多 → 界面 → 显示描述」；写入后 AppNav 根部的 CompositionLocal 立刻全树重组 */
     suspend fun setShowDescriptions(v: Boolean) = store.edit { p -> p[KEY_SHOW_DESCRIPTIONS] = v }
-
-    suspend fun setShowFocusInDock(v: Boolean) = store.edit { p -> p[KEY_SHOW_FOCUS_IN_DOCK] = v }
 
     /** 首页模块自定义（issue #19）：显示顺序 + 隐藏集合一起写 */
     suspend fun setTodayModules(order: List<String>, hidden: Set<String>) = store.edit { p ->
@@ -476,7 +471,6 @@ class UiPrefsStore(context: Context) {
         val KEY_WIDGET_FONT_TIER = stringPreferencesKey("widget_font_tier")
         val KEY_WIDGET_HEADER_STYLE = stringPreferencesKey("widget_header_style")
         val KEY_SHOW_DESCRIPTIONS = booleanPreferencesKey("show_descriptions")
-        val KEY_SHOW_FOCUS_IN_DOCK = booleanPreferencesKey("show_focus_in_dock")
 
         /** 旧的单槽位房间名（历史遗留）：已不再读写，留着只是没去动老用户的存储 */
         val KEY_LIGHT_ROOM_LABEL = stringPreferencesKey("light_room_label")

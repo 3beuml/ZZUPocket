@@ -11,7 +11,7 @@
 .cxx
 local.properties
 app/build/
-app/schemas/
+# Room schema 需要入库：androidTest 的 10→11 迁移测试要读取历史版本
 *.apk
 *.aab
 *.jks

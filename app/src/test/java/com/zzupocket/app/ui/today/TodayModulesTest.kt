@@ -59,6 +59,7 @@ class TodayModulesTest {
         assertEquals(
             listOf(
                 TodayModules.TODAY_MODULE_TIMELINE,
+                TodayModules.TODAY_MODULE_FOCUS,
                 TodayModules.TODAY_MODULE_CARD,
                 TodayModules.TODAY_MODULE_ELECTRICITY,
                 TodayModules.TODAY_MODULE_SCHEDULE,
@@ -67,6 +68,17 @@ class TodayModulesTest {
             ),
             layout.map { it.first },
         )
+    }
+
+    @Test
+    fun `专注不可隐藏且旧顺序会补到时间轴后`() {
+        val layout = TodayModules.resolved(
+            listOf(TodayModules.TODAY_MODULE_CARD, TodayModules.TODAY_MODULE_ELECTRICITY),
+            setOf(TodayModules.TODAY_MODULE_FOCUS),
+        )
+        assertEquals(TodayModules.TODAY_MODULE_TIMELINE, layout[0].first)
+        assertEquals(TodayModules.TODAY_MODULE_FOCUS, layout[1].first)
+        assertTrue(layout[1].second)
     }
 
     @Test

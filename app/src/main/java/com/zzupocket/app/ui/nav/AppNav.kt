@@ -1,6 +1,15 @@
 package com.zzupocket.app.ui.nav
 
+import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,11 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.CalendarMonth
-import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Today
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,15 +47,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -58,9 +75,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.data.prefs.UiPrefs
+import com.zzupocket.app.domain.news.NewsArticle
+import com.zzupocket.app.ui.news.NewsDetailScreen
+import com.zzupocket.app.ui.news.NewsScreen
+import com.zzupocket.app.ui.news.NewsViewModel
 import com.zzupocket.app.data.update.AppUpdate
 import com.zzupocket.app.data.update.UpdateCenter
 import com.zzupocket.app.ui.about.AboutScreen
+import com.zzupocket.app.ui.settings.AiProviderScreen
 import com.zzupocket.app.ui.settings.WidgetSettingsScreen
 import com.zzupocket.app.ui.theme.rememberEffectiveDark
 import com.zzupocket.app.ui.components.LocalShowDescriptions
@@ -82,6 +104,8 @@ import com.zzupocket.app.ui.settings.AppearanceScreen
 import com.zzupocket.app.ui.schedule.WallpaperLayers
 import com.zzupocket.app.ui.schedule.rememberScheduleBackground
 import com.zzupocket.app.ui.today.TodayScreen
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 
 enum class Destination(
     val route: String,
@@ -92,7 +116,7 @@ enum class Destination(
 ) {
     TODAY(AppRoutes.TODAY, "首页", Icons.Filled.Today, Icons.Outlined.Today),
     SCHEDULE(AppRoutes.SCHEDULE, "课表", Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
-    FOCUS(AppRoutes.FOCUS, "专注", Icons.Filled.Timer, Icons.Outlined.Timer),
+    NEWS(AppRoutes.NEWS, "雷达", Icons.Filled.Radar, Icons.Outlined.Radar),
     CAMPUS(AppRoutes.CAMPUS, "更多", Icons.Filled.Apps, Icons.Outlined.Apps),
 }
 
@@ -117,9 +141,21 @@ private const val ROUTE_LIB_RECORDS = "library_records"
 private const val ROUTE_ABOUT = "about"
 private const val ROUTE_APPEARANCE = "appearance"
 private const val ROUTE_WIDGET_SETTINGS = "widget_settings"
+private const val ROUTE_AI_PROVIDER = "ai_provider"
 
 /** "重新裁剪"时用这个占位值代替相册 URI */
 private const val CROP_SOURCE_SAVED = "saved"
+
+/**
+ * 资讯详情退场：跟随返回手势缩到 75%、压暗 30%、圆角 26dp、投影 24dp。
+ *
+ * 缩放锚点偏左、位移仍按整屏宽算，卡片会先"脱离"右边缘再整张抽走；
+ * 实机若觉得 75% 太小，先只调 [DETAIL_EXIT_SCALE]。
+ */
+private const val DETAIL_EXIT_SCALE = 0.75f
+private const val DETAIL_EXIT_DIM = 0.30f
+private val DETAIL_EXIT_RADIUS = 26.dp
+private val DETAIL_EXIT_SHADOW = 24.dp
 
 @Composable
 fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
@@ -128,10 +164,12 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
     val currentRoute = backStackEntry?.destination?.route
     val context = LocalContext.current
     val prefs by AppGraph.uiPrefsStore.flow.collectAsStateWithLifecycle(initialValue = UiPrefs())
-    val dockDestinations = Destination.entries.filter {
-        it != Destination.FOCUS || prefs.showFocusInDock
-    }
-    val showBottomBar = dockDestinations.any { it.route == currentRoute }
+    val dockDestinations = Destination.entries
+    // 资讯雷达是 tab，但文章详情是全屏页：详情打开时隐藏 dock，否则会压在正文上。
+    // 状态放在 NavHost 外面，才能参与 showBottomBar 的计算。
+    var newsDetailArticle by remember { mutableStateOf<NewsArticle?>(null) }
+    val showBottomBar = dockDestinations.any { it.route == currentRoute } &&
+        (currentRoute != Destination.NEWS.route || newsDetailArticle == null)
 
     /**
      * 切到某个 tab。
@@ -145,6 +183,8 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
      * 从专注页点今天又被弹回课表页）。对照组：正常从今天页点课表再点回来，一切正常。
      */
     fun switchTab(route: String) {
+        // 从雷达详情切走再回来，应该回到列表，而不是残留上一篇的详情。
+        newsDetailArticle = null
         navController.navigate(route) {
             popUpTo(navController.graph.findStartDestination().id) { saveState = true }
             launchSingleTop = true
@@ -180,10 +220,10 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
         version = prefs.backgroundVersion,
     )
     val transparentBar = wallpaperActive && wallpaper != null && prefs.wallpaperNavBar
-    // dock 胶囊的透明度：壁纸模式尊重"透明导航栏"偏好（更透），其余页面 0.5 ——
-    // 半透明 + 细描边 + 无阴影，是所有页面同一套配方：胶囊融进页面底色，
-    // 不再出现"一圈不是背景色的色带"（surfaceContainerHighest 实底 + 渐变衬底的教训）。
-    val dockAlpha = if (transparentBar) 0.35f else 0.5f
+    // dock 胶囊的透明度：壁纸模式尊重"透明导航栏"偏好（更透）；其余页面用接近实底。
+    // 实测 0.5 时，滚动到 dock 下方的卡片文字会透上来，和图标叠在一起像坏了；
+    // 0.97 只留极轻的玻璃感，基本不会干扰图标。壁纸模式仍保持 0.35。
+    val dockAlpha = if (transparentBar) 0.35f else 0.97f
     // dock 同样跟「生效深浅」同口径：深色非壁纸档直接用页面的 surface（保留颜色/
     // 对比度染色后也一致），无手工混合。rc6 又拆掉两处深色暗源：
     // ① 6dp 投影在深底上是一圈"更黑的晕"，深色非壁纸档降到 1dp tonal 微浮起；
@@ -247,6 +287,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenCard = { navController.navigate(ROUTE_CARD) },
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
                         onOpenRooms = { navController.navigate(ROUTE_ROOMS) },
+                        onOpenFocus = { navController.navigate(AppRoutes.FOCUS) },
                     )
                 }
                 composable(Destination.SCHEDULE.route) {
@@ -258,8 +299,11 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenDisplaySettings = { navController.navigate(ROUTE_DISPLAY) },
                     )
                 }
-                composable(Destination.FOCUS.route) {
-                    FocusScreen(onOpenStats = { navController.navigate(ROUTE_FOCUS_STATS) })
+                composable(AppRoutes.FOCUS) {
+                    FocusScreen(
+                        onBack = { navController.popBackStack() },
+                        onOpenStats = { navController.navigate(ROUTE_FOCUS_STATS) },
+                    )
                 }
                 composable(Destination.CAMPUS.route) {
                     CampusScreen(
@@ -270,6 +314,7 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                         onOpenCard = { navController.navigate(ROUTE_CARD) },
                         onOpenRooms = { navController.navigate(ROUTE_ROOMS) },
                         onOpenLibrary = { navController.navigate(ROUTE_LIBRARY) },
+                        onOpenAiProvider = { navController.navigate(ROUTE_AI_PROVIDER) },
                         onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                         onOpenAppearance = { navController.navigate(ROUTE_APPEARANCE) },
                         onOpenWidgetSettings = { navController.navigate(ROUTE_WIDGET_SETTINGS) },
@@ -289,6 +334,9 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                 }
                 composable(ROUTE_ABOUT) {
                     AboutScreen(onBack = { navController.popBackStack() })
+                }
+                composable(ROUTE_AI_PROVIDER) {
+                    AiProviderScreen(onBack = { navController.popBackStack() })
                 }
                 composable(
                     route = "$ROUTE_OVERVIEW/{semesterId}",
@@ -361,6 +409,188 @@ fun AppNav(initialRoute: String? = null, routeToken: Int = 0) {
                             navController.navigate(ROUTE_LIBRARY) { launchSingleTop = true }
                         },
                     )
+                }
+                composable(Destination.NEWS.route) { entry ->
+                    val vm: NewsViewModel = viewModel(entry)
+                    val state by vm.state.collectAsStateWithLifecycle()
+                    val aiConfigured by vm.aiConfigured.collectAsStateWithLifecycle()
+                    val aiDetails by vm.aiDetails.collectAsStateWithLifecycle()
+                    val aiOverview by vm.aiOverview.collectAsStateWithLifecycle()
+                    var detailLoading by remember { mutableStateOf(false) }
+                    var detailError by remember { mutableStateOf<String?>(null) }
+                    var detailReloadKey by remember { mutableStateOf(0) }
+                    // 详情返回手势进度：0 完全盖住列表，1 完全移出屏幕。
+                    val detailBackProgress = remember { Animatable(0f) }
+                    val backScope = rememberCoroutineScope()
+                    // 换文章或关掉详情时把进度归零，避免下一次打开带着上一张卡片的位移。
+                    LaunchedEffect(newsDetailArticle?.id) { detailBackProgress.snapTo(0f) }
+                    val openOriginal: (String) -> Unit = { url ->
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                    }
+                    Box(Modifier.fillMaxSize()) {
+                        // 列表始终留在组合中：打开详情只覆盖，不销毁 LazyColumn/滚动位置。
+                        NewsScreen(
+                            state = state,
+                            onToggleTopic = vm::toggleTopic,
+                            onOnlyFollowedChange = vm::setOnlyFollowed,
+                            onSortModeChange = vm::setSortMode,
+                            onRefresh = vm::refresh,
+                            onApplyPending = vm::applyPendingNews,
+                            onResetFilters = vm::resetFilters,
+                            onClearFilters = vm::clearFilters,
+                            onOpenArticle = { article ->
+                                detailError = null
+                                // 首帧就进入加载态，避免"空正文渲染一帧再显示加载中"。
+                                detailLoading = article.body.isBlank()
+                                detailReloadKey = 0
+                                newsDetailArticle = article
+                            },
+                            onOpenOriginal = { openOriginal(it.url) },
+                            onBack = null,
+                            isTab = true,
+                            aiOverview = aiOverview,
+                            onAiOverview = {
+                                if (aiConfigured) {
+                                    vm.generateAiOverview(state.articles)
+                                } else {
+                                    navController.navigate(ROUTE_AI_PROVIDER)
+                                }
+                            },
+                            onDismissAiOverview = vm::clearAiOverview,
+                            modifier = if (newsDetailArticle != null) {
+                                Modifier.clearAndSetSemantics { }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        AnimatedVisibility(
+                            visible = newsDetailArticle != null,
+                            enter = fadeIn(tween(180)) +
+                                slideInVertically(
+                                    animationSpec = tween(180),
+                                    initialOffsetY = { it / 12 },
+                                ),
+                            // 返回立即露出仍在组合中的列表，避免退场过程与底部导航栏抢帧。
+                            exit = ExitTransition.None,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            val article = newsDetailArticle ?: return@AnimatedVisibility
+                            // 列表的匹配分/分类变化也同步到详情；正文只在切换文章时请求一次。
+                            // 首屏预取可能比用户点开更快地补上正文/要点；这里合并最新快照，
+                            // 避免详情页重复请求，也避免"列表已有摘要、详情却是空的"。
+                            val displayed = state.articles.firstOrNull { it.id == article.id }?.let { matched ->
+                                article.copy(
+                                    matchScore = matched.matchScore,
+                                    matchReasons = matched.matchReasons,
+                                    category = matched.category,
+                                    body = matched.body.ifBlank { article.body },
+                                    excerpt = matched.excerpt.ifBlank { article.excerpt },
+                                    keyPoints = matched.keyPoints.ifEmpty { article.keyPoints },
+                                    eventDate = matched.eventDate ?: article.eventDate,
+                                    eventPlace = matched.eventPlace ?: article.eventPlace,
+                                )
+                            } ?: article
+                            val ai = aiDetails[article.id]
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    // 返回手势进度驱动整张详情右移、缩小并压暗，像卡片被抽走。
+                                    .graphicsLayer {
+                                        val p = detailBackProgress.value
+                                        val scale = 1f - (1f - DETAIL_EXIT_SCALE) * p
+                                        transformOrigin = TransformOrigin(0.42f, 0.48f)
+                                        translationX = size.width * p
+                                        scaleX = scale
+                                        scaleY = scale
+                                        shape = RoundedCornerShape(DETAIL_EXIT_RADIUS * p)
+                                        clip = true
+                                        shadowElevation = DETAIL_EXIT_SHADOW.toPx() * p
+                                    }
+                                    // 压暗在绘制阶段读进度，避免每帧重组。
+                                    .drawWithContent {
+                                        drawContent()
+                                        drawRect(
+                                            Color.Black,
+                                            alpha = DETAIL_EXIT_DIM * detailBackProgress.value,
+                                        )
+                                    }
+                                    .background(MaterialTheme.colorScheme.surface),
+                            ) {
+                                // 详情完全盖住列表，空白区域的点按/滑动也不能漏给后面的列表。
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .pointerInput(Unit) { detectTapGestures { } },
+                                )
+                                NewsDetailScreen(
+                                    article = displayed,
+                                    loading = detailLoading,
+                                    error = detailError,
+                                    aiConfigured = aiConfigured,
+                                    aiSummary = ai?.text,
+                                    aiLoading = ai?.loading == true,
+                                    aiError = ai?.error,
+                                    aiModel = ai?.model.orEmpty(),
+                                    onGenerateAi = {
+                                        if (aiConfigured) {
+                                            vm.generateAiDetail(displayed)
+                                        } else {
+                                            navController.navigate(ROUTE_AI_PROVIDER)
+                                        }
+                                    },
+                                    onOpenAiSettings = { navController.navigate(ROUTE_AI_PROVIDER) },
+                                    onRetryDetail = { detailReloadKey++ },
+                                    onBack = {
+                                        backScope.launch {
+                                            detailBackProgress.animateTo(1f, tween(160))
+                                            newsDetailArticle = null
+                                        }
+                                    },
+                                    onOpenOriginal = openOriginal,
+                                )
+                            }
+                            LaunchedEffect(article.id, detailReloadKey) {
+                                if (article.body.isNotBlank()) {
+                                    detailLoading = false
+                                    return@LaunchedEffect
+                                }
+                                detailLoading = true
+                                detailError = null
+                                try {
+                                    val loaded = vm.detail(article)
+                                    // 用户在请求期间已经返回时，不能把详情重新打开。
+                                    if (newsDetailArticle?.id == article.id) {
+                                        newsDetailArticle = loaded
+                                    }
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    detailError = e.message ?: "正文加载失败"
+                                } finally {
+                                    if (newsDetailArticle?.id == article.id) {
+                                        detailLoading = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 系统返回键/手势与页面返回按钮一致：先退回资讯列表，而不是直接退出雷达。
+                    // 手势进度驱动详情右移缩小；松手完成关闭，取消则弹回。
+                    PredictiveBackHandler(enabled = newsDetailArticle != null) { events ->
+                        try {
+                            events.collect { detailBackProgress.snapTo(it.progress) }
+                            detailBackProgress.animateTo(1f, tween(120))
+                            newsDetailArticle = null
+                        } catch (e: CancellationException) {
+                            backScope.launch {
+                                detailBackProgress.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+                                )
+                            }
+                            throw e
+                        }
+                    }
                 }
                 composable(ROUTE_LOGIN) {
                     LoginScreen(

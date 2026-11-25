@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import com.zzupocket.app.ui.components.GlassCard
+import com.zzupocket.app.ui.focus.TodayFocusCard
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,6 +91,7 @@ fun TodayScreen(
     onOpenCard: () -> Unit,
     onOpenLibrary: () -> Unit = {},
     onOpenRooms: () -> Unit = {},
+    onOpenFocus: () -> Unit = {},
     vm: TodayViewModel = viewModel(),
     timelineVm: TodayTimelineViewModel = viewModel(),
     cardVm: TodayCardViewModel = viewModel(),
@@ -180,6 +182,9 @@ fun TodayScreen(
                             onOpen = onOpenRooms,
                         )
 
+                    TodayModules.TODAY_MODULE_FOCUS ->
+                        TodayFocusCard(onOpenFocus = onOpenFocus)
+
                     TodayModules.TODAY_MODULE_ELECTRICITY ->
                         // ③ 宿舍电量（底部带"近 7 天"摘要行，完整的趋势图在电费页）
                         ElectricityCard(
@@ -231,7 +236,7 @@ private fun TodayModuleEditorSheet(
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text("自定义首页模块", style = MaterialTheme.typography.titleLarge)
             Text(
-                "「今天的时间轴」是首页核心，始终显示；其余模块可隐藏、可调序。",
+                "「今天的时间轴」和「专注」始终显示；其余模块可隐藏、可调序。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
@@ -262,11 +267,9 @@ private fun TodayModuleEditorSheet(
                         },
                         modifier = Modifier.weight(1f),
                     )
-                    // 上移/下移（时间轴恒在第一，不给它按钮）
-                    if (index > 1) {
-                        IconButton(onClick = {
-                            if (index > 1) items.move(index, index - 1)
-                        }) {
+                    // 上移/下移（时间轴恒在第一，不给它按钮；专注可调序）
+                    if (index > 0) {
+                        IconButton(onClick = { items.move(index, index - 1) }) {
                             Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "上移")
                         }
                     } else {

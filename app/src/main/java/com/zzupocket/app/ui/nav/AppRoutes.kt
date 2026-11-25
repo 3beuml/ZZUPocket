@@ -12,8 +12,11 @@ object AppRoutes {
     /** 底部导航的 tab */
     const val TODAY = "today"
     const val SCHEDULE = "schedule"
-    const val FOCUS = "focus"
+    const val NEWS = "news_radar"
     const val CAMPUS = "campus"
+
+    /** 原底栏 tab，现在从首页进入的普通子页 */
+    const val FOCUS = "focus"
 
     /** 「更多」里的子页（不是 tab，进去之后底部导航栏会隐藏） */
     const val ELECTRICITY = "electricity"

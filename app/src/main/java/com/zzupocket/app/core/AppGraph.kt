@@ -222,4 +222,18 @@ object AppGraph {
     val roomRepository: RoomRepository by lazy {
         RoomRepository(easClient, authRepository, db)
     }
+
+    /** 公开校园资讯：独立数据源，不依赖校园账号登录；Room 只缓存公开网页快照。 */
+    val newsRepository: com.zzupocket.app.data.news.NewsRepository by lazy {
+        com.zzupocket.app.data.news.NewsRepository(db)
+    }
+
+    val newsPrefsStore: com.zzupocket.app.data.prefs.NewsPrefsStore by lazy {
+        com.zzupocket.app.data.prefs.NewsPrefsStore(appContext)
+    }
+
+    /** AI 摘要配置：独立加密存储，不随校园账号登出清除。 */
+    val aiProviderStore: com.zzupocket.app.data.ai.AiProviderStore by lazy {
+        com.zzupocket.app.data.ai.AiProviderStore(appContext)
+    }
 }
