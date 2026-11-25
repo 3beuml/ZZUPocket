@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/3beuml/ZZUPocket?style=flat&label=release)](../../releases)
 [![Android](https://img.shields.io/badge/Android-12%2B-3ddc84?style=flat&logo=android&logoColor=white)](#构建)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-7f52ff?style=flat&logo=kotlin&logoColor=white)](#技术栈)
-[![Tests](https://img.shields.io/badge/unit%20tests-445-brightgreen?style=flat)](#参与贡献)
+[![Tests](https://img.shields.io/badge/unit%20tests-452-brightgreen?style=flat)](#参与贡献)
 
 > ⚠️ 本项目是非官方项目。
 > 接口来自公开网页的协议整理与社区项目经验，**随时可能失效或被学校调整**；
@@ -213,7 +213,7 @@
 3. **离线可用**：课表、专注记录、电费历史都是本地数据，断网也能看；
    教室占用、图书馆、校园卡需要联网。
 4. **课程提醒（可选，默认关）**：在「更多 → 学习空间 → 课程提醒」里打开，并设置提前分钟数。
-   首次打开会申请两项权限：
+   首次打开会引导两项权限：
    - **通知权限**：用来弹课程提醒，不发就不会显示；
    - **「闹钟和提醒」权限**（系统里叫法，即精确闹钟 `SCHEDULE_EXACT_ALARM`）：让提醒准时弹出。
      **不给也能用**，只是系统省电时可能延后几分钟；也一样不会往系统时钟的闹铃列表里加任何东西。

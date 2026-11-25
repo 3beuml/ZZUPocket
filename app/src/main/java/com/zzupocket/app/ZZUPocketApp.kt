@@ -3,6 +3,7 @@ package com.zzupocket.app
 import android.app.Application
 import com.zzupocket.app.core.AppGraph
 import com.zzupocket.app.data.work.EnergySamplingWorker
+import com.zzupocket.app.reminder.ClassReminderScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,7 +21,7 @@ class ZZUPocketApp : Application() {
 
         // 课程提醒：启动时重排一次（闹钟可能被 ROM 清掉、课表可能在别处更新过）。
         // 开关默认关；关着的时候 reschedule 只会撤销旧闹钟，不留任何后台唤醒。
-        com.zzupocket.app.reminder.ClassReminderScheduler.rescheduleAsync(this)
+        ClassReminderScheduler.rescheduleAsync(this)
 
         // 电量定时采样：学校不给历史用电量，只能靠按点采样差分算（尽力而为）
         EnergySamplingWorker.schedule(this)

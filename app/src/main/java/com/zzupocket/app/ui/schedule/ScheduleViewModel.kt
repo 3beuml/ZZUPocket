@@ -26,6 +26,7 @@ import com.zzupocket.app.domain.PlanSpec
 import com.zzupocket.app.domain.Semester
 import com.zzupocket.app.domain.Session
 import com.zzupocket.app.domain.WeekAlignment
+import com.zzupocket.app.reminder.ClassReminderScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -743,7 +744,7 @@ cacheNoticeNeedsLogin = expired,
             renderLocal(semester, null)
             // 课表数据变了：课程提醒的"下一节"要跟着重算（关着开关时只会撤旧闹钟）
             AppGraph.appContextOrNull()?.let {
-                com.zzupocket.app.reminder.ClassReminderScheduler.rescheduleAsync(it)
+                ClassReminderScheduler.rescheduleAsync(it)
             }
             return
         }
@@ -778,7 +779,7 @@ cacheNoticeNeedsLogin = expired,
             )
             // 后台同步完课表：重排课程提醒（无网络，只读刚落库的数据）
             AppGraph.appContextOrNull()?.let {
-                com.zzupocket.app.reminder.ClassReminderScheduler.rescheduleAsync(it)
+                ClassReminderScheduler.rescheduleAsync(it)
             }
         }
     }

@@ -23,6 +23,7 @@ import com.zzupocket.app.data.repo.ScheduleRepository
 import com.zzupocket.app.core.net.HttpClients
 import com.zzupocket.app.focus.PomodoroEngine
 import com.zzupocket.app.focus.PomodoroNotifications
+import com.zzupocket.app.reminder.ClassReminderNotifications
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -188,8 +189,8 @@ object AppGraph {
     val pomodoroNotifications: PomodoroNotifications by lazy { PomodoroNotifications(appContext) }
 
     /** 课程提醒：普通通知（默认提示音，不抢占闹铃） */
-    val classReminderNotifications: com.zzupocket.app.reminder.ClassReminderNotifications by lazy {
-        com.zzupocket.app.reminder.ClassReminderNotifications(appContext)
+    val classReminderNotifications: ClassReminderNotifications by lazy {
+        ClassReminderNotifications(appContext)
     }
 
     val pomodoroEngine: PomodoroEngine by lazy {
